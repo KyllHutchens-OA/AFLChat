@@ -174,8 +174,13 @@ class AFLTablesIngester:
         logger.info(f"Fetching matches for {year}...")
         games_url = f"{base_url}/?q=games&year={year}"
 
+        # Headers required by Squiggle API
+        headers = {
+            "User-Agent": "AFL-Analytics-Agent/1.0 (https://github.com/KyllHutchens-OA/AFLChat; educational project)"
+        }
+
         try:
-            response = requests.get(games_url, timeout=30)
+            response = requests.get(games_url, headers=headers, timeout=30)
             response.raise_for_status()
             data = response.json()
 

@@ -20,6 +20,9 @@ engine = create_engine(
     pool_size=10,
     max_overflow=20,
     echo=config.DEBUG,  # Log SQL queries in debug mode
+    connect_args={
+        "prepare_threshold": None  # Disable prepared statements for Supabase pooler
+    }
 )
 
 # Create session factory
