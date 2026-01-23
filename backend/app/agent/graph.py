@@ -14,6 +14,8 @@ from app.agent.state import AgentState, WorkflowStep, QueryIntent
 from app.agent.tools import DatabaseTool, StatisticsTool
 from app.analytics.query_builder import QueryBuilder
 from app.analytics.entity_resolver import EntityResolver, MetricResolver
+from app.analytics.context_enrichment import ContextEnricher
+from app.analytics.statistics import EfficiencyCalculator
 from app.visualization import PlotlyBuilder
 from app.visualization.plotly_builder import ChartHelper
 
@@ -422,6 +424,41 @@ User question: {state["user_query"]}"""
                 state["statistical_analysis"] = combined_stats
                 logger.info(f"Computed statistics for {len(analysis_types)} analysis types")
 
+                # Step 4: Add context enrichment for in-depth mode
+                if state.get("analysis_mode") == "in_depth":
+                    state["thinking_message"] = "🔍 Enriching context..."
+                    entities = state.get("entities", {})
+                    teams = entities.get("teams", [])
+                    seasons = entities.get("seasons", [])
+
+                    # Enrich team context if we have a team
+                    if teams and len(teams) > 0:
+                        team_name = teams[0]
+                        season = int(seasons[0]) if seasons and len(seasons) > 0 else None
+
+                        try:
+                            context = ContextEnricher.enrich_team_context(
+                                team_name=team_name,
+                                current_stats=combined_stats.get("average", {}),
+                                data=db_result["data"],
+                                season=season
+                            )
+
+                            # Calculate efficiency metrics
+                            efficiency = EfficiencyCalculator.calculate_all_efficiency_metrics(
+                                db_result["data"]
+                            )
+
+                            if context:
+                                state["context_insights"] = context
+                            if efficiency:
+                                state["context_insights"]["efficiency"] = efficiency
+
+                            logger.info(f"Added context enrichment for {team_name}")
+                        except Exception as enrichment_error:
+                            logger.error(f"Error enriching context: {enrichment_error}")
+                            # Don't fail the whole request if enrichment fails
+
         except Exception as e:
             logger.error(f"Error in EXECUTE node: {e}")
             state["execution_error"] = str(e)
@@ -635,6 +672,20 @@ User question: {state["user_query"]}"""
                             f"({item['percentile']}th percentile)"
                         )
 
+        # Add data quality warnings from any analysis type
+        quality_warnings = []
+        for analysis_type in ["average", "trend", "comparison", "rank"]:
+            if analysis_type in stats:
+                analysis_stats = stats[analysis_type]
+                if "data_quality" in analysis_stats:
+                    warnings = analysis_stats["data_quality"].get("warnings", [])
+                    quality_warnings.extend(warnings)
+
+        if quality_warnings:
+            parts.append("\n**Data Quality Considerations:**")
+            for warning in list(set(quality_warnings))[:3]:  # Unique warnings, limit 3
+                parts.append(f"⚠️  {warning}")
+
         return "\n".join(parts)
 
     async def respond_node(self, state: AgentState) -> AgentState:
@@ -699,6 +750,40 @@ User question: {state["user_query"]}"""
             # Format statistics for GPT consumption
             stats_summary = self._format_stats_for_gpt(state.get("statistical_analysis", {}))
 
+            # Format context insights if available
+            context_insights = state.get("context_insights", {})
+            context_text = ""
+            if context_insights:
+                context_text = "\n\nContextual Insights:"
+
+                # Form analysis
+                if "form_analysis" in context_insights:
+                    form = context_insights["form_analysis"]
+                    context_text += f"\n- Recent form: {form.get('momentum', 'N/A')}"
+
+                # Venue splits
+                if "venue_splits" in context_insights:
+                    splits = context_insights["venue_splits"]
+                    home_adv = splits.get("home_advantage_pct")
+                    if home_adv:
+                        context_text += f"\n- Home advantage: {home_adv:+.1f}%"
+
+                # Historical percentiles
+                if "historical_percentiles" in context_insights:
+                    percentiles = context_insights["historical_percentiles"]
+                    if "win_rate" in percentiles:
+                        context_text += f"\n- Historical percentile (win rate): {percentiles['win_rate']}th"
+
+                # Efficiency metrics
+                if "efficiency" in context_insights:
+                    efficiency = context_insights["efficiency"]
+                    if "shooting" in efficiency:
+                        shooting = efficiency["shooting"]
+                        context_text += f"\n- Shooting accuracy: {shooting['accuracy_percent']:.1f}%"
+                    if "margins" in efficiency:
+                        margins = efficiency["margins"]
+                        context_text += f"\n- Close game percentage: {margins.get('close_game_pct', 0):.1f}%"
+
             # Generate response using GPT-5-nano (Responses API)
             response = client.responses.create(
                 model="gpt-5-nano",
@@ -717,6 +802,7 @@ Guidelines:
 - Highlight patterns, trends, and meaningful insights from the statistical analysis
 - If confidence is low or sample size is small, mention it
 - If analysis mode is "in_depth", provide richer context and deeper insights
+- Include contextual insights like form, home advantage, historical rankings when available
 - Never mention SQL, databases, or technical details
 - Write in a friendly, conversational tone
 
@@ -726,7 +812,7 @@ Query results:
 {state['query_results'].to_string() if len(state['query_results']) < 20 else state['query_results'].head(10).to_string()}
 
 Statistical Insights:
-{stats_summary}
+{stats_summary}{context_text}
 
 Generate a comprehensive summary using these insights:"""
                             }

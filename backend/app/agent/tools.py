@@ -13,6 +13,7 @@ from scipy import stats as scipy_stats
 
 from app.data.database import Session
 from app.analytics.validators import SQLValidator
+from app.analytics.data_quality import DataQualityChecker
 
 logger = logging.getLogger(__name__)
 
@@ -185,13 +186,16 @@ class StatisticsTool:
         Returns:
             Dictionary with trend analysis
         """
-        # Validate sample size
-        if len(data) < 3:
+        # Assess data quality first
+        quality = DataQualityChecker.assess_quality(data, "trend", params)
+
+        if not quality["can_proceed"]:
             return {
                 "success": False,
-                "error": "Insufficient data for trend analysis (need at least 3 data points)",
-                "confidence": "none",
-                "sample_size": len(data)
+                "error": quality["warnings"][0] if quality["warnings"] else "Insufficient data",
+                "confidence": quality["confidence"],
+                "sample_size": quality["sample_size"],
+                "data_quality": quality
             }
 
         # Identify numeric columns for analysis
@@ -255,6 +259,7 @@ class StatisticsTool:
             "rolling_averages": rolling_info,
             "periods": periods_info,
             "volatility": volatility_info,
+            "data_quality": quality,
             "summary": StatisticsTool._generate_trend_summary(
                 direction_info, momentum_info, overall_change, confidence
             )
@@ -554,6 +559,19 @@ class StatisticsTool:
                 "error": "Need at least 2 entities to compare"
             }
 
+        # Assess data quality
+        params["group_col"] = group_col  # Ensure group_col is in params for quality check
+        quality = DataQualityChecker.assess_quality(data, "comparison", params)
+
+        if not quality["can_proceed"]:
+            return {
+                "success": False,
+                "error": quality["warnings"][0] if quality["warnings"] else "Insufficient data",
+                "confidence": quality["confidence"],
+                "sample_size": quality["sample_size"],
+                "data_quality": quality
+            }
+
         # Perform pairwise comparisons
         comparisons = {}
 
@@ -587,6 +605,7 @@ class StatisticsTool:
             "comparisons": comparisons,
             "leaders": leaders,
             "laggards": laggards,
+            "data_quality": quality,
             "summary": summary
         }
 
@@ -818,6 +837,19 @@ class StatisticsTool:
                 "error": f"No valid data for ranking by {metric_col}"
             }
 
+        # Assess data quality
+        params["metric_col"] = metric_col
+        quality = DataQualityChecker.assess_quality(rank_data, "rank", params)
+
+        if not quality["can_proceed"]:
+            return {
+                "success": False,
+                "error": quality["warnings"][0] if quality["warnings"] else "Insufficient data",
+                "confidence": quality["confidence"],
+                "sample_size": quality["sample_size"],
+                "data_quality": quality
+            }
+
         # Sort and rank
         rank_data = rank_data.sort_values(metric_col, ascending=ascending).reset_index(drop=True)
         rank_data['rank'] = range(1, len(rank_data) + 1)
@@ -894,6 +926,7 @@ class StatisticsTool:
             "top_3": top_3,
             "bottom_3": bottom_3,
             "statistics": stats,
+            "data_quality": quality,
             "summary": summary
         }
 
