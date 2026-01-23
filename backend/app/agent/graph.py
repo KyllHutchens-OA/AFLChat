@@ -741,6 +741,37 @@ User question: {state["user_query"]}"""
                 state["confidence"] = 0.3
                 return state
 
+            # Check if results are all NULL (query succeeded but no data for that filter)
+            data = state["query_results"]
+
+            # Check if ALL columns are NULL (indicates no data for this query)
+            all_null = data.isnull().all().all() if len(data) > 0 else False
+
+            if all_null:
+                # All columns are NULL - no data exists for this query
+                entities = state.get("entities", {})
+                players = entities.get("players", [])
+                seasons = entities.get("seasons", [])
+
+                # Build helpful message
+                if players and seasons:
+                    player_name = players[0] if players else "this player"
+                    season = seasons[0] if seasons else "this season"
+
+                    state["natural_language_summary"] = (
+                        f"I couldn't find any data for {player_name} in {season}. "
+                        f"Player statistics are available for seasons 2012-2023 and 2025. "
+                        f"Try asking about a different season or player."
+                    )
+                else:
+                    state["natural_language_summary"] = (
+                        "I found matching records but they don't contain any data values. "
+                        "Try asking about a different time period or entity."
+                    )
+
+                state["confidence"] = 0.4
+                return state
+
             # Format statistics for GPT consumption
             stats_summary = self._format_stats_for_gpt(state.get("statistical_analysis", {}))
 
