@@ -65,7 +65,7 @@ def get_match_id(team_id: int, opponent: str, season: int, round_num: str) -> in
     if not opponent_id:
         return None
 
-    # Find match where team was home or away
+    # Try exact round first
     result = DatabaseTool.query_database(f"""
         SELECT id FROM matches
         WHERE season = {season}
@@ -77,6 +77,23 @@ def get_match_id(team_id: int, opponent: str, season: int, round_num: str) -> in
 
     if result["success"] and len(result["data"]) > 0:
         return result["data"].iloc[0]["id"]
+
+    # If no match, try round - 1 (CSV rounds are 1 higher due to Round 0 "Opening Round")
+    try:
+        adjusted_round = str(int(round_num) - 1)
+        result = DatabaseTool.query_database(f"""
+            SELECT id FROM matches
+            WHERE season = {season}
+            AND round = '{adjusted_round}'
+            AND ((home_team_id = {team_id} AND away_team_id = {opponent_id})
+                 OR (away_team_id = {team_id} AND home_team_id = {opponent_id}))
+            LIMIT 1
+        """)
+
+        if result["success"] and len(result["data"]) > 0:
+            return result["data"].iloc[0]["id"]
+    except (ValueError, TypeError):
+        pass  # Non-numeric round (e.g., "EF", "GF")
 
     return None
 
