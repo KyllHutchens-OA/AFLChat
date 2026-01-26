@@ -186,13 +186,14 @@ ORDER BY m.match_date
 Return ONLY the SQL query, no explanations or markdown formatting."""
 
     @staticmethod
-    def generate_sql(user_query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def generate_sql(user_query: str, context: Optional[Dict[str, Any]] = None, conversation_history: Optional[list] = None) -> Dict[str, Any]:
         """
         Generate SQL query from natural language.
 
         Args:
             user_query: Natural language question
             context: Optional context (entities, intent, etc.)
+            conversation_history: Optional previous conversation messages for resolving references
 
         Returns:
             Dictionary with:
@@ -209,6 +210,39 @@ Database Schema:
 {QueryBuilder.SCHEMA_CONTEXT}
 
 Question: {user_query}"""
+
+            # Add conversation context for follow-up queries
+            if conversation_history and len(conversation_history) > 0:
+                recent_messages = conversation_history[-4:]  # Last 2 exchanges
+
+                prompt_text += "\n\n## Previous Conversation Context\n"
+                prompt_text += "Use this context to resolve ambiguous references (e.g., 'this', 'them', 'by year'):\n"
+
+                for msg in recent_messages:
+                    role = msg.get("role", "unknown")
+                    content = msg.get("content", "")[:150]  # Truncate long messages
+
+                    if role == "user":
+                        prompt_text += f"User asked: {content}\n"
+                    elif role == "assistant":
+                        # Include assistant entities for context
+                        entities = msg.get("entities", {})
+                        if entities:
+                            teams = entities.get("teams", [])
+                            players = entities.get("players", [])
+                            seasons = entities.get("seasons", [])
+                            if players:
+                                prompt_text += f"(Was discussing: {', '.join(players)}"
+                                if seasons:
+                                    prompt_text += f" in {', '.join(str(s) for s in seasons)}"
+                                prompt_text += ")\n"
+                            elif teams:
+                                prompt_text += f"(Was discussing: {', '.join(teams)}"
+                                if seasons:
+                                    prompt_text += f" in {', '.join(str(s) for s in seasons)}"
+                                prompt_text += ")\n"
+
+                prompt_text += "\nFor the current query, resolve references using the context above.\n"
 
             # Add context if provided (these are VALIDATED entities with canonical team names)
             if context and any(context.values()):

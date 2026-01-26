@@ -213,12 +213,180 @@ class EntityResolver:
 
             result["corrected_entities"]["seasons"] = corrected_seasons
 
-        # Pass through other entities unchanged for now
-        for key in ["players", "metrics", "rounds"]:
+        # Handle player disambiguation
+        if "players" in entities and entities["players"]:
+            from app.data.database import Session
+            from sqlalchemy import text
+
+            corrected_players = []
+            seasons = result["corrected_entities"].get("seasons", entities.get("seasons", []))
+
+            for player_name in entities["players"]:
+                # Check for duplicate players in database
+                disambiguation_result = cls._disambiguate_player(player_name, seasons)
+
+                if disambiguation_result["needs_clarification"]:
+                    # Multiple active players found
+                    result["is_valid"] = False
+                    result["needs_clarification"] = True
+                    result["suggestions"].append(disambiguation_result["clarification_question"])
+                    # Include all candidates in corrected entities for reference
+                    corrected_players.extend(disambiguation_result["candidates"])
+                elif disambiguation_result["resolved_name"]:
+                    # Successfully resolved to one player
+                    corrected_players.append(disambiguation_result["resolved_name"])
+                    if disambiguation_result["warning"]:
+                        result["warnings"].append(disambiguation_result["warning"])
+                else:
+                    # No matches found, pass through original
+                    corrected_players.append(player_name)
+
+            result["corrected_entities"]["players"] = corrected_players
+
+        # Pass through other entities unchanged
+        for key in ["metrics", "rounds"]:
             if key in entities:
                 result["corrected_entities"][key] = entities[key]
 
         return result
+
+    @classmethod
+    def _disambiguate_player(cls, player_name: str, seasons: List[str] = None) -> Dict[str, any]:
+        """
+        Disambiguate player name when multiple players exist with similar names.
+
+        Strategy:
+        1. Find all players matching the name (exact or fuzzy)
+        2. If seasons provided, filter to players active during those seasons
+        3. If only 1 active player → auto-select
+        4. If 0 active players → return all matches with warning
+        5. If 2+ active players → ask user to clarify
+
+        Args:
+            player_name: Player name from user query
+            seasons: List of season years to check activity
+
+        Returns:
+            Dict with:
+            - needs_clarification: bool
+            - resolved_name: str (if single match)
+            - candidates: List[str] (all matching names)
+            - clarification_question: str (if needs clarification)
+            - warning: str (optional warning message)
+        """
+        from app.data.database import Session
+        from sqlalchemy import text
+
+        session = Session()
+        try:
+            # Find all players matching the name (using ILIKE for case-insensitive partial match)
+            result = session.execute(
+                text("""
+                    SELECT DISTINCT p.name, p.id
+                    FROM players p
+                    WHERE p.name ILIKE :pattern
+                    ORDER BY p.name
+                """),
+                {"pattern": f"%{player_name}%"}
+            )
+            all_matches = result.fetchall()
+
+            if len(all_matches) == 0:
+                # No matches found
+                return {
+                    "needs_clarification": False,
+                    "resolved_name": player_name,  # Pass through original
+                    "candidates": [],
+                    "clarification_question": None,
+                    "warning": None
+                }
+
+            if len(all_matches) == 1:
+                # Single match - use it
+                return {
+                    "needs_clarification": False,
+                    "resolved_name": all_matches[0][0],
+                    "candidates": [all_matches[0][0]],
+                    "clarification_question": None,
+                    "warning": None
+                }
+
+            # Multiple matches - check activity during specified seasons
+            logger.info(f"Found {len(all_matches)} players matching '{player_name}': {[m[0] for m in all_matches]}")
+
+            if seasons and len(seasons) > 0:
+                # Filter to players active during these seasons
+                active_players = []
+                for player_full_name, player_id in all_matches:
+                    # Check if player has any stats in the specified seasons
+                    check_result = session.execute(
+                        text("""
+                            SELECT COUNT(*) > 0 as is_active
+                            FROM player_stats ps
+                            JOIN matches m ON ps.match_id = m.id
+                            WHERE ps.player_id = :player_id
+                            AND m.season = ANY(:seasons)
+                        """),
+                        {"player_id": player_id, "seasons": [int(s) for s in seasons]}
+                    )
+                    is_active = check_result.fetchone()[0]
+
+                    if is_active:
+                        active_players.append(player_full_name)
+                        logger.info(f"  - {player_full_name}: ACTIVE in {seasons}")
+                    else:
+                        logger.info(f"  - {player_full_name}: NOT active in {seasons}")
+
+                if len(active_players) == 0:
+                    # No players active in specified season - return all candidates with warning
+                    all_names = [m[0] for m in all_matches]
+                    return {
+                        "needs_clarification": False,
+                        "resolved_name": all_names[0],  # Default to first
+                        "candidates": all_names,
+                        "clarification_question": None,
+                        "warning": f"Multiple players named '{player_name}' found ({', '.join(all_names)}), but none were active in {', '.join(seasons)}. Using {all_names[0]}."
+                    }
+
+                if len(active_players) == 1:
+                    # Single active player - use it
+                    return {
+                        "needs_clarification": False,
+                        "resolved_name": active_players[0],
+                        "candidates": active_players,
+                        "clarification_question": None,
+                        "warning": f"Resolved '{player_name}' to {active_players[0]} (active in {', '.join(seasons)})"
+                    }
+
+                # Multiple active players - ask for clarification
+                season_str = ', '.join(seasons)
+                return {
+                    "needs_clarification": True,
+                    "resolved_name": None,
+                    "candidates": active_players,
+                    "clarification_question": (
+                        f"Multiple players named '{player_name}' were active in {season_str}: "
+                        f"{', '.join(active_players)}. Which player did you mean?"
+                    ),
+                    "warning": None
+                }
+
+            else:
+                # No season specified - ask for clarification with all matches
+                all_names = [m[0] for m in all_matches]
+                return {
+                    "needs_clarification": True,
+                    "resolved_name": None,
+                    "candidates": all_names,
+                    "clarification_question": (
+                        f"Multiple players named '{player_name}' found: {', '.join(all_names)}. "
+                        f"Which player did you mean?"
+                    ),
+                    "warning": None
+                }
+
+        finally:
+            session.close()
 
     @classmethod
     def suggest_teams(cls, partial_input: str, limit: int = 5) -> List[str]:

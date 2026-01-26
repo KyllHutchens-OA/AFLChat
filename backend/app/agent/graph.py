@@ -45,6 +45,25 @@ class AFLAnalyticsAgent:
     def __init__(self):
         self.graph = self._build_graph()
 
+    @staticmethod
+    def _emit_progress(state: AgentState, step: str, message: str):
+        """
+        Emit WebSocket progress update if callback is available.
+
+        Args:
+            state: Current agent state
+            step: Step identifier (e.g., "understand", "execute")
+            message: User-facing progress message
+        """
+        if state.get("socketio_emit"):
+            try:
+                state["socketio_emit"]('thinking', {
+                    'step': message,
+                    'current_step': step
+                })
+            except Exception as e:
+                logger.warning(f"Failed to emit WebSocket progress: {e}")
+
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
         workflow = StateGraph(AgentState)
@@ -57,8 +76,16 @@ class AFLAnalyticsAgent:
         workflow.add_node("visualize", self.visualize_node)
         workflow.add_node("respond", self.respond_node)
 
-        # Add edges
-        workflow.add_edge("understand", "analyze_depth")
+        # Add edges with conditional routing
+        # After understand: if needs clarification, skip to respond
+        workflow.add_conditional_edges(
+            "understand",
+            lambda state: "respond" if state.get("needs_clarification") else "analyze_depth",
+            {
+                "respond": "respond",
+                "analyze_depth": "analyze_depth"
+            }
+        )
         workflow.add_edge("analyze_depth", "plan")
         workflow.add_edge("plan", "execute")
 
@@ -80,17 +107,27 @@ class AFLAnalyticsAgent:
 
         return workflow.compile()
 
-    async def run(self, user_query: str, conversation_id: str = None) -> AgentState:
+    async def run(
+        self,
+        user_query: str,
+        conversation_id: str = None,
+        socketio_emit: Any = None,
+        conversation_history: List[Dict[str, Any]] = None
+    ) -> AgentState:
         """
         Run the agent workflow on a user query.
 
         Args:
             user_query: Natural language question
             conversation_id: Optional conversation ID
+            socketio_emit: Optional WebSocket emit callback for real-time updates
+            conversation_history: Optional previous conversation messages for context
 
         Returns:
             Final agent state with response
         """
+        from typing import List, Any
+
         initial_state = AgentState(
             user_query=user_query,
             conversation_id=conversation_id,
@@ -105,7 +142,9 @@ class AFLAnalyticsAgent:
             analysis_types=[],
             context_insights={},
             data_quality={},
-            stats_summary={}
+            stats_summary={},
+            socketio_emit=socketio_emit,
+            conversation_history=conversation_history or []
         )
 
         final_state = await self.graph.ainvoke(initial_state)
@@ -124,10 +163,156 @@ class AFLAnalyticsAgent:
         """
         state["current_step"] = WorkflowStep.UNDERSTAND
         state["thinking_message"] = "🔍 Understanding your question..."
+        self._emit_progress(state, "understand", "🔍 Understanding your question...")
 
         logger.info(f"UNDERSTAND: Processing query: {state['user_query']}")
 
         try:
+            # Check if this is a response to a clarification question
+            conversation_history = state.get("conversation_history", [])
+            logger.info(f"UNDERSTAND: conversation_history length = {len(conversation_history) if conversation_history else 0}")
+
+            # Debug: Log all messages in history
+            if conversation_history:
+                for i, msg in enumerate(conversation_history):
+                    role = msg.get("role")
+                    content = msg.get("content", "")[:50]
+                    has_clarification = msg.get("needs_clarification", False)
+                    candidates = msg.get("clarification_candidates")
+                    logger.info(f"  Message {i}: {role} - '{content}...' needs_clarification={has_clarification}, candidates={candidates}")
+
+            if conversation_history and len(conversation_history) >= 2:
+                # Get the last assistant message (most recent)
+                last_assistant_msg = None
+                for msg in reversed(conversation_history):
+                    if msg.get("role") == "assistant":
+                        last_assistant_msg = msg
+                        break
+
+                # Check if last message was a clarification question
+                if last_assistant_msg:
+                    content = last_assistant_msg.get("content", "")
+                    was_clarification = last_assistant_msg.get("needs_clarification", False)
+                    candidates = last_assistant_msg.get("clarification_candidates")
+
+                    logger.info(f"UNDERSTAND: Last assistant message: {content[:100]}...")
+                    logger.info(f"UNDERSTAND: was_clarification={was_clarification}, candidates={candidates}")
+
+                    # Check if this was a clarification question
+                    if was_clarification and candidates:
+                        logger.info(f"UNDERSTAND: Detected clarification question with candidates: {candidates}")
+
+                        # Try to match user's response against candidates
+                        user_response = state['user_query'].lower().strip()
+
+                        # Remove common filler words
+                        user_response_cleaned = user_response
+                        for filler in [' please', ' thanks', ' pls', ' thx', ',', '.', ' ?']:
+                            user_response_cleaned = user_response_cleaned.replace(filler, '')
+                        user_response_cleaned = user_response_cleaned.strip()
+
+                        # Try to find matches
+                        potential_matches = []
+                        for candidate in candidates:
+                            candidate_lower = candidate.lower()
+
+                            # Check exact match
+                            if user_response_cleaned == candidate_lower:
+                                potential_matches.append(candidate)
+                                continue
+
+                            # Check if all words in user response are in candidate
+                            user_words = user_response_cleaned.split()
+                            candidate_words = candidate_lower.split()
+
+                            # If user response is a single word, check if it matches any part of candidate name
+                            if len(user_words) == 1:
+                                if user_words[0] in candidate_words:
+                                    potential_matches.append(candidate)
+                            else:
+                                # Multiple words: check if all are in candidate
+                                if all(word in candidate_words for word in user_words):
+                                    potential_matches.append(candidate)
+
+                        # Only use match if exactly one candidate matches
+                        logger.info(f"UNDERSTAND: Potential matches for '{user_response_cleaned}': {potential_matches}")
+                        matched_candidate = None
+                        if len(potential_matches) == 1:
+                            matched_candidate = potential_matches[0]
+                            logger.info(f"UNDERSTAND: Successfully matched to '{matched_candidate}'")
+                        elif len(potential_matches) > 1:
+                            logger.warning(f"Ambiguous clarification response: '{user_response}' matches multiple candidates: {potential_matches}")
+                        else:
+                            logger.warning(f"No matches found for clarification response: '{user_response}' among candidates: {candidates}")
+
+                        if matched_candidate:
+                            logger.info(f"Matched clarification response '{user_response}' to '{matched_candidate}'")
+
+                            # Get the original query intent from conversation history
+                            # Find the user message before the clarification
+                            original_user_msg = None
+                            found_clarification = False
+                            for msg in reversed(conversation_history):
+                                if msg.get("role") == "assistant" and msg.get("needs_clarification"):
+                                    found_clarification = True
+                                elif found_clarification and msg.get("role") == "user":
+                                    original_user_msg = msg
+                                    break
+
+                            # Set entities directly without GPT call
+                            state["entities"] = {
+                                "players": [matched_candidate],
+                                "teams": [],
+                                "seasons": [],
+                                "metrics": [],
+                                "rounds": []
+                            }
+
+                            # Copy season/metric from original query if available
+                            if original_user_msg:
+                                original_entities = original_user_msg.get("entities", {})
+                                if original_entities.get("seasons"):
+                                    state["entities"]["seasons"] = original_entities["seasons"]
+                                if original_entities.get("metrics"):
+                                    state["entities"]["metrics"] = original_entities["metrics"]
+
+                            # Set intent to simple_stat (most common for player stats)
+                            state["intent"] = QueryIntent.SIMPLE_STAT
+                            state["requires_visualization"] = False
+                            state["needs_clarification"] = False
+
+                            logger.info(f"Resolved clarification: entities={state['entities']}")
+
+                            # Skip the rest of entity extraction and return
+                            return state
+
+            # Build conversation context for follow-up questions
+            conversation_context = ""
+
+            if conversation_history and len(conversation_history) > 0:
+                # Get last few exchanges for context
+                recent_messages = conversation_history[-6:]  # Last 3 exchanges (user + assistant)
+
+                conversation_context = "\n## Previous Conversation Context\n"
+                for msg in recent_messages:
+                    role = msg.get("role", "unknown")
+                    content = msg.get("content", "")
+
+                    if role == "user":
+                        conversation_context += f"User: {content}\n"
+                    elif role == "assistant":
+                        # Include assistant entities if available
+                        entities = msg.get("entities", {})
+                        if entities:
+                            teams = entities.get("teams", [])
+                            players = entities.get("players", [])
+                            if teams:
+                                conversation_context += f"Assistant discussed: Teams: {', '.join(teams)}\n"
+                            if players:
+                                conversation_context += f"Assistant discussed: Players: {', '.join(players)}\n"
+
+                conversation_context += "\nUse this context to resolve ambiguous references (e.g., 'What about 2023?' or 'Compare them').\n---\n\n"
+
             # Use GPT-5-nano to understand the query (Responses API)
             response = client.responses.create(
                 model="gpt-5-nano",
@@ -147,9 +332,18 @@ Intent Classification:
 - "team_analysis": Single team's performance over a SINGLE season/period
 - "trend_analysis": TEMPORAL queries showing change over TIME (keywords: "over time", "across time", "year by year", "historical", "trend", "evolution", "since joining", "throughout history")
 
-CRITICAL: If the query contains temporal keywords (over time, across time, year-by-year, historical, trend, since, evolution), the intent MUST be "trend_analysis".
+Entity Classification Rules:
+- **Players**: Surnames (e.g., "Dangerfield", "Cripps", "Bontempelli"), full names (e.g., "Patrick Dangerfield"), or nicknames
+- **Teams**: AFL club names (e.g., "Richmond", "Collingwood", "Geelong", "Brisbane Lions", "Greater Western Sydney")
+- **Metrics**: Statistics like "goals", "disposals", "marks", "tackles", "wins", "losses", "score"
+- **Seasons**: Years (e.g., "2022", "2023", "last year", "this year")
 
-Return a JSON object with:
+CRITICAL Rules:
+- If the query contains temporal keywords (over time, across time, year-by-year, historical, trend, since, evolution), the intent MUST be "trend_analysis"
+- Single surnames (e.g., "Dangerfield", "Cripps") are ALWAYS players, NEVER teams
+- If uncertain whether something is a player or team, prefer "players" for single-word surnames
+
+{conversation_context}Return a JSON object with:
 {{
   "intent": "simple_stat" | "player_comparison" | "team_analysis" | "trend_analysis",
   "entities": {{
@@ -162,7 +356,7 @@ Return a JSON object with:
   "requires_visualization": true/false
 }}
 
-User question: {state["user_query"]}"""
+Current user question: {state["user_query"]}"""
                             }
                         ]
                     }
@@ -221,6 +415,7 @@ User question: {state["user_query"]}"""
         """
         state["current_step"] = WorkflowStep.ANALYZE_DEPTH
         state["thinking_message"] = "🎯 Analyzing query complexity..."
+        self._emit_progress(state, "analyze_depth", "🎯 Analyzing query complexity...")
 
         logger.info(f"ANALYZE_DEPTH: Determining analysis mode for intent={state.get('intent')}")
 
@@ -308,6 +503,7 @@ User question: {state["user_query"]}"""
         """
         state["current_step"] = WorkflowStep.PLAN
         state["thinking_message"] = "📋 Planning the analysis..."
+        self._emit_progress(state, "plan", "📋 Planning the analysis...")
 
         intent = state.get('intent', QueryIntent.SIMPLE_STAT)
         logger.info(f"PLAN: Creating analysis plan for intent: {intent}")
@@ -364,15 +560,18 @@ User question: {state["user_query"]}"""
         """
         state["current_step"] = WorkflowStep.EXECUTE
         state["thinking_message"] = "🔨 Generating SQL query..."
+        self._emit_progress(state, "execute", "🔨 Generating SQL query...")
 
         logger.info("EXECUTE: Generating and running SQL query")
 
         try:
             # Step 1: Generate SQL from natural language
             # Use RESOLVED entities (normalized team names, validated seasons, etc.)
+            # Pass conversation history to resolve ambiguous references like "this", "them", etc.
             sql_result = QueryBuilder.generate_sql(
                 state["user_query"],
-                context=state["entities"]  # These are now validated/normalized
+                context=state["entities"],  # These are now validated/normalized
+                conversation_history=state.get("conversation_history", [])
             )
 
             if not sql_result["success"]:
@@ -386,6 +585,7 @@ User question: {state["user_query"]}"""
 
             # Step 2: Execute query
             state["thinking_message"] = "⚡ Querying AFL database (6,243 matches)..."
+            self._emit_progress(state, "execute", "⚡ Querying AFL database (6,243 matches)...")
             db_result = DatabaseTool.query_database(state["sql_query"])
 
             if not db_result["success"]:
@@ -399,10 +599,12 @@ User question: {state["user_query"]}"""
 
             logger.info(f"Query returned {db_result['rows_returned']} rows")
             state["thinking_message"] = f"✅ Found {db_result['rows_returned']} results"
+            self._emit_progress(state, "execute", f"✅ Found {db_result['rows_returned']} results")
 
             # Step 3: Compute statistics if needed
             if len(db_result["data"]) > 0 and state.get("intent") != QueryIntent.SIMPLE_STAT:
                 state["thinking_message"] = "📊 Calculating statistics..."
+                self._emit_progress(state, "execute", "📊 Calculating statistics...")
 
                 # Get analysis types from analyze_depth node
                 analysis_types = state.get("analysis_types", ["average"])
@@ -428,6 +630,7 @@ User question: {state["user_query"]}"""
                 # Step 4: Add context enrichment for in-depth mode
                 if state.get("analysis_mode") == "in_depth":
                     state["thinking_message"] = "🔍 Enriching context..."
+                    self._emit_progress(state, "execute", "🔍 Enriching context...")
                     entities = state.get("entities", {})
                     teams = entities.get("teams", [])
                     seasons = entities.get("seasons", [])
@@ -478,6 +681,7 @@ User question: {state["user_query"]}"""
         """
         state["current_step"] = WorkflowStep.VISUALIZE
         state["thinking_message"] = "📈 Creating visualization..."
+        self._emit_progress(state, "visualize", "📈 Creating visualization...")
 
         logger.info("VISUALIZE: Generating chart")
 
@@ -559,6 +763,7 @@ User question: {state["user_query"]}"""
 
             logger.info(f"Chart generated: {chart_type}")
             state["thinking_message"] = f"✅ Chart created ({chart_type})"
+            self._emit_progress(state, "visualize", f"✅ Chart created ({chart_type})")
 
         except Exception as e:
             logger.error(f"Error in VISUALIZE node: {e}")
@@ -691,10 +896,18 @@ User question: {state["user_query"]}"""
         """
         state["current_step"] = WorkflowStep.RESPOND
         state["thinking_message"] = "✍️ Writing response..."
+        self._emit_progress(state, "respond", "✍️ Writing response...")
 
         logger.info("RESPOND: Generating natural language response")
 
         try:
+            # Check for clarification needed (player disambiguation, etc.)
+            if state.get("needs_clarification"):
+                clarification_q = state.get("clarification_question", "Could you provide more details?")
+                state["natural_language_summary"] = clarification_q
+                state["confidence"] = 0.5
+                return state
+
             # Check for errors
             if state.get("execution_error"):
                 state["natural_language_summary"] = (
@@ -802,6 +1015,73 @@ User question: {state["user_query"]}"""
                         margins = efficiency["margins"]
                         context_text += f"\n- Close game percentage: {margins.get('close_game_pct', 0):.1f}%"
 
+            # Build conversation context for continuity
+            conversation_context_text = ""
+            conversation_history = state.get("conversation_history", [])
+
+            if conversation_history and len(conversation_history) > 0:
+                recent_messages = conversation_history[-4:]  # Last 2 exchanges
+
+                conversation_context_text = "\n\n## Previous Conversation\n"
+                for msg in recent_messages:
+                    role = msg.get("role", "unknown")
+                    content = msg.get("content", "")[:200]  # Truncate long messages
+
+                    if role == "user":
+                        conversation_context_text += f"User: {content}\n"
+                    elif role == "assistant":
+                        conversation_context_text += f"Assistant: {content}\n"
+
+                conversation_context_text += "\nYour response should build on this conversation naturally.\n---\n"
+
+            # Determine response style based on analysis mode
+            analysis_mode = state.get("analysis_mode", "summary")
+            intent = state.get("intent")
+
+            # Build prompt based on mode
+            if analysis_mode == "summary" or intent == QueryIntent.SIMPLE_STAT:
+                # SUMMARY MODE: Direct, concise answers
+                prompt = f"""You are an AFL analytics expert. Answer the user's question directly and concisely.
+
+CRITICAL RULES for simple stat queries:
+- Answer in 1-2 sentences MAX
+- State the number/fact directly
+- DO NOT mention what additional analysis you could do
+- DO NOT mention limitations or missing data unless the query CANNOT be answered
+- DO NOT offer follow-up analysis unprompted
+- Just answer the question asked, nothing more
+
+{conversation_context_text}User asked: {state['user_query']}
+
+Query results:
+{state['query_results'].to_string() if len(state['query_results']) < 20 else state['query_results'].head(10).to_string()}
+
+Provide a direct, concise answer (1-2 sentences):"""
+
+            else:
+                # IN-DEPTH MODE: Rich analysis with context
+                prompt = f"""You are an AFL analytics expert. Generate a comprehensive analysis of the query results.
+
+Guidelines for in-depth analysis:
+- Provide rich context and deeper insights
+- Include specific numbers from both query results AND statistical insights
+- Highlight patterns, trends, and meaningful insights from the statistical analysis
+- Include contextual insights like form, home advantage, historical rankings when available
+- Use Australian football terminology correctly
+- Never mention SQL, databases, or technical details
+- Write in a friendly, conversational tone
+- If this is a follow-up question, reference the previous conversation naturally
+
+{conversation_context_text}Current user query: {state['user_query']}
+
+Query results:
+{state['query_results'].to_string() if len(state['query_results']) < 20 else state['query_results'].head(10).to_string()}
+
+Statistical Insights:
+{stats_summary}{context_text}
+
+Generate a comprehensive analysis using these insights:"""
+
             # Generate response using GPT-5-nano (Responses API)
             response = client.responses.create(
                 model="gpt-5-nano",
@@ -811,28 +1091,7 @@ User question: {state["user_query"]}"""
                         "content": [
                             {
                                 "type": "input_text",
-                                "text": f"""You are an AFL analytics expert. Generate a natural language summary of the query results.
-
-Guidelines:
-- Be concise but insightful
-- Use Australian football terminology correctly
-- Include specific numbers from both query results AND statistical insights
-- Highlight patterns, trends, and meaningful insights from the statistical analysis
-- If confidence is low or sample size is small, mention it
-- If analysis mode is "in_depth", provide richer context and deeper insights
-- Include contextual insights like form, home advantage, historical rankings when available
-- Never mention SQL, databases, or technical details
-- Write in a friendly, conversational tone
-
-User asked: {state['user_query']}
-
-Query results:
-{state['query_results'].to_string() if len(state['query_results']) < 20 else state['query_results'].head(10).to_string()}
-
-Statistical Insights:
-{stats_summary}{context_text}
-
-Generate a comprehensive summary using these insights:"""
+                                "text": prompt
                             }
                         ]
                     }
@@ -843,6 +1102,7 @@ Generate a comprehensive summary using these insights:"""
             state["confidence"] = 0.9
             state["sources"] = ["AFL Tables (1990-2025)"]
             state["thinking_message"] = "✅ Response complete!"
+            self._emit_progress(state, "respond", "✅ Response complete!")
 
             logger.info("Response generated successfully")
 

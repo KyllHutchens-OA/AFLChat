@@ -27,6 +27,7 @@ export const useWebSocket = (): UseWebSocketReturn => {
   const [thinkingStep, setThinkingStep] = useState('');
   const socketRef = useRef<Socket | null>(null);
   const currentAgentMessageRef = useRef<Message | null>(null);
+  const conversationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Connect to WebSocket
@@ -81,10 +82,16 @@ export const useWebSocket = (): UseWebSocketReturn => {
       currentAgentMessageRef.current = null;
     });
 
-    socket.on('complete', () => {
+    socket.on('complete', (data: { conversation_id?: string }) => {
       console.log('Request complete');
       setIsThinking(false);
       setThinkingStep('');
+
+      // Store conversation_id for follow-up messages
+      if (data.conversation_id) {
+        conversationIdRef.current = data.conversation_id;
+        console.log('Stored conversation_id:', data.conversation_id);
+      }
     });
 
     socket.on('error', (data: { message: string }) => {
@@ -131,15 +138,16 @@ export const useWebSocket = (): UseWebSocketReturn => {
       timestamp: new Date(),
     };
 
-    // Send to server
+    // Send to server with conversation_id (if we have one from previous messages)
     socketRef.current.emit('chat_message', {
       message,
-      conversation_id: null,
+      conversation_id: conversationIdRef.current,
     });
   }, [isConnected]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
+    conversationIdRef.current = null; // Reset conversation for fresh start
   }, []);
 
   return {

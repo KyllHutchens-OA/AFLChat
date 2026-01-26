@@ -79,3 +79,5 @@ class AgentState(TypedDict, total=False):
     current_step: WorkflowStep
     thinking_message: Optional[str]  # User-facing status update
     errors: List[str]
+    socketio_emit: Optional[Any]  # Callback for emitting WebSocket progress updates
+    conversation_history: Optional[List[Dict[str, Any]]]  # Recent conversation messages for context
