@@ -39,7 +39,17 @@ class DataPreprocessor:
         - Always start y-axis at 0
         """
         y_col_lower = y_col.lower().strip()
-        return y_col_lower in DataPreprocessor.COUNT_METRICS
+
+        # Check exact match first
+        if y_col_lower in DataPreprocessor.COUNT_METRICS:
+            return True
+
+        # Check if column contains any count metric word (e.g., "goals_kicked" contains "goals")
+        for metric in DataPreprocessor.COUNT_METRICS:
+            if metric in y_col_lower:
+                return True
+
+        return False
 
     @staticmethod
     def preprocess_for_chart(
@@ -441,7 +451,7 @@ class DataPreprocessor:
                 "arrowcolor": "#059669",
                 "ax": 0,
                 "ay": -40,
-                "font": {"size": 10, "color": "#059669", "weight": 600},
+                "font": {"size": 11, "color": "#059669"},
                 "bgcolor": "rgba(255, 255, 255, 0.9)",
                 "bordercolor": "#059669",
                 "borderwidth": 1,
@@ -461,7 +471,7 @@ class DataPreprocessor:
                     "arrowcolor": "#dc2626",
                     "ax": 0,
                     "ay": 40,
-                    "font": {"size": 10, "color": "#dc2626", "weight": 600},
+                    "font": {"size": 11, "color": "#dc2626"},
                     "bgcolor": "rgba(255, 255, 255, 0.9)",
                     "bordercolor": "#dc2626",
                     "borderwidth": 1,

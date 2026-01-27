@@ -53,7 +53,7 @@ const ChatContainer: React.FC = () => {
         )}
 
         {messages.map((message) => (
-          <div key={message.id}>
+          <div key={message.id} className="mb-4">
             {/* Message bubble */}
             <div
               className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -77,7 +77,7 @@ const ChatContainer: React.FC = () => {
 
             {/* Chart - full width outside message bubble */}
             {message.type === 'agent' && message.visualization && (
-              <div className="w-full mt-4 mb-2">
+              <div className="w-full mt-3">
                 <ChartRenderer spec={message.visualization} />
               </div>
             )}
