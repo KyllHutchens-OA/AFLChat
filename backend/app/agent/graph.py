@@ -19,6 +19,8 @@ from app.analytics.statistics import EfficiencyCalculator
 from app.visualization import PlotlyBuilder
 from app.visualization.plotly_builder import ChartHelper
 from app.visualization.chart_selector import ChartSelector
+from app.visualization.layout_optimizer import LayoutOptimizer
+from app.visualization.data_preprocessor import DataPreprocessor
 
 # Load environment variables
 load_dotenv()
@@ -747,6 +749,49 @@ Current user question: {state["user_query"]}"""
                     params["y_col"] = y_col
                 if group_col:
                     params["group_col"] = group_col
+
+            # PHASE 1: PREPROCESS DATA - Analyze data characteristics
+            # Only preprocess for standard chart types (not comparison charts)
+            if chart_type != "comparison" and x_col and y_col:
+                logger.info(f"Preprocessing data for {chart_type} chart (x={x_col}, y={y_col})")
+                preprocessing_result = DataPreprocessor.preprocess_for_chart(
+                    data=data,
+                    chart_type=chart_type,
+                    x_col=x_col,
+                    y_col=y_col,
+                    params=params
+                )
+
+                # Update data with processed version (may include moving averages)
+                data = preprocessing_result["data"]
+
+                # Extract metadata and recommendations
+                metadata = preprocessing_result.get("metadata", {})
+                recommendations = preprocessing_result.get("recommendations", {})
+                annotations = preprocessing_result.get("annotations", [])
+
+                logger.info(f"Data analysis: sparse={metadata.get('is_sparse')}, "
+                           f"variance={metadata.get('variance_level')}, "
+                           f"gaps={metadata.get('has_gaps')}")
+
+                # PHASE 2: OPTIMIZE LAYOUT - Calculate optimal layout parameters
+                logger.info("Calculating optimal layout parameters")
+                layout_config = LayoutOptimizer.optimize_layout(
+                    data=data,
+                    chart_type=chart_type,
+                    x_col=x_col,
+                    y_col=y_col,
+                    metadata=metadata
+                )
+
+                # Add preprocessing results to params for PlotlyBuilder
+                params["metadata"] = metadata
+                params["recommendations"] = recommendations
+                params["annotations"] = annotations
+                params["layout_config"] = layout_config
+
+                logger.info(f"Layout optimized: height={layout_config.get('height')}, "
+                           f"x_rotation={layout_config.get('xaxis', {}).get('tickangle')}")
 
             # Generate smart title
             params["title"] = ChartHelper.generate_chart_title(

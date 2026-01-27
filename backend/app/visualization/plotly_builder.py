@@ -160,14 +160,71 @@ class PlotlyBuilder:
         COLORS["teal"],
     ]
 
-    # Base layout configuration
+    # Professional theme system
+    THEMES = {
+        "professional": {
+            "primary": "#2563eb",      # Deep blue
+            "secondary": "#dc2626",    # Crimson
+            "success": "#059669",      # Emerald
+            "accent": "#7c3aed",       # Purple
+            "neutral": "#475569",      # Slate
+            "background": "#ffffff",
+            "paper": "#ffffff",
+            "grid": "#f1f5f9",         # Light slate
+            "text": "#0f172a"          # Dark slate
+        },
+        "high_contrast": {
+            "primary": "#0ea5e9",      # Sky blue
+            "secondary": "#f43f5e",    # Rose
+            "success": "#10b981",      # Emerald
+            "accent": "#a855f7",       # Purple
+            "neutral": "#64748b",      # Slate
+            "background": "#ffffff",
+            "paper": "#ffffff",
+            "grid": "#e2e8f0",
+            "text": "#020617"
+        }
+    }
+
+    # Typography hierarchy
+    FONTS = {
+        "title": {
+            "family": "Inter, sans-serif",
+            "size": 18,
+            "weight": 600,
+            "color": "#0f172a"
+        },
+        "axis_label": {
+            "family": "Inter, sans-serif",
+            "size": 13,
+            "weight": 500,
+            "color": "#334155"
+        },
+        "tick_label": {
+            "family": "SF Mono, Consolas, Monaco, monospace",  # Monospace for numbers
+            "size": 11,
+            "color": "#64748b"
+        },
+        "annotation": {
+            "family": "Inter, sans-serif",
+            "size": 10,
+            "color": "#64748b"
+        },
+        "legend": {
+            "family": "Inter, sans-serif",
+            "size": 12,
+            "color": "#475569"
+        }
+    }
+
+    # Base layout configuration (enhanced)
     BASE_LAYOUT = {
         "font": {
-            "family": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            "family": FONTS["axis_label"]["family"],
             "size": 14,
-            "color": "#1f2937"
+            "color": THEMES["professional"]["text"]
         },
-        "plot_bgcolor": "#ffffff",
+        "plot_bgcolor": "#fafafa",      # Slight off-white for better contrast
         "paper_bgcolor": "#ffffff",
         "hovermode": "x unified",
         "showlegend": True,
@@ -177,28 +234,54 @@ class PlotlyBuilder:
             "y": -0.15,
             "xanchor": "center",
             "x": 0.5,
-            "font": {"size": 12},
-            "bgcolor": "rgba(255,255,255,0.8)",
+            "font": {
+                "family": FONTS["legend"]["family"],
+                "size": FONTS["legend"]["size"],
+                "color": FONTS["legend"]["color"]
+            },
+            "bgcolor": "rgba(255,255,255,0.9)",
             "bordercolor": "#e5e7eb",
             "borderwidth": 1
         },
         "margin": {"l": 80, "r": 40, "t": 100, "b": 100},
         "xaxis": {
             "showgrid": True,
-            "gridcolor": "#e5e7eb",
-            "zeroline": False,
+            "gridwidth": 1,
+            "gridcolor": "#e2e8f0",     # Light gray grid
+            "zeroline": True,
+            "zerolinewidth": 2,
+            "zerolinecolor": "#cbd5e1",  # Slightly darker zero line
             "title": {
-                "font": {"size": 13, "color": "#4b5563"},
+                "font": {
+                    "family": FONTS["axis_label"]["family"],
+                    "size": FONTS["axis_label"]["size"],
+                    "color": FONTS["axis_label"]["color"]
+                },
                 "standoff": 15
+            },
+            "tickfont": {
+                "family": FONTS["tick_label"]["family"],
+                "size": FONTS["tick_label"]["size"],
+                "color": FONTS["tick_label"]["color"]
             }
         },
         "yaxis": {
             "showgrid": True,
-            "gridcolor": "#e5e7eb",
+            "gridwidth": 1,
+            "gridcolor": "#e2e8f0",
             "zeroline": False,
             "title": {
-                "font": {"size": 13, "color": "#4b5563"},
+                "font": {
+                    "family": FONTS["axis_label"]["family"],
+                    "size": FONTS["axis_label"]["size"],
+                    "color": FONTS["axis_label"]["color"]
+                },
                 "standoff": 15
+            },
+            "tickfont": {
+                "family": FONTS["tick_label"]["family"],
+                "size": FONTS["tick_label"]["size"],
+                "color": FONTS["tick_label"]["color"]
             }
         }
     }
@@ -307,6 +390,12 @@ class PlotlyBuilder:
         group_col = params.get("group_col")
         title = params.get("title", "Trend Over Time")
 
+        # Get preprocessing results
+        metadata = params.get("metadata", {})
+        recommendations = params.get("recommendations", {})
+        annotations = params.get("annotations", [])
+        layout_config = params.get("layout_config", {})
+
         # If x_col is 'round', try to convert to numeric for proper sorting
         # Handle both numeric rounds (0, 1, 2...) and finals ("Qualifying Final", etc.)
         if x_col == 'round' and 'match_date' in data.columns:
@@ -346,6 +435,19 @@ class PlotlyBuilder:
                 marker={"size": 8}
             ))
 
+        # Add moving average trace if recommended and available
+        if recommendations.get("show_moving_avg") and "moving_avg_3" in data.columns:
+            from app.visualization.data_preprocessor import DataPreprocessor
+            ma_trace_dict = DataPreprocessor.add_moving_average_trace(
+                data=data,
+                x_col=x_col_for_plot,
+                y_col=y_col,
+                window=3
+            )
+            if ma_trace_dict:
+                traces.append(go.Scatter(**ma_trace_dict))
+                logger.info("Added 3-game moving average to line chart")
+
         layout = PlotlyBuilder.BASE_LAYOUT.copy()
         layout["title"] = {
             "text": title,
@@ -357,15 +459,65 @@ class PlotlyBuilder:
         layout["xaxis"]["title"] = {"text": ChartHelper.humanize_column_name(x_col)}
         layout["yaxis"]["title"] = {"text": ChartHelper.humanize_column_name(y_col)}
 
+        # Apply layout optimizations
+        if layout_config:
+            # Update margins
+            if "margin" in layout_config:
+                layout["margin"] = layout_config["margin"]
+
+            # Update height
+            if "height" in layout_config:
+                layout["height"] = layout_config["height"]
+
+            # Update x-axis configuration
+            if "xaxis" in layout_config:
+                layout["xaxis"].update(layout_config["xaxis"])
+
+            # Update y-axis configuration
+            if "yaxis" in layout_config:
+                layout["yaxis"].update(layout_config["yaxis"])
+
         # If we created custom ordering, set tick labels to show round names
         if round_labels is not None:
             layout["xaxis"]["tickmode"] = "array"
             layout["xaxis"]["tickvals"] = list(range(len(round_labels)))
             layout["xaxis"]["ticktext"] = round_labels
 
+        # Add peak/trough annotations if recommended
+        if recommendations.get("show_peaks"):
+            from app.visualization.data_preprocessor import DataPreprocessor
+            peak_annotations = DataPreprocessor.add_peak_annotations(
+                data=data,
+                x_col=x_col_for_plot,
+                y_col=y_col
+            )
+            annotations.extend(peak_annotations)
+            logger.info(f"Added {len(peak_annotations)} peak/trough annotations")
+
+        # Add all annotations to layout
+        if annotations:
+            layout["annotations"] = annotations
+
         # Create figure and convert to JSON-serializable dict
         fig = go.Figure(data=traces, layout=layout)
-        return fig.to_dict()
+        fig_dict = fig.to_dict()
+
+        # Clean NaN values (not JSON-serializable) - replace with None
+        import json
+        import math
+
+        def clean_nan(obj):
+            """Recursively replace NaN with None for JSON serialization"""
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(item) for item in obj]
+            elif isinstance(obj, float) and math.isnan(obj):
+                return None
+            else:
+                return obj
+
+        return clean_nan(fig_dict)
 
     @staticmethod
     def _build_bar_chart(data: pd.DataFrame, params: Dict) -> Dict:
@@ -374,6 +526,12 @@ class PlotlyBuilder:
         y_col = params.get("y_col", data.columns[1])
         title = params.get("title", "Comparison")
         orientation = params.get("orientation", "v")  # v or h
+
+        # Get preprocessing results
+        metadata = params.get("metadata", {})
+        recommendations = params.get("recommendations", {})
+        annotations = params.get("annotations", [])
+        layout_config = params.get("layout_config", {})
 
         traces = [go.Bar(
             x=data[x_col].tolist() if orientation == "v" else data[y_col].tolist(),
@@ -396,9 +554,48 @@ class PlotlyBuilder:
         layout["yaxis"]["title"] = {"text": ChartHelper.humanize_column_name(y_col if orientation == "v" else x_col)}
         layout["showlegend"] = False
 
+        # Apply layout optimizations
+        if layout_config:
+            # Update margins
+            if "margin" in layout_config:
+                layout["margin"] = layout_config["margin"]
+
+            # Update height
+            if "height" in layout_config:
+                layout["height"] = layout_config["height"]
+
+            # Update x-axis configuration
+            if "xaxis" in layout_config:
+                layout["xaxis"].update(layout_config["xaxis"])
+
+            # Update y-axis configuration
+            if "yaxis" in layout_config:
+                layout["yaxis"].update(layout_config["yaxis"])
+
+        # Add all annotations to layout
+        if annotations:
+            layout["annotations"] = annotations
+
         # Create figure and convert to JSON-serializable dict
         fig = go.Figure(data=traces, layout=layout)
-        return fig.to_dict()
+        fig_dict = fig.to_dict()
+
+        # Clean NaN values (not JSON-serializable) - replace with None
+        import json
+        import math
+
+        def clean_nan(obj):
+            """Recursively replace NaN with None for JSON serialization"""
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(item) for item in obj]
+            elif isinstance(obj, float) and math.isnan(obj):
+                return None
+            else:
+                return obj
+
+        return clean_nan(fig_dict)
 
     @staticmethod
     def _build_scatter_chart(data: pd.DataFrame, params: Dict) -> Dict:
@@ -407,6 +604,12 @@ class PlotlyBuilder:
         y_col = params.get("y_col", data.columns[1])
         title = params.get("title", "Correlation Analysis")
         group_col = params.get("group_col")
+
+        # Get preprocessing results
+        metadata = params.get("metadata", {})
+        recommendations = params.get("recommendations", {})
+        annotations = params.get("annotations", [])
+        layout_config = params.get("layout_config", {})
 
         traces = []
 
@@ -445,9 +648,48 @@ class PlotlyBuilder:
         layout["xaxis"]["title"] = {"text": ChartHelper.humanize_column_name(x_col)}
         layout["yaxis"]["title"] = {"text": ChartHelper.humanize_column_name(y_col)}
 
+        # Apply layout optimizations
+        if layout_config:
+            # Update margins
+            if "margin" in layout_config:
+                layout["margin"] = layout_config["margin"]
+
+            # Update height
+            if "height" in layout_config:
+                layout["height"] = layout_config["height"]
+
+            # Update x-axis configuration
+            if "xaxis" in layout_config:
+                layout["xaxis"].update(layout_config["xaxis"])
+
+            # Update y-axis configuration
+            if "yaxis" in layout_config:
+                layout["yaxis"].update(layout_config["yaxis"])
+
+        # Add all annotations to layout
+        if annotations:
+            layout["annotations"] = annotations
+
         # Create figure and convert to JSON-serializable dict
         fig = go.Figure(data=traces, layout=layout)
-        return fig.to_dict()
+        fig_dict = fig.to_dict()
+
+        # Clean NaN values (not JSON-serializable) - replace with None
+        import json
+        import math
+
+        def clean_nan(obj):
+            """Recursively replace NaN with None for JSON serialization"""
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(item) for item in obj]
+            elif isinstance(obj, float) and math.isnan(obj):
+                return None
+            else:
+                return obj
+
+        return clean_nan(fig_dict)
 
     @staticmethod
     def _build_comparison_chart(data: pd.DataFrame, params: Dict) -> Dict:
@@ -480,7 +722,24 @@ class PlotlyBuilder:
 
         # Create figure and convert to JSON-serializable dict
         fig = go.Figure(data=traces, layout=layout)
-        return fig.to_dict()
+        fig_dict = fig.to_dict()
+
+        # Clean NaN values (not JSON-serializable) - replace with None
+        import json
+        import math
+
+        def clean_nan(obj):
+            """Recursively replace NaN with None for JSON serialization"""
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(item) for item in obj]
+            elif isinstance(obj, float) and math.isnan(obj):
+                return None
+            else:
+                return obj
+
+        return clean_nan(fig_dict)
 
     @staticmethod
     def _build_trend_chart(data: pd.DataFrame, params: Dict) -> Dict:
