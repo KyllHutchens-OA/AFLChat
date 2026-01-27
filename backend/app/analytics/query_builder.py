@@ -125,8 +125,8 @@ class QueryBuilder:
 ## Important Notes
 - **Data Availability**:
   * Match-level data: 1990-2025 (6,000+ matches)
-  * Player statistics: 1990-2023 (excluding 1994, 2017, 2024) + partial 2025 (12,615 players, 230,000+ match-level stats)
-  * **NO 2024 player data available** - if user asks for 2024 player stats, inform them data is unavailable
+  * Player statistics: 1990-2024 (excluding 1994, 2017) + very limited 2025 (12,615 players, 230,000+ match-level stats)
+  * **2025 data is VERY LIMITED** - only 1-2 matches available, warn users that 2025 season data is incomplete
 - **Team Names**: Use the teams table to get correct team names and IDs
 - **Finals**: Finals rounds have string names like "Qualifying Final", "Grand Final". ALWAYS include finals in round-by-round queries for a season - they are part of the season data.
 - **Scoring**: home_score and away_score are total points (goals × 6 + behinds)
