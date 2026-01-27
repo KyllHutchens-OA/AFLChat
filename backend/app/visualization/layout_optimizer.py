@@ -193,10 +193,11 @@ class LayoutOptimizer:
             padding = data_range * 0.1
 
             # Start from 0 if min is close to 0
-            range_min = 0 if min_val < data_range * 0.2 else min_val - padding
-            range_max = max_val + padding
+            range_min = 0 if min_val < data_range * 0.2 else float(min_val - padding)
+            range_max = float(max_val + padding)
 
-            config["range"] = [range_min, range_max]
+            # Convert to Python native floats for JSON serialization
+            config["range"] = [float(range_min), float(range_max)]
 
             # Set tick spacing for readability
             if data_range < 5:

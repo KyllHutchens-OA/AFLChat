@@ -234,10 +234,16 @@ class DataPreprocessor:
                 if idx in data.index:
                     row = data.loc[idx]
                     if x_col in row and y_col in row:
+                        # Convert to Python native types for JSON serialization
+                        x_val = row[x_col]
+                        y_val = float(row[y_col])
+                        if isinstance(x_val, (int, float)):
+                            x_val = float(x_val)
+
                         annotations.append({
-                            "x": row[x_col],
-                            "y": row[y_col],
-                            "text": f"⚠️ {row[y_col]:.1f}",
+                            "x": x_val,
+                            "y": y_val,
+                            "text": f"⚠️ {y_val:.1f}",
                             "showarrow": True,
                             "arrowhead": 2,
                             "arrowsize": 1,
@@ -327,8 +333,8 @@ class DataPreprocessor:
             return {}
 
         return {
-            "x": data[x_col],
-            "y": data['moving_avg_3'],
+            "x": data[x_col].tolist(),
+            "y": data['moving_avg_3'].tolist(),
             "name": f"{window}-Game Average",
             "mode": "lines",
             "line": {
@@ -365,11 +371,23 @@ class DataPreprocessor:
 
         # Only annotate if there's meaningful variation
         if y_data.max() != y_data.min():
+            # Convert to Python native types for JSON serialization
+            max_x = data.loc[max_idx, x_col]
+            max_y = float(data.loc[max_idx, y_col])
+            min_x = data.loc[min_idx, x_col]
+            min_y = float(data.loc[min_idx, y_col])
+
+            # Convert x values to native types if they're numeric
+            if isinstance(max_x, (int, float)):
+                max_x = float(max_x)
+            if isinstance(min_x, (int, float)):
+                min_x = float(min_x)
+
             # Peak annotation
             annotations.append({
-                "x": data.loc[max_idx, x_col],
-                "y": data.loc[max_idx, y_col],
-                "text": f"Best: {data.loc[max_idx, y_col]:.1f}",
+                "x": max_x,
+                "y": max_y,
+                "text": f"Best: {max_y:.1f}",
                 "showarrow": True,
                 "arrowhead": 2,
                 "arrowsize": 1,
@@ -387,9 +405,9 @@ class DataPreprocessor:
             # Trough annotation (only if different from peak)
             if max_idx != min_idx:
                 annotations.append({
-                    "x": data.loc[min_idx, x_col],
-                    "y": data.loc[min_idx, y_col],
-                    "text": f"Worst: {data.loc[min_idx, y_col]:.1f}",
+                    "x": min_x,
+                    "y": min_y,
+                    "text": f"Worst: {min_y:.1f}",
                     "showarrow": True,
                     "arrowhead": 2,
                     "arrowsize": 1,
