@@ -72,6 +72,11 @@ class DataPreprocessor:
         # Detect if this is a count metric (goals, disposals, etc.)
         is_count = DataPreprocessor.is_count_metric(y_col)
 
+        # Replace NaN with 0 for count metrics (0 goals is clearer than a gap)
+        # For all metrics, fill NaN with 0 for clearer visualization
+        if y_col in processed_data.columns:
+            processed_data[y_col] = processed_data[y_col].fillna(0)
+
         # Analyze data characteristics
         metadata = DataPreprocessor._analyze_data(processed_data, x_col, y_col, chart_type)
         metadata["is_count_metric"] = is_count

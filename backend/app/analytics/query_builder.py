@@ -60,7 +60,7 @@ class QueryBuilder:
 ### matches
 - id (INTEGER, PRIMARY KEY)
 - season (INTEGER) - Year (e.g., 2024)
-- round (VARCHAR) - Round number or finals name (e.g., "1", "2", "Qualifying Final", "Grand Final")
+- round (VARCHAR) - Round number as string. Regular rounds: "0", "1", "2", ... "24" (numeric strings WITHOUT "Round " prefix). Finals rounds: "Qualifying Final", "Elimination Final", "Semi Final", "Preliminary Final", "Grand Final". CRITICAL: When querying round-by-round data for a season, ALWAYS include both regular AND finals rounds - do NOT filter to only numeric rounds.
 - match_date (TIMESTAMP) - **IMPORTANT: Use match_date, not date**
 - home_team_id (INTEGER, FOREIGN KEY -> teams.id)
 - away_team_id (INTEGER, FOREIGN KEY -> teams.id)
@@ -128,7 +128,7 @@ class QueryBuilder:
   * Player statistics: 1990-2023 (excluding 1994, 2017, 2024) + partial 2025 (12,615 players, 230,000+ match-level stats)
   * **NO 2024 player data available** - if user asks for 2024 player stats, inform them data is unavailable
 - **Team Names**: Use the teams table to get correct team names and IDs
-- **Finals**: Finals rounds have string names like "Qualifying Final", "Grand Final"
+- **Finals**: Finals rounds have string names like "Qualifying Final", "Grand Final". ALWAYS include finals in round-by-round queries for a season - they are part of the season data.
 - **Scoring**: home_score and away_score are total points (goals × 6 + behinds)
 - **Player Queries**: Join players and player_stats with matches to get per-match player performance
 """
@@ -157,11 +157,19 @@ Common Patterns:
 - Use CASE statements to calculate team-specific stats from home/away columns
 - Win/loss ratios: Use SUM with CASE for wins/losses, then calculate ratio directly (no subquery needed)
 
-IMPORTANT - For "team performance" queries:
+IMPORTANT - For "team performance" or "by round" queries:
 - Return ROUND-BY-ROUND data (one row per match), NOT season aggregates
 - Include: round, match_date, opponent, score, result (Win/Loss/Draw), margin
 - This allows visualization of performance trends over the season
 - Example: "Show me Richmond's performance in 2024" should return ~24 rows (one per round)
+
+CRITICAL - ALWAYS INCLUDE FINALS when querying round-by-round data for a season:
+- Regular rounds are stored as: '0', '1', '2', ... '24'
+- Finals rounds are stored as: 'Qualifying Final', 'Elimination Final', 'Semi Final', 'Preliminary Final', 'Grand Final'
+- When user asks for "by round", "each round", "round breakdown" for a season, INCLUDE ALL ROUNDS (regular + finals)
+- Do NOT filter to only numeric rounds - include finals rounds in results
+- Example: For "goals by round in 2024", return rounds 0-24 AND any finals that exist
+- Finals are part of the season and should always be included in round-by-round breakdowns
 
 CRITICAL - For TEMPORAL/TREND queries (over time, across time, year-by-year, historical):
 - ALWAYS return ONE ROW PER TIME PERIOD (year, season, etc.)
@@ -254,7 +262,17 @@ Question: {user_query}"""
                 if context.get("players"):
                     prompt_text += f"\n- Players: {', '.join(context['players'])}"
                 if context.get("rounds"):
-                    prompt_text += f"\n- Rounds: {', '.join(str(r) for r in context['rounds'])}"
+                    # Normalize round names to match database format
+                    # Database has: '0', '1', '2', ... for regular rounds
+                    # Entity extraction gives: 'Round 1', 'Round 2', ...
+                    normalized_rounds = []
+                    for r in context['rounds']:
+                        r_str = str(r)
+                        # Strip "Round " prefix if present
+                        if r_str.startswith("Round "):
+                            r_str = r_str.replace("Round ", "")
+                        normalized_rounds.append(r_str)
+                    prompt_text += f"\n- Rounds: {', '.join(normalized_rounds)}"
 
             prompt_text += "\n\nGenerate the SQL query:"
 
