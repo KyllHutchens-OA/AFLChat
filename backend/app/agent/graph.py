@@ -399,7 +399,13 @@ Current user question: {state["user_query"]}"""
             import traceback
             tb = traceback.format_exc()
             logger.error(f"UNDERSTAND: Exception caught: {type(e).__name__}: {str(e)}")
+            logger.error(f"UNDERSTAND: Exception details: {repr(e)}")
             logger.error(f"UNDERSTAND: Full traceback:\n{tb}")
+            # Check for specific OpenAI errors
+            if hasattr(e, 'status_code'):
+                logger.error(f"UNDERSTAND: OpenAI status_code: {e.status_code}")
+            if hasattr(e, 'response'):
+                logger.error(f"UNDERSTAND: OpenAI response: {e.response}")
             state["errors"].append(f"Understanding error: {str(e)}")
 
         return state

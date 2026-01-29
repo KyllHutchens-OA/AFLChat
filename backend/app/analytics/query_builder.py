@@ -376,7 +376,14 @@ Question: {user_query}"""
             tb = traceback.format_exc()
             error_type = type(e).__name__
             error_msg = f"{error_type}: {str(e)}"
-            logger.error(f"SQL generation error: {error_msg}\n{tb}")
+            logger.error(f"SQL generation error: {error_msg}")
+            logger.error(f"SQL generation exception details: {repr(e)}")
+            logger.error(f"SQL generation traceback:\n{tb}")
+            # Check for specific OpenAI errors
+            if hasattr(e, 'status_code'):
+                logger.error(f"OpenAI status_code: {e.status_code}")
+            if hasattr(e, 'response'):
+                logger.error(f"OpenAI response: {e.response}")
 
             # Check for common OpenAI API errors
             if "api_key" in str(e).lower() or "authentication" in str(e).lower():

@@ -30,6 +30,7 @@ class CSVMatchIngester:
         "Carlton": "CAR",
         "Collingwood": "COL",
         "Essendon": "ESS",
+        "Fitzroy": "FIT",  # Historical team (merged with Brisbane Bears in 1996)
         "Fremantle": "FRE",
         "Geelong": "GEE",
         "Gold Coast": "GCS",
@@ -43,7 +44,7 @@ class CSVMatchIngester:
         "Sydney": "SYD",
         "West Coast": "WCE",
         "Western Bulldogs": "WB",
-        "Footscray": "WB",
+        "Footscray": "WB",  # Renamed to Western Bulldogs in 1997
     }
 
     def __init__(self, csv_dir: str):
@@ -156,9 +157,16 @@ class CSVMatchIngester:
                     except:
                         match_date = datetime.strptime(date_str[:10], '%Y-%m-%d')
 
+                    # Helper function to safely convert to int (handles decimals like "17.0")
+                    def safe_int(value):
+                        try:
+                            return int(float(value))
+                        except (ValueError, TypeError):
+                            return 0
+
                     # Parse scores
-                    team1_score = int(row['team_1_final_goals']) * 6 + int(row['team_1_final_behinds'])
-                    team2_score = int(row['team_2_final_goals']) * 6 + int(row['team_2_final_behinds'])
+                    team1_score = safe_int(row['team_1_final_goals']) * 6 + safe_int(row['team_1_final_behinds'])
+                    team2_score = safe_int(row['team_2_final_goals']) * 6 + safe_int(row['team_2_final_behinds'])
 
                     # Create match
                     match = Match(
@@ -170,22 +178,22 @@ class CSVMatchIngester:
                         away_team_id=team2_id,
                         home_score=team1_score,
                         away_score=team2_score,
-                        home_q1_goals=int(row['team_1_q1_goals']),
-                        home_q1_behinds=int(row['team_1_q1_behinds']),
-                        home_q2_goals=int(row['team_1_q2_goals']),
-                        home_q2_behinds=int(row['team_1_q2_behinds']),
-                        home_q3_goals=int(row['team_1_q3_goals']),
-                        home_q3_behinds=int(row['team_1_q3_behinds']),
-                        home_q4_goals=int(row['team_1_final_goals']),
-                        home_q4_behinds=int(row['team_1_final_behinds']),
-                        away_q1_goals=int(row['team_2_q1_goals']),
-                        away_q1_behinds=int(row['team_2_q1_behinds']),
-                        away_q2_goals=int(row['team_2_q2_goals']),
-                        away_q2_behinds=int(row['team_2_q2_behinds']),
-                        away_q3_goals=int(row['team_2_q3_goals']),
-                        away_q3_behinds=int(row['team_2_q3_behinds']),
-                        away_q4_goals=int(row['team_2_final_goals']),
-                        away_q4_behinds=int(row['team_2_final_behinds']),
+                        home_q1_goals=safe_int(row['team_1_q1_goals']),
+                        home_q1_behinds=safe_int(row['team_1_q1_behinds']),
+                        home_q2_goals=safe_int(row['team_1_q2_goals']),
+                        home_q2_behinds=safe_int(row['team_1_q2_behinds']),
+                        home_q3_goals=safe_int(row['team_1_q3_goals']),
+                        home_q3_behinds=safe_int(row['team_1_q3_behinds']),
+                        home_q4_goals=safe_int(row['team_1_final_goals']),
+                        home_q4_behinds=safe_int(row['team_1_final_behinds']),
+                        away_q1_goals=safe_int(row['team_2_q1_goals']),
+                        away_q1_behinds=safe_int(row['team_2_q1_behinds']),
+                        away_q2_goals=safe_int(row['team_2_q2_goals']),
+                        away_q2_behinds=safe_int(row['team_2_q2_behinds']),
+                        away_q3_goals=safe_int(row['team_2_q3_goals']),
+                        away_q3_behinds=safe_int(row['team_2_q3_behinds']),
+                        away_q4_goals=safe_int(row['team_2_final_goals']),
+                        away_q4_behinds=safe_int(row['team_2_final_behinds']),
                         match_status="completed"
                     )
 

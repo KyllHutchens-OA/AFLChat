@@ -39,6 +39,7 @@ class PlayerDataIngester:
         "Carlton": "CAR",
         "Collingwood": "COL",
         "Essendon": "ESS",
+        "Fitzroy": "FIT",  # Historical team (merged with Brisbane Bears in 1996)
         "Fremantle": "FRE",
         "Geelong": "GEE",
         "Gold Coast": "GCS",
@@ -52,10 +53,9 @@ class PlayerDataIngester:
         "Sydney": "SYD",
         "West Coast": "WCE",
         "Western Bulldogs": "WB",
-        "Footscray": "WB",
-        "Fitzroy": "FIT",
-        "South Melbourne": "SYD",
-        "University": "UNI",
+        "Footscray": "WB",  # Renamed to Western Bulldogs in 1997
+        "South Melbourne": "SYD",  # Relocated to Sydney in 1982
+        "University": "UNI",  # Historical team (disbanded 1914)
     }
 
     def __init__(self, csv_dir: str):
