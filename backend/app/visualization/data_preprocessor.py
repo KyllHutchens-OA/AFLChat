@@ -271,31 +271,7 @@ class DataPreprocessor:
                 "yanchor": "top"
             })
 
-        # Outlier annotations (limit to avoid clutter)
-        if metadata.get("outliers") and len(metadata["outliers"]) > 0:
-            for idx in metadata["outliers"][:3]:  # Max 3 outlier annotations
-                if idx in data.index:
-                    row = data.loc[idx]
-                    if x_col in row and y_col in row:
-                        # Convert to Python native types for JSON serialization
-                        x_val = row[x_col]
-                        y_val = float(row[y_col])
-                        if isinstance(x_val, (int, float)):
-                            x_val = float(x_val)
-
-                        annotations.append({
-                            "x": x_val,
-                            "y": y_val,
-                            "text": f"⚠️ {y_val:.1f}",
-                            "showarrow": True,
-                            "arrowhead": 2,
-                            "arrowsize": 1,
-                            "arrowcolor": "#f59e0b",
-                            "font": {"size": 9, "color": "#f59e0b"},
-                            "bgcolor": "rgba(255, 255, 255, 0.9)",
-                            "bordercolor": "#f59e0b",
-                            "borderwidth": 1
-                        })
+        # Outlier annotations removed - too cluttered and confusing for users
 
         return annotations
 

@@ -140,8 +140,14 @@ class ConversationService:
             messages.append(message)
             logger.info(f"add_message: After append, messages array length: {len(messages)}")
 
+            # CRITICAL: For JSONB columns, SQLAlchemy doesn't auto-detect mutations
+            # We must explicitly flag the column as modified
+            from sqlalchemy.orm.attributes import flag_modified
             conversation.messages = messages
+            flag_modified(conversation, "messages")
             conversation.updated_at = datetime.utcnow()
+
+            logger.info(f"add_message: Flagged 'messages' as modified for SQLAlchemy")
 
             logger.info(f"add_message: About to commit. Setting conversation.messages to array with {len(messages)} messages")
             session.commit()

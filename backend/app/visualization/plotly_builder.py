@@ -77,55 +77,110 @@ class ChartHelper:
         """
         teams = entities.get("teams", [])
         seasons = entities.get("seasons", [])
+        players = entities.get("players", [])
 
-        # Extract team name (first team or "Teams" if multiple)
-        team_name = teams[0] if len(teams) == 1 else "Teams" if len(teams) > 1 else ""
-
-        # Determine primary metric being visualized
-        metric = None
-        if "win_loss_ratio" in data_cols or "win_loss_ratio" in metrics:
-            metric = "Win/Loss Ratio"
-        elif "win_rate" in data_cols or "win_percentage" in metrics:
-            metric = "Win Rate"
-        elif "wins" in data_cols:
-            metric = "Wins"
-        elif "avg_score_per_game" in data_cols or "scoring" in metrics:
-            metric = "Scoring"
-        elif "margin" in data_cols:
-            metric = "Margin"
-        elif "total_score" in data_cols:
-            metric = "Total Score"
-
-        # Build title based on intent
-        if intent == "TREND_ANALYSIS" or str(intent) == "QueryIntent.TREND_ANALYSIS":
-            # Time-series title
-            if team_name and metric:
-                if seasons and len(seasons) > 1:
-                    return f"{team_name} {metric} ({seasons[0]}-{seasons[-1]})"
-                return f"{team_name} {metric} Over Time"
-            elif team_name:
-                return f"{team_name} Performance Over Time"
-            elif metric:
-                return f"{metric} Trend"
-            return "Performance Trend"
-
-        elif intent == "PLAYER_COMPARISON" or str(intent) == "QueryIntent.PLAYER_COMPARISON":
-            return "Player Comparison"
-
-        elif intent == "TEAM_ANALYSIS" or str(intent) == "QueryIntent.TEAM_ANALYSIS":
-            if team_name and seasons and len(seasons) == 1:
-                return f"{team_name} {seasons[0]} Season"
-            elif team_name:
-                return f"{team_name} Analysis"
-            return "Team Performance"
-
+        # Determine subject (player takes priority, then team)
+        if players:
+            subject = players[0] if len(players) == 1 else " vs ".join(players[:2]) if len(players) > 1 else ""
+            subject_type = "player"
+        elif teams:
+            subject = teams[0] if len(teams) == 1 else " vs ".join(teams[:2]) if len(teams) > 1 else ""
+            subject_type = "team"
         else:
-            # Default for simple stats
-            if team_name and metric:
-                return f"{team_name} {metric}"
-            elif metric:
-                return metric
+            subject = ""
+            subject_type = None
+
+        # Build season string
+        season_str = ""
+        if seasons:
+            if len(seasons) == 1:
+                season_str = str(seasons[0])
+            elif len(seasons) == 2:
+                season_str = f"{seasons[0]}-{seasons[-1]}"
+            else:
+                season_str = f"{seasons[0]}-{seasons[-1]}"
+
+        # Metric mapping - check data columns for the primary metric
+        metric_map = {
+            "goals": "Goals",
+            "disposals": "Disposals",
+            "kicks": "Kicks",
+            "handballs": "Handballs",
+            "marks": "Marks",
+            "tackles": "Tackles",
+            "clearances": "Clearances",
+            "inside_50s": "Inside 50s",
+            "contested_possessions": "Contested Possessions",
+            "uncontested_possessions": "Uncontested Possessions",
+            "brownlow_votes": "Brownlow Votes",
+            "behinds": "Behinds",
+            "hitouts": "Hitouts",
+            "win_loss_ratio": "Win/Loss Ratio",
+            "win_rate": "Win Rate",
+            "win_percentage": "Win Rate",
+            "wins": "Wins",
+            "losses": "Losses",
+            "avg_score_per_game": "Scoring",
+            "avg_score": "Average Score",
+            "margin": "Margin",
+            "total_score": "Total Score",
+            "home_score": "Score",
+            "away_score": "Score",
+            "score": "Score",
+            "total_goals": "Goals",
+            "total_disposals": "Disposals",
+        }
+
+        # Find the metric from data columns
+        metric = None
+        for col in data_cols:
+            col_lower = col.lower()
+            if col_lower in metric_map:
+                metric = metric_map[col_lower]
+                break
+
+        # Also check the metrics list passed in
+        if not metric:
+            for m in metrics:
+                m_lower = m.lower()
+                if m_lower in metric_map:
+                    metric = metric_map[m_lower]
+                    break
+
+        # Check if this is a "by round" query (has round column)
+        by_round = "round" in [c.lower() for c in data_cols]
+
+        # Build dynamic title
+        parts = []
+
+        # Add subject
+        if subject:
+            parts.append(subject)
+
+        # Add metric
+        if metric:
+            parts.append(metric)
+        elif subject_type == "player":
+            parts.append("Stats")
+        elif subject_type == "team":
+            parts.append("Performance")
+
+        # Add time context
+        if by_round and season_str:
+            parts.append(f"by Round ({season_str})")
+        elif by_round:
+            parts.append("by Round")
+        elif season_str:
+            if len(seasons) > 1:
+                parts.append(f"({season_str})")
+            else:
+                parts.append(season_str)
+
+        # Fallback
+        if not parts:
             return "AFL Statistics"
+
+        return " ".join(parts)
 
 
 class PlotlyBuilder:
@@ -482,6 +537,11 @@ class PlotlyBuilder:
             layout["xaxis"]["tickmode"] = "array"
             layout["xaxis"]["tickvals"] = list(range(len(round_labels)))
             layout["xaxis"]["ticktext"] = round_labels
+        # For season/year columns, ensure integer-only ticks (no 2020.5)
+        elif x_col in ['season', 'year'] or x_col_for_plot in ['season', 'year']:
+            layout["xaxis"]["tickmode"] = "linear"
+            layout["xaxis"]["dtick"] = 1  # Force integer steps
+            layout["xaxis"]["tickformat"] = "d"  # Integer format (no decimals)
 
         # Add peak/trough annotations if recommended
         if recommendations.get("show_peaks"):
@@ -571,6 +631,12 @@ class PlotlyBuilder:
             # Update y-axis configuration
             if "yaxis" in layout_config:
                 layout["yaxis"].update(layout_config["yaxis"])
+
+        # For season/year columns, ensure integer-only ticks (no 2020.5)
+        if x_col in ['season', 'year']:
+            layout["xaxis"]["tickmode"] = "linear"
+            layout["xaxis"]["dtick"] = 1  # Force integer steps
+            layout["xaxis"]["tickformat"] = "d"  # Integer format (no decimals)
 
         # Add all annotations to layout
         if annotations:

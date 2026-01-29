@@ -164,8 +164,8 @@ class AFLAnalyticsAgent:
         - thinking_message
         """
         state["current_step"] = WorkflowStep.UNDERSTAND
-        state["thinking_message"] = "🔍 Understanding your question..."
-        self._emit_progress(state, "understand", "🔍 Understanding your question...")
+        state["thinking_message"] = "Understanding your question..."
+        self._emit_progress(state, "understand", "Understanding your question...")
 
         logger.info(f"UNDERSTAND: Processing query: {state['user_query']}")
 
@@ -600,13 +600,13 @@ Current user question: {state["user_query"]}"""
             state["query_results"] = db_result["data"]
 
             logger.info(f"Query returned {db_result['rows_returned']} rows")
-            state["thinking_message"] = f"✅ Found {db_result['rows_returned']} results"
-            self._emit_progress(state, "execute", f"✅ Found {db_result['rows_returned']} results")
+            state["thinking_message"] = f"Found {db_result['rows_returned']} results"
+            self._emit_progress(state, "execute", f"Found {db_result['rows_returned']} results")
 
             # Step 3: Compute statistics if needed
             if len(db_result["data"]) > 0 and state.get("intent") != QueryIntent.SIMPLE_STAT:
-                state["thinking_message"] = "📊 Calculating statistics..."
-                self._emit_progress(state, "execute", "📊 Calculating statistics...")
+                state["thinking_message"] = "Calculating statistics..."
+                self._emit_progress(state, "execute", "Calculating statistics...")
 
                 # Get analysis types from analyze_depth node
                 analysis_types = state.get("analysis_types", ["average"])
@@ -631,8 +631,8 @@ Current user question: {state["user_query"]}"""
 
                 # Step 4: Add context enrichment for in-depth mode
                 if state.get("analysis_mode") == "in_depth":
-                    state["thinking_message"] = "🔍 Enriching context..."
-                    self._emit_progress(state, "execute", "🔍 Enriching context...")
+                    state["thinking_message"] = "Enriching context..."
+                    self._emit_progress(state, "execute", "Enriching context...")
                     entities = state.get("entities", {})
                     teams = entities.get("teams", [])
                     seasons = entities.get("seasons", [])
@@ -682,8 +682,8 @@ Current user question: {state["user_query"]}"""
         - thinking_message
         """
         state["current_step"] = WorkflowStep.VISUALIZE
-        state["thinking_message"] = "📈 Creating visualization..."
-        self._emit_progress(state, "visualize", "📈 Creating visualization...")
+        state["thinking_message"] = "Creating visualization..."
+        self._emit_progress(state, "visualize", "Creating visualization...")
 
         logger.info("VISUALIZE: Generating chart")
 
@@ -812,8 +812,8 @@ Current user question: {state["user_query"]}"""
             state["visualization_spec"] = chart_spec
 
             logger.info(f"Chart generated: {chart_type}")
-            state["thinking_message"] = f"✅ Chart created ({chart_type})"
-            self._emit_progress(state, "visualize", f"✅ Chart created ({chart_type})")
+            state["thinking_message"] = f"Chart created ({chart_type})"
+            self._emit_progress(state, "visualize", f"Chart created ({chart_type})")
 
         except Exception as e:
             logger.error(f"Error in VISUALIZE node: {e}")
@@ -1088,10 +1088,45 @@ Current user question: {state["user_query"]}"""
             analysis_mode = state.get("analysis_mode", "summary")
             intent = state.get("intent")
 
+            # Format query results - show more data for round-by-round or breakdown queries
+            # These queries need full data to generate accurate summaries
+            query_lower = state['user_query'].lower()
+            is_breakdown_query = any(term in query_lower for term in ['by round', 'round by round', 'each round', 'per round', 'breakdown', 'by game', 'by match'])
+
+            results_df = state['query_results']
+            if is_breakdown_query or len(results_df) <= 50:
+                # Show all results for breakdown queries or smaller result sets
+                results_text = results_df.to_string()
+            elif len(results_df) <= 100:
+                # For medium result sets, show first 50
+                results_text = results_df.head(50).to_string() + f"\n... ({len(results_df)} total rows)"
+            else:
+                # For large result sets, show first 30 with note
+                results_text = results_df.head(30).to_string() + f"\n... ({len(results_df)} total rows)"
+
+            # Capability constraints to prevent hallucinations
+            capability_constraints = """
+SYSTEM CAPABILITIES (be honest about what you can and cannot do):
+✓ CAN DO: Query AFL statistics from the database (1990-2025), show match results, player stats, team performance
+✓ CAN DO: Generate visualizations and charts displayed in the chat interface
+✓ CAN DO: Compare players, teams, and seasons
+✓ CAN DO: Answer questions about historical AFL data
+
+✗ CANNOT DO: Export data to CSV, Excel, or any file format
+✗ CANNOT DO: Download or email reports
+✗ CANNOT DO: Access live/real-time data or external websites
+✗ CANNOT DO: Make predictions about future games
+✗ CANNOT DO: Access data outside of AFL statistics (no other sports, no betting odds)
+
+NEVER claim you can do something not listed above. If asked about unsupported features, politely explain what IS possible instead.
+"""
+
             # Build prompt based on mode
             if analysis_mode == "summary" or intent == QueryIntent.SIMPLE_STAT:
                 # SUMMARY MODE: Direct, concise answers
                 prompt = f"""You are an AFL analytics expert. Answer the user's question directly and concisely.
+
+{capability_constraints}
 
 CRITICAL RULES for simple stat queries:
 - Answer in 1-2 sentences MAX
@@ -1104,33 +1139,55 @@ CRITICAL RULES for simple stat queries:
 {conversation_context_text}User asked: {state['user_query']}
 
 Query results:
-{state['query_results'].to_string() if len(state['query_results']) < 20 else state['query_results'].head(10).to_string()}
+{results_text}
 
 Provide a direct, concise answer (1-2 sentences):"""
 
             else:
-                # IN-DEPTH MODE: Rich analysis with context
-                prompt = f"""You are an AFL analytics expert. Generate a comprehensive analysis of the query results.
+                # Check if we're showing a chart
+                has_chart = state.get("visualization_spec") is not None
 
-Guidelines for in-depth analysis:
-- Provide rich context and deeper insights
-- Include specific numbers from both query results AND statistical insights
-- Highlight patterns, trends, and meaningful insights from the statistical analysis
-- Include contextual insights like form, home advantage, historical rankings when available
+                if has_chart:
+                    # CHART MODE: Very brief text, let the chart do the talking
+                    prompt = f"""You are an AFL analytics expert. A chart is being displayed to the user.
+
+{capability_constraints}
+
+CRITICAL: Keep your response VERY SHORT (2-3 sentences max).
+- Briefly state what the chart shows
+- Mention 1-2 key insights or standout data points
+- Do NOT describe every data point - the chart shows that
+- Do NOT write paragraphs of analysis
+
+{conversation_context_text}User query: {state['user_query']}
+
+Key stats: {stats_summary}
+
+Write a brief 2-3 sentence summary to accompany the chart:"""
+                else:
+                    # IN-DEPTH MODE: Concise but informative analysis
+                    prompt = f"""You are an AFL analytics expert. Provide a focused analysis of the query results.
+
+{capability_constraints}
+
+Guidelines:
+- Keep response to 3-5 sentences MAX
+- Lead with the key finding or answer
+- Include 2-3 specific numbers that matter most
+- Mention one interesting insight or pattern
 - Use Australian football terminology correctly
 - Never mention SQL, databases, or technical details
-- Write in a friendly, conversational tone
-- If this is a follow-up question, reference the previous conversation naturally
+- Be conversational but concise
 
 {conversation_context_text}Current user query: {state['user_query']}
 
 Query results:
-{state['query_results'].to_string() if len(state['query_results']) < 20 else state['query_results'].head(10).to_string()}
+{results_text}
 
 Statistical Insights:
 {stats_summary}{context_text}
 
-Generate a comprehensive analysis using these insights:"""
+Provide a concise analysis (3-5 sentences):"""
 
             # Generate response using GPT-5-nano (Responses API)
             response = client.responses.create(
@@ -1151,8 +1208,8 @@ Generate a comprehensive analysis using these insights:"""
             state["natural_language_summary"] = response.output_text.strip()
             state["confidence"] = 0.9
             state["sources"] = ["AFL Tables (1990-2025)"]
-            state["thinking_message"] = "✅ Response complete!"
-            self._emit_progress(state, "respond", "✅ Response complete!")
+            state["thinking_message"] = "Response complete"
+            self._emit_progress(state, "respond", "Response complete")
 
             logger.info("Response generated successfully")
 

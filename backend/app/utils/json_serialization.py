@@ -6,6 +6,7 @@ Handles conversion of non-JSON-serializable Python objects to JSON-compatible fo
 from datetime import datetime, date
 from typing import Any
 import pandas as pd
+import numpy as np
 from decimal import Decimal
 
 
@@ -16,6 +17,8 @@ def make_json_serializable(obj: Any) -> Any:
     Handles:
     - datetime/date/Timestamp → ISO format strings
     - Decimal → float
+    - numpy int/float types → Python int/float
+    - numpy arrays → lists
     - pandas DataFrame → dict
     - pandas Series → list
     - Sets → lists
@@ -31,6 +34,25 @@ def make_json_serializable(obj: Any) -> Any:
     if obj is None:
         return None
 
+    # Handle numpy integer types (must check before regular int)
+    if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+        return int(obj)
+
+    # Handle numpy float types (must check before regular float)
+    if isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+        # Handle NaN values
+        if np.isnan(obj):
+            return None
+        return float(obj)
+
+    # Handle numpy bool
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+
+    # Handle numpy arrays
+    if isinstance(obj, np.ndarray):
+        return [make_json_serializable(item) for item in obj.tolist()]
+
     # Handle datetime/date/Timestamp
     if isinstance(obj, (datetime, date, pd.Timestamp)):
         return obj.isoformat()
@@ -45,11 +67,11 @@ def make_json_serializable(obj: Any) -> Any:
 
     # Handle pandas Series
     if isinstance(obj, pd.Series):
-        return obj.tolist()
+        return [make_json_serializable(item) for item in obj.tolist()]
 
     # Handle dictionaries recursively
     if isinstance(obj, dict):
-        return {key: make_json_serializable(value) for key, value in obj.items()}
+        return {str(key): make_json_serializable(value) for key, value in obj.items()}
 
     # Handle lists/tuples recursively
     if isinstance(obj, (list, tuple)):

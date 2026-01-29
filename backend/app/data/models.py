@@ -150,6 +150,9 @@ class PlayerStat(Base):
     player_id = Column(
         Integer, ForeignKey("players.id", ondelete="CASCADE"), nullable=False
     )
+    team_id = Column(
+        Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+    )  # Team player was playing FOR in this match (handles trades correctly)
     disposals = Column(Integer, default=0)
     kicks = Column(Integer, default=0)
     handballs = Column(Integer, default=0)
@@ -182,9 +185,10 @@ class PlayerStat(Base):
     # Relationships
     match = relationship("Match", back_populates="player_stats")
     player = relationship("Player", back_populates="player_stats")
+    team = relationship("Team")  # Team player was on for this specific match
 
     def __repr__(self):
-        return f"<PlayerStat Match:{self.match_id} Player:{self.player_id}>"
+        return f"<PlayerStat Match:{self.match_id} Player:{self.player_id} Team:{self.team_id}>"
 
 
 class TeamStat(Base):
@@ -293,3 +297,19 @@ class Conversation(Base):
 
     def __repr__(self):
         return f"<Conversation {self.id}>"
+
+
+class PageView(Base):
+    """Simple analytics - page view tracking."""
+
+    __tablename__ = "page_views"
+
+    id = Column(Integer, primary_key=True)
+    visitor_id = Column(String(100), nullable=False, index=True)
+    page = Column(String(200), nullable=False)
+    referrer = Column(String(500))
+    user_agent = Column(String(500))
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f"<PageView {self.page} by {self.visitor_id}>"

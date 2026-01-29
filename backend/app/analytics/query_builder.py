@@ -60,7 +60,7 @@ class QueryBuilder:
 ### matches
 - id (INTEGER, PRIMARY KEY)
 - season (INTEGER) - Year (e.g., 2024)
-- round (VARCHAR) - Round number as string. Regular rounds: "0", "1", "2", ... "24" (numeric strings WITHOUT "Round " prefix). Finals rounds: "Qualifying Final", "Elimination Final", "Semi Final", "Preliminary Final", "Grand Final". CRITICAL: When querying round-by-round data for a season, ALWAYS include both regular AND finals rounds - do NOT filter to only numeric rounds.
+- round (VARCHAR) - Round number as string. Regular rounds: "0", "1", "2", ... "24" (numeric strings WITHOUT "Round " prefix). Round "0" is the "Opening Round" introduced in 2024 (4 matches before Round 1). Finals rounds: "Qualifying Final", "Elimination Final", "Semi Final", "Preliminary Final", "Grand Final". CRITICAL: When querying round-by-round data for a season, ALWAYS include both regular AND finals rounds - do NOT filter to only numeric rounds.
 - match_date (TIMESTAMP) - **IMPORTANT: Use match_date, not date**
 - home_team_id (INTEGER, FOREIGN KEY -> teams.id)
 - away_team_id (INTEGER, FOREIGN KEY -> teams.id)
@@ -82,16 +82,23 @@ class QueryBuilder:
 ### players
 - id (INTEGER, PRIMARY KEY)
 - name (VARCHAR)
-- team_id (INTEGER, FOREIGN KEY -> teams.id)
+- team_id (INTEGER, FOREIGN KEY -> teams.id) - **WARNING: This is the player's CURRENT team, NOT their historical team**
 - position (VARCHAR)
 - height (INTEGER) - in cm
 - weight (INTEGER) - in kg
 - debut_year (INTEGER)
 - created_at, updated_at (TIMESTAMP)
 
+**CRITICAL - players.team_id Limitation**:
+- players.team_id reflects the player's CURRENT team, not the team they played for historically
+- If a player was traded (e.g., Patrick Dangerfield: Adelaide → Geelong in 2016), their team_id shows their current team
+- DO NOT use players.team_id to aggregate team stats from player_stats - it will give WRONG results for traded players
+- For TEAM aggregate stats (total goals, disposals, etc.), use the matches table scores instead
+
 ### player_stats
 - match_id (INTEGER, FOREIGN KEY -> matches.id)
 - player_id (INTEGER, FOREIGN KEY -> players.id)
+- team_id (INTEGER, FOREIGN KEY -> teams.id) - **The team the player was playing FOR in this match** (handles trades correctly!)
 - disposals (INTEGER)
 - kicks (INTEGER)
 - handballs (INTEGER)
@@ -124,13 +131,18 @@ class QueryBuilder:
 
 ## Important Notes
 - **Data Availability**:
-  * Match-level data: 1990-2025 (6,000+ matches)
-  * Player statistics: 1990-2024 (excluding 1994, 2017) + very limited 2025 (12,615 players, 230,000+ match-level stats)
-  * **2025 data is VERY LIMITED** - only 1-2 matches available, warn users that 2025 season data is incomplete
+  * Match-level data: 1990-2025 (6,370 matches)
+  * Player statistics: Complete coverage for ALL seasons 1990-2025 including finals (~273,600 player-match records)
+  * 2025 season: COMPLETE data available - all rounds 1-25 plus finals (Qualifying Final, Semi Final, Preliminary Final, Grand Final)
 - **Team Names**: Use the teams table to get correct team names and IDs
 - **Finals**: Finals rounds have string names like "Qualifying Final", "Grand Final". ALWAYS include finals in round-by-round queries for a season - they are part of the season data.
 - **Scoring**: home_score and away_score are total points (goals × 6 + behinds)
 - **Player Queries**: Join players and player_stats with matches to get per-match player performance
+- **Team Statistics from player_stats**:
+  * player_stats has a team_id column that correctly identifies which team the player was playing FOR in each match
+  * Use player_stats.team_id (NOT players.team_id) when aggregating stats by team
+  * Example: "Geelong total goals in 2023" → JOIN player_stats ps ON teams t WHERE ps.team_id = t.id
+  * players.team_id shows current team and is WRONG for traded players - always use player_stats.team_id instead
 """
 
     SYSTEM_PROMPT = """You are an expert SQL query generator for an AFL (Australian Football League) database.
@@ -151,17 +163,36 @@ Guidelines:
 11. NEVER use CROSS JOIN - it creates a Cartesian product and returns wrong results
 12. CRITICAL: When using GROUP BY, ALL non-aggregated columns in SELECT must appear in GROUP BY clause
 13. For win/loss ratios, use direct aggregation without subqueries when possible
+14. When using ORDER BY DESC for statistics, add NULLS LAST to prevent NULL values from appearing first
+15. For "top" or "most" queries, filter out NULL values: WHERE column IS NOT NULL
 
 Common Patterns:
 - Team's season stats: Filter matches with WHERE (home_team_id = X OR away_team_id = X)
 - Use CASE statements to calculate team-specific stats from home/away columns
 - Win/loss ratios: Use SUM with CASE for wins/losses, then calculate ratio directly (no subquery needed)
 
-IMPORTANT - For "team performance" or "by round" queries:
+CRITICAL - Team Stats from player_stats:
+- player_stats has a team_id column that correctly tracks which team each player was playing FOR in that match
+- ALWAYS use player_stats.team_id when aggregating stats by team (e.g., "Geelong goals in 2023")
+- NEVER use players.team_id for team aggregations - it shows current team and is WRONG for traded players
+- Example CORRECT: SELECT SUM(ps.goals) FROM player_stats ps JOIN teams t ON ps.team_id = t.id WHERE t.name = 'Geelong'
+- Example WRONG: SELECT SUM(ps.goals) FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN teams t ON p.team_id = t.id
+
+IMPORTANT - "TEAM PERFORMANCE" Definition:
+When a user asks about a team's "performance", they want these key metrics:
+- Margin (points difference per game)
+- Win/loss ratio or record (wins, losses, win percentage)
+- Ladder position (if asking about final standings)
+
+For "team performance by round" or "performance in [season]" queries:
 - Return ROUND-BY-ROUND data (one row per match), NOT season aggregates
-- Include: round, match_date, opponent, score, result (Win/Loss/Draw), margin
+- Include: round, match_date, opponent, team_score, opponent_score, result (Win/Loss/Draw), margin
 - This allows visualization of performance trends over the season
 - Example: "Show me Richmond's performance in 2024" should return ~24 rows (one per round)
+
+For "team performance over time" or multi-season queries:
+- Return ONE ROW PER SEASON with: season, wins, losses, win_pct, avg_margin
+- Example: "Adelaide's performance over time" → returns yearly win/loss ratios and margins
 
 CRITICAL - ALWAYS INCLUDE FINALS when querying round-by-round data for a season:
 - Regular rounds are stored as: '0', '1', '2', ... '24'
@@ -179,17 +210,36 @@ CRITICAL - For TEMPORAL/TREND queries (over time, across time, year-by-year, his
 - Each year should be a separate row to enable proper time-series visualization
 - Minimum data points for useful charts: At least 3-5 time periods
 
-Example for team performance:
+Example for team performance (single season, by round):
 SELECT
   m.round,
   m.match_date,
-  opponent.name AS opponent,
-  CASE WHEN home THEN home_score ELSE away_score END AS team_score,
-  CASE WHEN home THEN away_score ELSE home_score END AS opponent_score,
-  CASE WHEN won THEN 'Win' ELSE 'Loss' END AS result
+  opp.name AS opponent,
+  CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END AS team_score,
+  CASE WHEN m.home_team_id = t.id THEN m.away_score ELSE m.home_score END AS opponent_score,
+  CASE WHEN m.home_team_id = t.id THEN m.home_score - m.away_score ELSE m.away_score - m.home_score END AS margin,
+  CASE
+    WHEN (m.home_team_id = t.id AND m.home_score > m.away_score) OR (m.away_team_id = t.id AND m.away_score > m.home_score) THEN 'Win'
+    WHEN m.home_score = m.away_score THEN 'Draw'
+    ELSE 'Loss'
+  END AS result
 FROM matches m
-WHERE team matches
+JOIN teams t ON t.name = 'TeamName'
+JOIN teams opp ON opp.id = CASE WHEN m.home_team_id = t.id THEN m.away_team_id ELSE m.home_team_id END
+WHERE m.season = 2024 AND (m.home_team_id = t.id OR m.away_team_id = t.id)
 ORDER BY m.match_date
+
+Example for team performance (multi-season/over time):
+SELECT
+  m.season,
+  SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score) OR (m.away_team_id = t.id AND m.away_score > m.home_score) THEN 1 ELSE 0 END) AS wins,
+  SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score < m.away_score) OR (m.away_team_id = t.id AND m.away_score < m.home_score) THEN 1 ELSE 0 END) AS losses,
+  ROUND(AVG(CASE WHEN m.home_team_id = t.id THEN m.home_score - m.away_score ELSE m.away_score - m.home_score END), 1) AS avg_margin
+FROM matches m
+JOIN teams t ON t.name = 'TeamName'
+WHERE (m.home_team_id = t.id OR m.away_team_id = t.id)
+GROUP BY m.season
+ORDER BY m.season
 
 Return ONLY the SQL query, no explanations or markdown formatting."""
 

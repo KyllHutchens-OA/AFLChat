@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 @socketio.on('connect')
 def handle_connect():
     """Handle client connection."""
-    logger.info("Client connected")
+    from flask import request
+    session_id = request.sid
+    logger.info(f"Client connected - Session ID: {session_id}")
 
 
 @socketio.on('disconnect')
@@ -35,14 +37,21 @@ def handle_chat_message(data):
             "conversation_id": "uuid" (optional)
         }
     """
-    logger.info(f"Received message: {data}")
+    from flask import request
+    session_id = request.sid
+    logger.info(f"Received message from session {session_id}: {data}")
 
     try:
         user_query = data.get('message')
         conversation_id = data.get('conversation_id')
 
+        # Emit function - in Socket.IO event handler context, emit() sends to requesting client
+        def session_emit(event, data):
+            """Emit to the requesting client"""
+            socketio.emit(event, data)
+
         if not user_query:
-            socketio.emit('error', {'message': 'No message provided'})
+            session_emit('error', {'message': 'No message provided'})
             return
 
         # Import agent
@@ -52,7 +61,7 @@ def handle_chat_message(data):
         # Create or load conversation
         if not conversation_id:
             conversation_id = ConversationService.create_conversation()
-            socketio.emit('conversation_started', {'conversation_id': conversation_id})
+            session_emit('conversation_started', {'conversation_id': conversation_id})
             logger.info(f"Created new conversation: {conversation_id}")
         else:
             logger.info(f"Continuing conversation: {conversation_id}")
@@ -65,7 +74,7 @@ def handle_chat_message(data):
         )
 
         # Initial progress update
-        socketio.emit('thinking', {'step': '🔍 Received your question...', 'current_step': 'received'})
+        session_emit('thinking', {'step': 'Received your question...', 'current_step': 'received'})
 
         # Get conversation history for context
         conversation_history = ConversationService.get_recent_messages(
@@ -78,34 +87,81 @@ def handle_chat_message(data):
         final_state = asyncio.run(agent.run(
             user_query=user_query,
             conversation_id=conversation_id,
-            socketio_emit=socketio.emit,  # Pass emit callback for real-time updates
+            socketio_emit=session_emit,  # Pass session-specific emit
             conversation_history=conversation_history
         ))
         logger.info(f"Agent completed, final state keys: {final_state.keys()}")
 
         # Send visualization if available
+        chart_sent = False
         if final_state.get('visualization_spec'):
-            socketio.emit('visualization', {
-                'spec': final_state['visualization_spec']
-            })
+            logger.info("Emitting 'visualization' event to frontend")
+            try:
+                import json
+                # Ensure visualization spec is JSON-serializable (convert numpy types, etc.)
+                viz_spec = make_json_serializable(final_state['visualization_spec'])
+                logger.info(f"Visualization spec type: {type(viz_spec)}")
+                logger.info(f"Visualization spec keys: {viz_spec.keys() if isinstance(viz_spec, dict) else 'N/A'}")
+
+                viz_data = {'spec': viz_spec}
+                # Test serialization
+                serialized = json.dumps(viz_data, ensure_ascii=True)
+                logger.info(f"Serialized viz length: {len(serialized)} bytes")
+
+                session_emit('visualization', viz_data)
+                logger.info("Successfully emitted 'visualization' event")
+                chart_sent = True
+            except Exception as e:
+                logger.error(f"Error with visualization: {e}")
+                logger.error(f"Visualization spec preview: {str(final_state['visualization_spec'])[:200]}")
+                # Skip visualization if it can't be serialized
+                chart_sent = False
 
         # Send response
         response_text = ""
         if final_state.get('natural_language_summary'):
             response_text = final_state['natural_language_summary']
-            socketio.emit('response', {
-                'text': response_text,
-                'confidence': final_state.get('confidence', 0.0),
-                'sources': final_state.get('sources', [])
-            })
+            logger.info(f"Emitting 'response' event with text length={len(response_text)}")
+
+            # Ensure response text is clean and serializable
+            try:
+                # Remove any control characters that might break WebSocket frames
+                import re
+                clean_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', response_text)
+
+                response_data = {
+                    'text': clean_text,
+                    'confidence': float(final_state.get('confidence', 0.0)),
+                    'sources': final_state.get('sources', []) or []
+                }
+
+                # Test JSON serialization before emitting
+                import json
+                json.dumps(response_data)
+
+                session_emit('response', response_data)
+                logger.info("Successfully emitted 'response' event")
+            except Exception as e:
+                logger.error(f"Error serializing response: {e}")
+                logger.error(f"Response text preview: {response_text[:200]}")
+                session_emit('response', {
+                    'text': 'I generated a response but encountered an encoding error. Please try rephrasing your question.',
+                    'confidence': 0.0,
+                    'sources': []
+                })
         else:
             response_text = 'I was unable to process your query.'
-            socketio.emit('response', {
+            logger.info("Emitting 'response' event with error text")
+            session_emit('response', {
                 'text': response_text,
                 'confidence': 0.0
             })
 
-        # Save assistant response to conversation
+        # Send completion IMMEDIATELY (before slow database save)
+        logger.info(f"Emitting 'complete' event with conversation_id={conversation_id}")
+        session_emit('complete', {'conversation_id': conversation_id})
+
+        # Save assistant response to conversation (in background, after sending complete)
         # Sanitize metadata to ensure JSON serializability (remove Timestamp objects, etc.)
         logger.info(f"Preparing to save assistant response to conversation {conversation_id}")
         metadata = {
@@ -113,8 +169,13 @@ def handle_chat_message(data):
             "intent": str(final_state.get("intent", "")),
             "confidence": final_state.get("confidence", 0.0),
             "needs_clarification": final_state.get("needs_clarification", False),
-            "clarification_question": final_state.get("clarification_question")
+            "clarification_question": final_state.get("clarification_question"),
+            "sources": final_state.get("sources", [])
         }
+
+        # Store visualization spec if chart was generated (for history restoration)
+        if chart_sent and final_state.get("visualization_spec"):
+            metadata["visualization"] = make_json_serializable(final_state["visualization_spec"])
 
         # If this was a clarification, include the candidate options for easy retrieval
         if final_state.get("needs_clarification") and final_state.get("entities"):
@@ -138,14 +199,15 @@ def handle_chat_message(data):
         else:
             logger.error(f"Failed to save assistant response to conversation {conversation_id}")
 
-        # Send completion
-        socketio.emit('complete', {'conversation_id': conversation_id})
-
     except Exception as e:
         logger.error(f"Error processing message: {e}")
         import traceback
         traceback.print_exc()
-        socketio.emit('error', {'message': f'Error: {str(e)}'})
+        # session_emit might not be defined if error happens early
+        try:
+            session_emit('error', {'message': f'Error: {str(e)}'})
+        except:
+            socketio.emit('error', {'message': f'Error: {str(e)}'}, room=session_id)
 
 
 @socketio.on('resume_message')
