@@ -82,10 +82,27 @@ class DatabaseTool:
                 session.close()
 
         except Exception as e:
-            logger.error(f"Database query error: {e}")
+            import traceback
+            tb = traceback.format_exc()
+            error_type = type(e).__name__
+            error_msg = str(e)
+            logger.error(f"Database query error ({error_type}): {error_msg}\n{tb}")
+
+            # Check for common database errors
+            if "connection" in error_msg.lower() or "connect" in error_msg.lower():
+                error_msg = f"Database connection error: {error_msg}"
+            elif "timeout" in error_msg.lower():
+                error_msg = f"Database timeout: {error_msg}"
+            elif "permission" in error_msg.lower() or "denied" in error_msg.lower():
+                error_msg = f"Database permission denied: {error_msg}"
+            elif "ssl" in error_msg.lower():
+                error_msg = f"Database SSL error: {error_msg}"
+            else:
+                error_msg = f"Database error ({error_type}): {error_msg}"
+
             return {
                 "success": False,
-                "error": f"Database error: {str(e)}",
+                "error": error_msg,
                 "data": None,
                 "rows_returned": 0
             }

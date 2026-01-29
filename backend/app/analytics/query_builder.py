@@ -364,11 +364,24 @@ Question: {user_query}"""
             }
 
         except Exception as e:
-            logger.error(f"SQL generation error: {e}")
+            import traceback
+            tb = traceback.format_exc()
+            error_type = type(e).__name__
+            error_msg = f"{error_type}: {str(e)}"
+            logger.error(f"SQL generation error: {error_msg}\n{tb}")
+
+            # Check for common OpenAI API errors
+            if "api_key" in str(e).lower() or "authentication" in str(e).lower():
+                error_msg = "OpenAI API key error - check OPENAI_API_KEY environment variable"
+            elif "rate_limit" in str(e).lower() or "429" in str(e):
+                error_msg = "OpenAI rate limit exceeded - please try again"
+            elif "connection" in str(e).lower() or "network" in str(e).lower():
+                error_msg = f"Network error connecting to OpenAI: {str(e)}"
+
             return {
                 "success": False,
                 "sql": None,
-                "error": str(e),
+                "error": error_msg,
                 "explanation": None
             }
 

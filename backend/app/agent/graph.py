@@ -577,9 +577,11 @@ Current user question: {state["user_query"]}"""
             )
 
             if not sql_result["success"]:
-                state["execution_error"] = sql_result["error"]
-                state["errors"].append(sql_result["error"])
-                state["thinking_message"] = f"❌ Error: {sql_result['error']}"
+                error_msg = f"SQL generation failed: {sql_result['error']}"
+                logger.error(error_msg)
+                state["execution_error"] = error_msg
+                state["errors"].append(error_msg)
+                state["thinking_message"] = f"❌ Error: {error_msg}"
                 return state
 
             state["sql_query"] = sql_result["sql"]
@@ -591,9 +593,11 @@ Current user question: {state["user_query"]}"""
             db_result = DatabaseTool.query_database(state["sql_query"])
 
             if not db_result["success"]:
-                state["execution_error"] = db_result["error"]
-                state["errors"].append(db_result["error"])
-                state["thinking_message"] = f"❌ Query failed: {db_result['error']}"
+                error_msg = f"Database query failed: {db_result['error']}"
+                logger.error(f"{error_msg} | SQL: {state.get('sql_query', 'N/A')}")
+                state["execution_error"] = error_msg
+                state["errors"].append(error_msg)
+                state["thinking_message"] = f"❌ Query failed: {error_msg}"
                 return state
 
             state["sql_validated"] = True
@@ -666,10 +670,13 @@ Current user question: {state["user_query"]}"""
                             # Don't fail the whole request if enrichment fails
 
         except Exception as e:
-            logger.error(f"Error in EXECUTE node: {e}")
-            state["execution_error"] = str(e)
-            state["errors"].append(f"Execution error: {str(e)}")
-            state["thinking_message"] = f"❌ Error: {str(e)}"
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"Error in EXECUTE node: {e}\n{tb}")
+            error_msg = f"Execution error: {str(e)}"
+            state["execution_error"] = error_msg
+            state["errors"].append(error_msg)
+            state["thinking_message"] = f"❌ Error: {error_msg}"
 
         return state
 
@@ -960,9 +967,14 @@ Current user question: {state["user_query"]}"""
 
             # Check for errors
             if state.get("execution_error"):
+                error_detail = state.get("execution_error", "Unknown error")
+                logger.error(f"RESPOND node detected execution_error: {error_detail}")
+
+                # Include error details for debugging (helps diagnose deployment issues)
                 state["natural_language_summary"] = (
-                    "I encountered an issue while analyzing your query. "
-                    "Could you rephrase your question?"
+                    f"I encountered an issue while analyzing your query.\n\n"
+                    f"**Debug info:** {error_detail}\n\n"
+                    f"Please check your query or try rephrasing."
                 )
                 state["confidence"] = 0.0
                 return state
