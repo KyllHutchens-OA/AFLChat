@@ -41,8 +41,12 @@ class DatabaseTool:
             - rows_returned: int
         """
         try:
+            logger.info(f"DatabaseTool.query_database called with SQL length={len(sql)}")
+            logger.info(f"SQL preview: {sql[:300]}...")
+
             # Validate SQL
             is_valid, error_message = SQLValidator.validate(sql)
+            logger.info(f"SQL validation result: is_valid={is_valid}, error={error_message}")
 
             if not is_valid:
                 logger.warning(f"SQL validation failed: {error_message}")
@@ -54,11 +58,15 @@ class DatabaseTool:
                 }
 
             # Execute query
+            logger.info("DatabaseTool: Creating database session...")
             session = Session()
+            logger.info("DatabaseTool: Session created, executing query...")
 
             try:
                 result = session.execute(text(sql))
+                logger.info("DatabaseTool: Query executed, fetching results...")
                 df = pd.DataFrame(result.fetchall(), columns=result.keys())
+                logger.info(f"DatabaseTool: Results fetched, {len(df)} rows")
 
                 # Convert Decimal types to float for JSON serialization
                 if len(df) > 0:

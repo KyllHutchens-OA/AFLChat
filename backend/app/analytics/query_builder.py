@@ -261,6 +261,8 @@ Return ONLY the SQL query, no explanations or markdown formatting."""
             - explanation: str (what the query does)
         """
         try:
+            logger.info(f"QueryBuilder.generate_sql called with query='{user_query[:100]}', context={context}")
+
             # Build prompt with schema context
             prompt_text = f"""{QueryBuilder.SYSTEM_PROMPT}
 
@@ -327,20 +329,26 @@ Question: {user_query}"""
             prompt_text += "\n\nGenerate the SQL query:"
 
             # Call GPT-5-nano (cheapest and fastest) using Responses API
-            response = client.responses.create(
-                model="gpt-5-nano",
-                input=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": prompt_text
-                            }
-                        ]
-                    }
-                ]
-            )
+            logger.info(f"QueryBuilder: Calling OpenAI API (gpt-5-nano)...")
+            try:
+                response = client.responses.create(
+                    model="gpt-5-nano",
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "input_text",
+                                    "text": prompt_text
+                                }
+                            ]
+                        }
+                    ]
+                )
+                logger.info(f"QueryBuilder: OpenAI API call successful")
+            except Exception as api_error:
+                logger.error(f"QueryBuilder: OpenAI API call FAILED: {type(api_error).__name__}: {str(api_error)}")
+                raise
 
             sql = response.output_text.strip()
 

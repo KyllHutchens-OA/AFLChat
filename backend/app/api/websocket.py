@@ -119,9 +119,11 @@ def handle_chat_message(data):
 
         # Send response
         response_text = ""
+        logger.info(f"WebSocket: Checking final_state for response - errors={final_state.get('errors')}, execution_error={final_state.get('execution_error')}")
         if final_state.get('natural_language_summary'):
             response_text = final_state['natural_language_summary']
             logger.info(f"Emitting 'response' event with text length={len(response_text)}")
+            logger.info(f"Response preview: {response_text[:200]}...")
 
             # Ensure response text is clean and serializable
             try:

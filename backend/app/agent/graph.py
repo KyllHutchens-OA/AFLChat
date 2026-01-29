@@ -316,6 +316,7 @@ class AFLAnalyticsAgent:
                 conversation_context += "\nUse this context to resolve ambiguous references (e.g., 'What about 2023?' or 'Compare them').\n---\n\n"
 
             # Use GPT-5-nano to understand the query (Responses API)
+            logger.info("UNDERSTAND: Calling OpenAI API (gpt-5-nano) for query understanding...")
             response = client.responses.create(
                 model="gpt-5-nano",
                 input=[
@@ -367,7 +368,9 @@ Current user question: {state["user_query"]}"""
             )
 
             import json
+            logger.info(f"UNDERSTAND: OpenAI API call successful, parsing response...")
             understanding = json.loads(response.output_text)
+            logger.info(f"UNDERSTAND: Parsed understanding: intent={understanding.get('intent')}, entities={understanding.get('entities')}")
 
             state["intent"] = QueryIntent(understanding.get("intent", "unknown"))
             raw_entities = understanding.get("entities", {})
@@ -393,7 +396,10 @@ Current user question: {state["user_query"]}"""
             logger.info(f"Intent: {state['intent']}, Raw entities: {raw_entities}, Resolved entities: {state['entities']}")
 
         except Exception as e:
-            logger.error(f"Error in UNDERSTAND node: {e}")
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"UNDERSTAND: Exception caught: {type(e).__name__}: {str(e)}")
+            logger.error(f"UNDERSTAND: Full traceback:\n{tb}")
             state["errors"].append(f"Understanding error: {str(e)}")
 
         return state
@@ -570,15 +576,17 @@ Current user question: {state["user_query"]}"""
             # Step 1: Generate SQL from natural language
             # Use RESOLVED entities (normalized team names, validated seasons, etc.)
             # Pass conversation history to resolve ambiguous references like "this", "them", etc.
+            logger.info(f"EXECUTE: Calling QueryBuilder.generate_sql with query='{state['user_query'][:100]}', entities={state.get('entities')}")
             sql_result = QueryBuilder.generate_sql(
                 state["user_query"],
                 context=state["entities"],  # These are now validated/normalized
                 conversation_history=state.get("conversation_history", [])
             )
+            logger.info(f"EXECUTE: SQL generation result: success={sql_result.get('success')}, error={sql_result.get('error')}")
 
             if not sql_result["success"]:
                 error_msg = f"SQL generation failed: {sql_result['error']}"
-                logger.error(error_msg)
+                logger.error(f"EXECUTE: {error_msg}")
                 state["execution_error"] = error_msg
                 state["errors"].append(error_msg)
                 state["thinking_message"] = f"❌ Error: {error_msg}"
@@ -590,7 +598,9 @@ Current user question: {state["user_query"]}"""
             # Step 2: Execute query
             state["thinking_message"] = "⚡ Querying AFL database (6,243 matches)..."
             self._emit_progress(state, "execute", "⚡ Querying AFL database (6,243 matches)...")
+            logger.info(f"EXECUTE: Calling DatabaseTool.query_database with SQL: {state['sql_query'][:200]}...")
             db_result = DatabaseTool.query_database(state["sql_query"])
+            logger.info(f"EXECUTE: Database query result: success={db_result.get('success')}, rows={db_result.get('rows_returned')}, error={db_result.get('error')}")
 
             if not db_result["success"]:
                 error_msg = f"Database query failed: {db_result['error']}"
@@ -966,9 +976,10 @@ Current user question: {state["user_query"]}"""
                 return state
 
             # Check for errors
+            logger.info(f"RESPOND: Checking state - execution_error={state.get('execution_error')}, query_results type={type(state.get('query_results'))}, errors={state.get('errors')}")
             if state.get("execution_error"):
                 error_detail = state.get("execution_error", "Unknown error")
-                logger.error(f"RESPOND node detected execution_error: {error_detail}")
+                logger.error(f"RESPOND: execution_error detected: {error_detail}")
 
                 # Include error details for debugging (helps diagnose deployment issues)
                 state["natural_language_summary"] = (
@@ -977,6 +988,7 @@ Current user question: {state["user_query"]}"""
                     f"Please check your query or try rephrasing."
                 )
                 state["confidence"] = 0.0
+                logger.info(f"RESPOND: Returning error response with debug info")
                 return state
 
             # Check if we have results
@@ -1226,8 +1238,11 @@ Provide a concise analysis (3-5 sentences):"""
             logger.info("Response generated successfully")
 
         except Exception as e:
-            logger.error(f"Error in RESPOND node: {e}")
-            state["natural_language_summary"] = "I encountered an issue generating the response."
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"RESPOND: Exception caught: {type(e).__name__}: {str(e)}")
+            logger.error(f"RESPOND: Full traceback:\n{tb}")
+            state["natural_language_summary"] = f"I encountered an issue generating the response. Error: {str(e)}"
             state["confidence"] = 0.0
             state["errors"].append(f"Response error: {str(e)}")
 
