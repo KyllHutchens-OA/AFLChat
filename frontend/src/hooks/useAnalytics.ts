@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 
 const VISITOR_ID_KEY = 'visitor_id';
-const API_URL = 'http://localhost:5001/api/analytics/track';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+const API_URL = `${BACKEND_URL}/api/analytics/track`;
 
 function getOrCreateVisitorId(): string {
   let visitorId = localStorage.getItem(VISITOR_ID_KEY);
