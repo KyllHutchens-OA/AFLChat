@@ -291,6 +291,7 @@ class Conversation(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(String(100))
+    chat_type = Column(String(20), nullable=False, default='afl', index=True)  # 'afl' or 'resume'
     messages = Column(JSONB, nullable=False, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -309,6 +310,7 @@ class PageView(Base):
     page = Column(String(200), nullable=False)
     referrer = Column(String(500))
     user_agent = Column(String(500))
+    ip_address = Column(String(45), index=True)  # IPv6 max length is 45 chars
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self):

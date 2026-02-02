@@ -131,12 +131,19 @@ def track_page_view():
         if not visitor_id or not page:
             return jsonify({'error': 'visitor_id and page required'}), 400
 
+        # Get client IP address (handles proxies via X-Forwarded-For)
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip_address:
+            # X-Forwarded-For can contain multiple IPs; take the first (client IP)
+            ip_address = ip_address.split(',')[0].strip()
+
         session = Session()
         page_view = PageView(
             visitor_id=visitor_id,
             page=page,
             referrer=referrer,
-            user_agent=user_agent
+            user_agent=user_agent,
+            ip_address=ip_address
         )
         session.add(page_view)
         session.commit()

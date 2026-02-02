@@ -60,9 +60,9 @@ def handle_chat_message(data):
 
         # Create or load conversation
         if not conversation_id:
-            conversation_id = ConversationService.create_conversation()
+            conversation_id = ConversationService.create_conversation(chat_type='afl')
             session_emit('conversation_started', {'conversation_id': conversation_id})
-            logger.info(f"Created new conversation: {conversation_id}")
+            logger.info(f"Created new AFL conversation: {conversation_id}")
         else:
             logger.info(f"Continuing conversation: {conversation_id}")
 
@@ -245,7 +245,7 @@ def handle_resume_message(data):
 
         # Create or load conversation (reuse same conversation service)
         if not conversation_id:
-            conversation_id = ConversationService.create_conversation()
+            conversation_id = ConversationService.create_conversation(chat_type='resume')
             session_emit('resume_conversation_started', {'conversation_id': conversation_id})
             logger.info(f"Created new resume conversation: {conversation_id}")
         else:

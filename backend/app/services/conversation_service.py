@@ -24,12 +24,13 @@ class ConversationService:
     """
 
     @classmethod
-    def create_conversation(cls, user_id: Optional[str] = None) -> str:
+    def create_conversation(cls, user_id: Optional[str] = None, chat_type: str = 'afl') -> str:
         """
         Create a new conversation.
 
         Args:
             user_id: Optional user identifier
+            chat_type: Type of chat ('afl' or 'resume')
 
         Returns:
             conversation_id (UUID string)
@@ -38,6 +39,7 @@ class ConversationService:
         try:
             conversation = Conversation(
                 user_id=user_id,
+                chat_type=chat_type,
                 messages=[]
             )
             session.add(conversation)
