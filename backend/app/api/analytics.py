@@ -14,7 +14,7 @@ from sqlalchemy import func, text
 
 logger = logging.getLogger(__name__)
 
-bp = Blueprint('analytics_dashboard', __name__, url_prefix='/analytics')
+bp = Blueprint('analytics_dashboard', __name__, url_prefix='/api/admin')
 
 AEDT = ZoneInfo('Australia/Sydney')
 
@@ -331,7 +331,7 @@ DASHBOARD_TEMPLATE = '''
                 <option value="24">Last 24 hours</option>
                 <option value="168">Last 7 days</option>
             </select>
-            <a href="/analytics/logout" class="btn">Logout</a>
+            <a href="/api/admin/logout" class="btn">Logout</a>
         </div>
     </div>
 
@@ -401,7 +401,7 @@ DASHBOARD_TEMPLATE = '''
 
         async function loadData() {
             const hours = document.getElementById('timeRange').value;
-            const res = await fetch('/analytics/data?hours=' + hours);
+            const res = await fetch('/api/admin/data?hours=' + hours);
             const data = await res.json();
 
             document.getElementById('totalViews').textContent = data.total_views;
