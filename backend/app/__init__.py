@@ -60,6 +60,10 @@ def create_app(config=None):
     from app.api import routes
     app.register_blueprint(routes.bp)
 
+    # Register analytics dashboard
+    from app.api import analytics
+    app.register_blueprint(analytics.bp)
+
     # Register WebSocket handlers
     from app.api import websocket
 
