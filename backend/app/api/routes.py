@@ -65,7 +65,9 @@ async def chat_message():
         try:
             data = ChatMessageRequest(**request.get_json())
         except ValidationError as e:
-            return jsonify({'error': 'Invalid input', 'details': e.errors()}), 400
+            details = [{'field': '.'.join(str(l) for l in err['loc']), 'message': err['msg']}
+                       for err in e.errors()]
+            return jsonify({'error': 'Invalid input', 'details': details}), 400
 
         message = data.message
         conversation_id = data.conversation_id
@@ -145,7 +147,9 @@ def track_page_view():
         try:
             data = PageViewRequest(**request.get_json())
         except ValidationError as e:
-            return jsonify({'error': 'Invalid input', 'details': e.errors()}), 400
+            details = [{'field': '.'.join(str(l) for l in err['loc']), 'message': err['msg']}
+                       for err in e.errors()]
+            return jsonify({'error': 'Invalid input', 'details': details}), 400
 
         # Get client IP address (handles proxies via X-Forwarded-For)
         ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
