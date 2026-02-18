@@ -6,6 +6,7 @@ Defines the agent workflow: UNDERSTAND → ANALYZE_DEPTH → PLAN → EXECUTE �
 from typing import Dict, Any, List
 from langgraph.graph import StateGraph, END
 from openai import OpenAI
+import httpx
 import os
 import logging
 from dotenv import load_dotenv
@@ -27,8 +28,12 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Initialize OpenAI client with timeout for production reliability
+# 60s total timeout, 10s connect timeout
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    timeout=httpx.Timeout(60.0, connect=10.0)
+)
 
 
 class AFLAnalyticsAgent:
@@ -601,30 +606,40 @@ Current user question: {state["user_query"]}"""
             state["sql_query"] = sql_result["sql"]
             logger.info(f"Generated SQL: {state['sql_query']}")
 
-            # Step 2: Execute query
-            state["thinking_message"] = "⚡ Querying AFL database (6,243 matches)..."
-            self._emit_progress(state, "execute", "⚡ Querying AFL database (6,243 matches)...")
-            logger.info(f"EXECUTE: Calling DatabaseTool.query_database with SQL: {state['sql_query'][:200]}...")
-            db_result = DatabaseTool.query_database(state["sql_query"])
-            logger.info(f"EXECUTE: Database query result: success={db_result.get('success')}, rows={db_result.get('rows_returned')}, error={db_result.get('error')}")
+            # Step 2: Execute query (check cache first)
+            from app.utils.cache import get_cached_result, set_cached_result
+            cached = get_cached_result(state["sql_query"])
+            if cached is not None:
+                logger.info("EXECUTE: Returning cached query result")
+                state["sql_validated"] = True
+                state["query_results"] = cached
+                state["thinking_message"] = f"Found {len(cached)} results (cached)"
+                self._emit_progress(state, "execute", f"Found {len(cached)} results")
+            else:
+                state["thinking_message"] = "⚡ Querying AFL database (6,243 matches)..."
+                self._emit_progress(state, "execute", "⚡ Querying AFL database (6,243 matches)...")
+                logger.info(f"EXECUTE: Calling DatabaseTool.query_database with SQL: {state['sql_query'][:200]}...")
+                db_result = DatabaseTool.query_database(state["sql_query"])
+                logger.info(f"EXECUTE: Database query result: success={db_result.get('success')}, rows={db_result.get('rows_returned')}, error={db_result.get('error')}")
 
-            if not db_result["success"]:
-                error_msg = f"Database query failed: {db_result['error']}"
-                logger.error(f"{error_msg} | SQL: {state.get('sql_query', 'N/A')}")
-                state["execution_error"] = error_msg
-                state["errors"].append(error_msg)
-                state["thinking_message"] = f"❌ Query failed: {error_msg}"
-                return state
+                if not db_result["success"]:
+                    error_msg = f"Database query failed: {db_result['error']}"
+                    logger.error(f"{error_msg} | SQL: {state.get('sql_query', 'N/A')}")
+                    state["execution_error"] = error_msg
+                    state["errors"].append(error_msg)
+                    state["thinking_message"] = f"❌ Query failed: {error_msg}"
+                    return state
 
-            state["sql_validated"] = True
-            state["query_results"] = db_result["data"]
+                state["sql_validated"] = True
+                state["query_results"] = db_result["data"]
+                set_cached_result(state["sql_query"], db_result["data"])
 
-            logger.info(f"Query returned {db_result['rows_returned']} rows")
-            state["thinking_message"] = f"Found {db_result['rows_returned']} results"
-            self._emit_progress(state, "execute", f"Found {db_result['rows_returned']} results")
+                logger.info(f"Query returned {db_result['rows_returned']} rows")
+                state["thinking_message"] = f"Found {db_result['rows_returned']} results"
+                self._emit_progress(state, "execute", f"Found {db_result['rows_returned']} results")
 
             # Step 3: Compute statistics if needed
-            if len(db_result["data"]) > 0 and state.get("intent") != QueryIntent.SIMPLE_STAT:
+            if len(state["query_results"]) > 0 and state.get("intent") != QueryIntent.SIMPLE_STAT:
                 state["thinking_message"] = "Calculating statistics..."
                 self._emit_progress(state, "execute", "Calculating statistics...")
 
@@ -636,7 +651,7 @@ Current user question: {state["user_query"]}"""
                 for analysis_type in analysis_types:
                     logger.info(f"Running {analysis_type} analysis")
                     stats_result = StatisticsTool.compute_statistics(
-                        db_result["data"],
+                        state["query_results"],
                         analysis_type=analysis_type,
                         params={}
                     )
@@ -666,13 +681,13 @@ Current user question: {state["user_query"]}"""
                             context = ContextEnricher.enrich_team_context(
                                 team_name=team_name,
                                 current_stats=combined_stats.get("average", {}),
-                                data=db_result["data"],
+                                data=state["query_results"],
                                 season=season
                             )
 
                             # Calculate efficiency metrics
                             efficiency = EfficiencyCalculator.calculate_all_efficiency_metrics(
-                                db_result["data"]
+                                state["query_results"]
                             )
 
                             if context:

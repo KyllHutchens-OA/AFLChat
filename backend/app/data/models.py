@@ -329,3 +329,22 @@ class AdminUser(Base):
 
     def __repr__(self):
         return f"<AdminUser {self.username}>"
+
+
+class APIUsage(Base):
+    """Track API usage for cost monitoring and rate limiting."""
+
+    __tablename__ = "api_usage"
+
+    id = Column(Integer, primary_key=True)
+    visitor_id = Column(String(100), nullable=False, index=True)
+    ip_address = Column(String(45), index=True)  # IPv6 max length
+    endpoint = Column(String(100))
+    model = Column(String(50))
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    estimated_cost_usd = Column(Numeric(10, 6))
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f"<APIUsage {self.visitor_id} ${self.estimated_cost_usd}>"

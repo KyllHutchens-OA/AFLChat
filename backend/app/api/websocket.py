@@ -6,10 +6,28 @@ Handles both AFL chat and Resume chat via WebSocket.
 from app import socketio
 from app.services.conversation_service import ConversationService
 from app.utils.json_serialization import make_json_serializable
+from app.middleware.usage_tracker import UsageTracker
+from collections import defaultdict
+from datetime import datetime, timedelta
 import logging
 import asyncio
 
 logger = logging.getLogger(__name__)
+
+# In-memory WebSocket rate limiter (10 messages/minute per IP)
+_ws_rate_limit: dict = defaultdict(list)
+WS_RATE_LIMIT = 10  # messages per minute
+
+
+def _check_ws_rate_limit(ip: str) -> bool:
+    """Return True if request is allowed, False if rate limit exceeded."""
+    now = datetime.utcnow()
+    cutoff = now - timedelta(minutes=1)
+    _ws_rate_limit[ip] = [t for t in _ws_rate_limit[ip] if t > cutoff]
+    if len(_ws_rate_limit[ip]) >= WS_RATE_LIMIT:
+        return False
+    _ws_rate_limit[ip].append(now)
+    return True
 
 
 @socketio.on('connect')
@@ -44,6 +62,12 @@ def handle_chat_message(data):
     try:
         user_query = data.get('message')
         conversation_id = data.get('conversation_id')
+        visitor_id = data.get('visitor_id') or session_id
+
+        # Get client IP
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip_address:
+            ip_address = ip_address.split(',')[0].strip()
 
         # Emit function - send only to the requesting client using their session ID
         def session_emit(event, data):
@@ -52,6 +76,19 @@ def handle_chat_message(data):
 
         if not user_query:
             session_emit('error', {'message': 'No message provided'})
+            return
+
+        # WebSocket rate limit check (10/min per IP)
+        if not _check_ws_rate_limit(ip_address or session_id):
+            logger.warning(f"WebSocket rate limit exceeded for IP {ip_address}")
+            session_emit('error', {'message': 'Rate limit exceeded. Please wait a moment before sending another message.'})
+            return
+
+        # Daily usage limit check
+        allowed, error_msg = UsageTracker.check_limits(visitor_id, ip_address or '')
+        if not allowed:
+            logger.warning(f"Usage limit exceeded for visitor {visitor_id[:8]}...")
+            session_emit('error', {'message': error_msg})
             return
 
         # Import agent
@@ -91,6 +128,16 @@ def handle_chat_message(data):
             conversation_history=conversation_history
         ))
         logger.info(f"Agent completed, final state keys: {final_state.keys()}")
+
+        # Track API usage for cost control
+        UsageTracker.track_usage(
+            visitor_id=visitor_id,
+            ip_address=ip_address or '',
+            model="gpt-5-nano",
+            input_tokens=500,   # Per-request estimate (2 OpenAI calls per query)
+            output_tokens=200,
+            endpoint="afl_chat"
+        )
 
         # Send visualization if available
         chart_sent = False
@@ -235,9 +282,28 @@ def handle_resume_message(data):
     try:
         user_query = data.get('message')
         conversation_id = data.get('conversation_id')
+        visitor_id = data.get('visitor_id') or session_id
+
+        # Get client IP
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip_address:
+            ip_address = ip_address.split(',')[0].strip()
 
         if not user_query:
             session_emit('resume_error', {'message': 'No message provided'})
+            return
+
+        # WebSocket rate limit check (10/min per IP)
+        if not _check_ws_rate_limit(ip_address or session_id):
+            logger.warning(f"WebSocket rate limit exceeded for IP {ip_address}")
+            session_emit('resume_error', {'message': 'Rate limit exceeded. Please wait a moment before sending another message.'})
+            return
+
+        # Daily usage limit check
+        allowed, error_msg = UsageTracker.check_limits(visitor_id, ip_address or '')
+        if not allowed:
+            logger.warning(f"Usage limit exceeded for visitor {visitor_id[:8]}...")
+            session_emit('resume_error', {'message': error_msg})
             return
 
         # Import resume agent
@@ -276,6 +342,16 @@ def handle_resume_message(data):
             conversation_history=conversation_history
         ))
         logger.info(f"Resume agent completed")
+
+        # Track API usage for cost control
+        UsageTracker.track_usage(
+            visitor_id=visitor_id,
+            ip_address=ip_address or '',
+            model="gpt-5-nano",
+            input_tokens=300,
+            output_tokens=150,
+            endpoint="resume_chat"
+        )
 
         # Send response
         response_text = final_state.get('natural_language_response', 'I was unable to process your query.')

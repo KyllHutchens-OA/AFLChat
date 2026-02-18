@@ -5,7 +5,8 @@ from flask import Blueprint, request, session, redirect, url_for, render_templat
 from functools import wraps
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-import hashlib
+from werkzeug.security import generate_password_hash, check_password_hash
+from markupsafe import escape
 import logging
 
 from app.data.database import Session
@@ -20,8 +21,13 @@ AEDT = ZoneInfo('Australia/Sydney')
 
 
 def hash_password(password):
-    """Simple password hashing."""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Secure password hashing using PBKDF2."""
+    return generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
+
+
+def verify_password(password_hash, password):
+    """Verify password against stored hash."""
+    return check_password_hash(password_hash, password)
 
 
 def login_required(f):
@@ -45,7 +51,7 @@ def login():
         db = Session()
         try:
             user = db.query(AdminUser).filter_by(username=username).first()
-            if user and user.password_hash == hash_password(password):
+            if user and verify_password(user.password_hash, password):
                 session['admin_logged_in'] = True
                 session['admin_username'] = username
                 return redirect(url_for('analytics_dashboard.dashboard'))
@@ -124,9 +130,11 @@ def get_data():
                     try:
                         msg_dt = datetime.fromisoformat(msg_time.replace('Z', '+00:00'))
                         if msg_dt.replace(tzinfo=None) >= since:
+                            # Escape HTML to prevent XSS attacks
+                            safe_content = str(escape(msg.get('content', '')[:500]))
                             recent_messages.append({
                                 'role': msg.get('role'),
-                                'content': msg.get('content', '')[:500],  # Truncate for display
+                                'content': safe_content,
                                 'timestamp': msg_time
                             })
                     except:

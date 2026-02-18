@@ -2,10 +2,14 @@
 AFL Analytics Agent - API Routes
 """
 from flask import Blueprint, jsonify, request
+from pydantic import ValidationError
 from app.data.database import Session
 from app.data.models import Match, Team, PageView
+from app.utils.validators import PageViewRequest, ChatMessageRequest
+from app.middleware.rate_limiter import limiter
 from datetime import datetime, timedelta
 from sqlalchemy import func
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,42 +19,56 @@ bp = Blueprint('api', __name__, url_prefix='/api')
 
 @bp.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint."""
+    """Comprehensive health check endpoint for Railway."""
+    health = {
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'checks': {}
+    }
+
+    # Database check
     try:
-        # Check database connection
         session = Session()
         match_count = session.query(Match).count()
         team_count = session.query(Team).count()
         session.close()
-
-        return jsonify({
-            'status': 'healthy',
-            'database': 'connected',
+        health['checks']['database'] = {
+            'status': 'ok',
             'matches': match_count,
             'teams': team_count
-        }), 200
-
+        }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return jsonify({
-            'status': 'unhealthy',
-            'error': str(e)
-        }), 500
+        logger.error(f"Database health check failed: {e}")
+        health['status'] = 'degraded'
+        health['checks']['database'] = {'status': 'error', 'message': str(e)}
+
+    # OpenAI API key check
+    openai_key = os.getenv("OPENAI_API_KEY")
+    health['checks']['openai'] = 'configured' if openai_key else 'missing'
+    if not openai_key:
+        health['status'] = 'degraded'
+
+    # Return appropriate status code
+    status_code = 200 if health['status'] == 'healthy' else 503
+    return jsonify(health), status_code
 
 
 @bp.route('/chat/message', methods=['POST'])
+@limiter.limit("10 per minute")
 async def chat_message():
     """
     Handle chat messages (REST endpoint for non-streaming).
     For streaming, use WebSocket instead.
     """
     try:
-        data = request.get_json()
-        message = data.get('message')
-        conversation_id = data.get('conversation_id')
+        # Validate input
+        try:
+            data = ChatMessageRequest(**request.get_json())
+        except ValidationError as e:
+            return jsonify({'error': 'Invalid input', 'details': e.errors()}), 400
 
-        if not message:
-            return jsonify({'error': 'Message required'}), 400
+        message = data.message
+        conversation_id = data.conversation_id
 
         # Import agent
         from app.agent import agent
@@ -119,17 +137,15 @@ def get_resume_data():
 # ==================== ANALYTICS ENDPOINTS ====================
 
 @bp.route('/analytics/track', methods=['POST'])
+@limiter.limit("60 per minute")
 def track_page_view():
-    """Track a page view."""
+    """Track a page view with input validation."""
     try:
-        data = request.get_json()
-        visitor_id = data.get('visitor_id')
-        page = data.get('page')
-        referrer = data.get('referrer')
-        user_agent = data.get('user_agent')
-
-        if not visitor_id or not page:
-            return jsonify({'error': 'visitor_id and page required'}), 400
+        # Validate input
+        try:
+            data = PageViewRequest(**request.get_json())
+        except ValidationError as e:
+            return jsonify({'error': 'Invalid input', 'details': e.errors()}), 400
 
         # Get client IP address (handles proxies via X-Forwarded-For)
         ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -138,16 +154,18 @@ def track_page_view():
             ip_address = ip_address.split(',')[0].strip()
 
         session = Session()
-        page_view = PageView(
-            visitor_id=visitor_id,
-            page=page,
-            referrer=referrer,
-            user_agent=user_agent,
-            ip_address=ip_address
-        )
-        session.add(page_view)
-        session.commit()
-        session.close()
+        try:
+            page_view = PageView(
+                visitor_id=data.visitor_id,
+                page=data.page,
+                referrer=data.referrer,
+                user_agent=data.user_agent,
+                ip_address=ip_address
+            )
+            session.add(page_view)
+            session.commit()
+        finally:
+            session.close()
 
         return jsonify({'status': 'tracked'}), 200
 
