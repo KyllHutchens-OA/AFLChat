@@ -1,0 +1,461 @@
+"""
+AFL Analytics Agent - Fast-Path Router
+
+Intercepts simple, common queries BEFORE the full LangGraph pipeline.
+Uses regex pattern matching + parameterized SQL templates + string response templates.
+Zero LLM calls for matched queries — reduces latency from ~3-5s to ~100-300ms.
+
+Falls through (returns None) for:
+- Queries that don't match any pattern
+- Follow-up queries ("what about 2023?")
+- Entity resolution failures (unknown team/player)
+- DB returning 0 rows
+"""
+import re
+import logging
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any, Callable
+
+logger = logging.getLogger(__name__)
+
+# Follow-up / ambiguous query indicators — skip fast-path for these
+_FOLLOWUP_PATTERNS = re.compile(
+    r"\b(what about|how about|and them|and they|and their|compare|vs|versus|"
+    r"their|they|them|those|these|that team|last year|this year|last season|"
+    r"this season)\b",
+    re.IGNORECASE
+)
+
+
+@dataclass
+class QueryPattern:
+    """A fast-path query pattern with SQL template and response formatter."""
+    name: str
+    regex: re.Pattern
+    sql_template: str
+    response_formatter: Callable  # fn(df) -> str
+    requires_team: bool = False
+    requires_season: bool = True
+
+
+class FastPathRouter:
+    """
+    Pre-pipeline router for simple AFL queries.
+
+    Usage:
+        result = FastPathRouter.try_fast_path(user_query, conversation_history)
+        if result is not None:
+            return result  # Skip the full pipeline
+        # else: run full LangGraph pipeline
+    """
+
+    # ── SQL Templates ──────────────────────────────────────────────────────────
+
+    _GF_WINNER_SQL = """
+        SELECT
+            CASE WHEN m.home_score > m.away_score THEN ht.name ELSE at.name END AS winner,
+            CASE WHEN m.home_score > m.away_score THEN at.name ELSE ht.name END AS loser,
+            GREATEST(m.home_score, m.away_score) AS winning_score,
+            LEAST(m.home_score, m.away_score) AS losing_score,
+            m.home_score,
+            m.away_score,
+            ht.name AS home_team,
+            at.name AS away_team
+        FROM matches m
+        JOIN teams ht ON m.home_team_id = ht.id
+        JOIN teams at ON m.away_team_id = at.id
+        WHERE m.season = {year} AND m.round = 'Grand Final'
+        LIMIT 1
+    """
+
+    _TEAM_RECORD_SQL = """
+        SELECT
+            t.name AS team,
+            SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score)
+                       OR (m.away_team_id = t.id AND m.away_score > m.home_score)
+                     THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score < m.away_score)
+                       OR (m.away_team_id = t.id AND m.away_score < m.home_score)
+                     THEN 1 ELSE 0 END) AS losses,
+            SUM(CASE WHEN m.home_score = m.away_score THEN 1 ELSE 0 END) AS draws,
+            COUNT(*) AS total_matches,
+            ROUND(AVG(
+                CASE WHEN m.home_team_id = t.id
+                     THEN m.home_score - m.away_score
+                     ELSE m.away_score - m.home_score END
+            ), 1) AS avg_margin
+        FROM matches m
+        JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id)
+        WHERE t.name = '{team}' AND m.season = {year}
+        GROUP BY t.name
+    """
+
+    _TOP_GOALS_SQL = """
+        SELECT p.name, SUM(ps.goals) AS total_goals, t.name AS team
+        FROM player_stats ps
+        JOIN players p ON ps.player_id = p.id
+        JOIN matches m ON ps.match_id = m.id
+        JOIN teams t ON ps.team_id = t.id
+        WHERE m.season = {year} AND ps.goals IS NOT NULL
+        GROUP BY p.name, t.name
+        ORDER BY total_goals DESC NULLS LAST
+        LIMIT 5
+    """
+
+    _TOP_DISPOSALS_SQL = """
+        SELECT p.name, SUM(ps.disposals) AS total_disposals, t.name AS team
+        FROM player_stats ps
+        JOIN players p ON ps.player_id = p.id
+        JOIN matches m ON ps.match_id = m.id
+        JOIN teams t ON ps.team_id = t.id
+        WHERE m.season = {year} AND ps.disposals IS NOT NULL
+        GROUP BY p.name, t.name
+        ORDER BY total_disposals DESC NULLS LAST
+        LIMIT 5
+    """
+
+    _BROWNLOW_SQL = """
+        SELECT p.name, SUM(ps.brownlow_votes) AS total_votes, t.name AS team
+        FROM player_stats ps
+        JOIN players p ON ps.player_id = p.id
+        JOIN matches m ON ps.match_id = m.id
+        JOIN teams t ON ps.team_id = t.id
+        WHERE m.season = {year} AND ps.brownlow_votes IS NOT NULL AND ps.brownlow_votes > 0
+        GROUP BY p.name, t.name
+        ORDER BY total_votes DESC NULLS LAST
+        LIMIT 1
+    """
+
+    # ── Response formatters ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _fmt_gf_winner(df, year: int, **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        row = df.iloc[0]
+        home, away = row["home_team"], row["away_team"]
+        hs, aws = int(row["home_score"]), int(row["away_score"])
+        if hs == aws:
+            return (f"The {year} AFL Grand Final between {home} and {away} "
+                    f"ended in a draw ({hs} points each). A replay was held.")
+        winner, loser = str(row["winner"]), str(row["loser"])
+        ws, ls = int(row["winning_score"]), int(row["losing_score"])
+        return f"{winner} won the {year} AFL Grand Final, defeating {loser} {ws} to {ls}."
+
+    @staticmethod
+    def _fmt_team_record(df, team: str, year: int, **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        row = df.iloc[0]
+        wins, losses, draws = int(row["wins"]), int(row["losses"]), int(row["draws"])
+        total, margin = int(row["total_matches"]), float(row["avg_margin"])
+        record = f"{wins} wins, {losses} losses"
+        if draws:
+            record += f", {draws} {'draw' if draws == 1 else 'draws'}"
+        direction = "ahead" if margin >= 0 else "behind"
+        margin_abs = abs(margin)
+        return (f"{team} finished the {year} season with {record} "
+                f"from {total} games (average margin: {margin_abs:.1f} points {direction}).")
+
+    @staticmethod
+    def _fmt_top_goals(df, year: int, **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        lines = []
+        for i, row in df.iterrows():
+            lines.append(f"{i+1}. {row['name']} ({row['team']}) — {int(row['total_goals'])} goals")
+        return f"Top goal kickers in {year}:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _fmt_top_disposals(df, year: int, **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        lines = []
+        for i, row in df.iterrows():
+            lines.append(f"{i+1}. {row['name']} ({row['team']}) — {int(row['total_disposals'])} disposals")
+        return f"Top disposal getters in {year}:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _fmt_brownlow(df, year: int, **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        row = df.iloc[0]
+        return (f"{row['name']} ({row['team']}) won the {year} Brownlow Medal "
+                f"with {int(row['total_votes'])} votes.")
+
+    # ── Pattern registry ───────────────────────────────────────────────────────
+
+    # Built lazily on first use
+    _PATTERNS: Optional[List[QueryPattern]] = None
+
+    @classmethod
+    def _build_patterns(cls) -> List[QueryPattern]:
+        return [
+            # Grand Final winner — "who won the GF in 2022" / "2022 grand final winner"
+            QueryPattern(
+                name="grand_final_winner",
+                regex=re.compile(
+                    r"(?:who\s+won|winner\s+of|who\s+won\s+the|result\s+of(?:\s+the)?)"
+                    r"(?:\s+the)?\s*(?:gf|grand\s+final|granny|premiership)"
+                    r"(?:\s+in)?\s*(\d{4})"
+                    r"|(\d{4})\s*(?:gf|grand\s+final|granny|premiership)\s*(?:winner|result|score)?",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._GF_WINNER_SQL,
+                response_formatter=cls._fmt_gf_winner,
+                requires_team=False,
+                requires_season=True,
+            ),
+
+            # Team season record — "how many wins did Geelong have in 2023" / "Geelong's record in 2023"
+            QueryPattern(
+                name="team_season_record",
+                regex=re.compile(
+                    r"(?:how\s+many\s+(?:wins|losses|games)|(?:win[s]?|loss(?:es)?)\s+record|"
+                    r"record|season\s+record|how\s+did\s+.+?\s+(?:go|do|perform))\b"
+                    r".{0,40}?(\d{4})",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._TEAM_RECORD_SQL,
+                response_formatter=cls._fmt_team_record,
+                requires_team=True,
+                requires_season=True,
+            ),
+
+            # Top goal kicker — "top goal scorer in 2024" / "most goals kicked in 2023"
+            QueryPattern(
+                name="top_goal_kickers",
+                regex=re.compile(
+                    r"(?:who\s+kicked|top\s+goal\s+(?:kicker|scorer|scorer)s?|"
+                    r"most\s+goals?\s+(?:kicked|scored|in)|leading\s+goal\s+kicker)"
+                    r".{0,20}?(\d{4})"
+                    r"|(\d{4}).{0,20}?(?:top\s+goal|most\s+goals?|leading\s+goal)",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._TOP_GOALS_SQL,
+                response_formatter=cls._fmt_top_goals,
+                requires_team=False,
+                requires_season=True,
+            ),
+
+            # Top disposal getter
+            QueryPattern(
+                name="top_disposal_getters",
+                regex=re.compile(
+                    r"(?:who\s+(?:had|got|averaged)|top|most|leading)\s+"
+                    r"(?:the\s+)?(?:most\s+)?disposals?"
+                    r".{0,20}?(\d{4})"
+                    r"|(\d{4}).{0,20}?(?:most|top|leading)\s+disposals?",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._TOP_DISPOSALS_SQL,
+                response_formatter=cls._fmt_top_disposals,
+                requires_team=False,
+                requires_season=True,
+            ),
+
+            # Brownlow Medal — "who won the brownlow in 2024"
+            QueryPattern(
+                name="brownlow_winner",
+                regex=re.compile(
+                    r"(?:who\s+won|winner\s+of(?:\s+the)?)\s+(?:the\s+)?brownlow"
+                    r"(?:\s+medal)?(?:\s+in)?\s*(\d{4})"
+                    r"|(\d{4})\s*brownlow(?:\s+medal)?\s*(?:winner|medallist)?",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._BROWNLOW_SQL,
+                response_formatter=cls._fmt_brownlow,
+                requires_team=False,
+                requires_season=True,
+            ),
+        ]
+
+    @classmethod
+    def _get_patterns(cls) -> List[QueryPattern]:
+        if cls._PATTERNS is None:
+            cls._PATTERNS = cls._build_patterns()
+        return cls._PATTERNS
+
+    # ── Team extraction helper ─────────────────────────────────────────────────
+
+    @classmethod
+    def _extract_team(cls, query: str) -> Optional[str]:
+        """
+        Find an AFL team name in the query text using EntityResolver.
+        Returns canonical team name or None.
+        """
+        from app.analytics.entity_resolver import EntityResolver
+        # Try progressively shorter substrings to find team mentions
+        words = query.split()
+        # Try 3-word, 2-word, 1-word sequences
+        for n in (3, 2, 1):
+            for i in range(len(words) - n + 1):
+                chunk = " ".join(words[i:i+n])
+                resolved = EntityResolver.resolve_team(chunk)
+                if resolved:
+                    return resolved
+        return None
+
+    @classmethod
+    def _is_followup(cls, query: str) -> bool:
+        """Return True if query looks like a follow-up to a previous message."""
+        return bool(_FOLLOWUP_PATTERNS.search(query))
+
+    @classmethod
+    def _is_range_query(cls, query: str) -> bool:
+        """Return True if query spans multiple seasons (e.g. '2010 to 2020')."""
+        years = re.findall(r'\b(19|20)\d{2}\b', query)
+        return len(years) >= 2
+
+    @classmethod
+    def _validate_year(cls, year_str: str) -> Optional[int]:
+        """Validate and return year as int, or None if out of range."""
+        try:
+            year = int(year_str)
+            if 1990 <= year <= 2026:
+                return year
+        except (ValueError, TypeError):
+            pass
+        return None
+
+    # ── Main entry point ───────────────────────────────────────────────────────
+
+    @classmethod
+    def try_fast_path(
+        cls,
+        user_query: str,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+        socketio_emit=None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Attempt to answer query via fast-path (no LLM calls).
+
+        Returns an AgentState-compatible dict on success, or None to fall
+        through to the full LangGraph pipeline.
+        """
+        from app.agent.state import QueryIntent, WorkflowStep
+        from app.agent.tools import DatabaseTool
+        from app.utils.cache import get_cached_result, set_cached_result
+
+        # Skip if query looks like a follow-up or spans multiple seasons
+        if cls._is_followup(user_query):
+            logger.debug(f"FAST-PATH: Skipping follow-up query: {user_query[:60]}")
+            return None
+        if cls._is_range_query(user_query):
+            logger.debug(f"FAST-PATH: Skipping multi-season range query: {user_query[:60]}")
+            return None
+
+        patterns = cls._get_patterns()
+
+        for pattern in patterns:
+            match = pattern.regex.search(user_query)
+            if not match:
+                continue
+
+            logger.info(f"FAST-PATH: Pattern '{pattern.name}' matched: {user_query[:80]}")
+
+            # Extract year from whichever capture group matched
+            year_str = next((g for g in match.groups() if g and g.isdigit() and len(g) == 4), None)
+            if not year_str:
+                logger.debug(f"FAST-PATH: No year found in match groups {match.groups()}")
+                continue
+
+            year = cls._validate_year(year_str)
+            if year is None:
+                logger.debug(f"FAST-PATH: Year {year_str} out of valid range")
+                continue
+
+            # Extract team if required
+            team = None
+            if pattern.requires_team:
+                team = cls._extract_team(user_query)
+                if team is None:
+                    logger.debug(f"FAST-PATH: Pattern '{pattern.name}' requires team but none found")
+                    continue  # Try next pattern
+
+            # Emit progress to WebSocket
+            if socketio_emit:
+                socketio_emit("thinking", {
+                    "step": "Looking up AFL data...",
+                    "current_step": "execute"
+                })
+
+            # Build and execute SQL
+            try:
+                sql = pattern.sql_template.format(year=year, team=team or "")
+                sql = " ".join(sql.split())  # Normalise whitespace
+
+                # Check cache first
+                df = get_cached_result(sql)
+                if df is not None:
+                    logger.info(f"FAST-PATH: Cache hit for '{pattern.name}'")
+                else:
+                    db_result = DatabaseTool.query_database(sql)
+                    if not db_result.get("success") or db_result.get("data") is None:
+                        logger.warning(f"FAST-PATH: DB query failed for '{pattern.name}': {db_result.get('error')}")
+                        return None
+                    df = db_result["data"]
+                    if len(df) > 0:
+                        set_cached_result(sql, df)
+
+                if df is None or len(df) == 0:
+                    logger.info(f"FAST-PATH: Empty result for '{pattern.name}', falling through")
+                    return None
+
+                # Format response
+                fmt_kwargs = {"year": year, "team": team}
+                response_text = pattern.response_formatter(df, **fmt_kwargs)
+
+                if response_text is None:
+                    logger.info(f"FAST-PATH: Formatter returned None for '{pattern.name}', falling through")
+                    return None
+
+                logger.info(f"FAST-PATH: Successfully answered via '{pattern.name}': {response_text[:80]}")
+
+                # Build AgentState-compatible result
+                entities: Dict[str, Any] = {
+                    "teams": [team] if team else [],
+                    "players": [],
+                    "seasons": [str(year)],
+                    "metrics": [],
+                    "rounds": [],
+                }
+
+                return {
+                    "user_query": user_query,
+                    "intent": QueryIntent.SIMPLE_STAT,
+                    "entities": entities,
+                    "needs_clarification": False,
+                    "clarification_question": None,
+                    "analysis_plan": [f"Fast-path: {pattern.name}"],
+                    "requires_visualization": False,
+                    "chart_type": None,
+                    "fallback_approach": None,
+                    "analysis_mode": "summary",
+                    "analysis_types": [],
+                    "context_insights": {},
+                    "data_quality": {},
+                    "stats_summary": {},
+                    "sql_query": sql,
+                    "sql_validated": True,
+                    "query_results": df,
+                    "statistical_analysis": {},
+                    "execution_error": None,
+                    "visualization_spec": None,
+                    "natural_language_summary": response_text,
+                    "confidence": 0.95,
+                    "sources": ["AFL Tables (1990-2025)"],
+                    "current_step": WorkflowStep.RESPOND,
+                    "thinking_message": "Done",
+                    "errors": [],
+                    "socketio_emit": socketio_emit,
+                    "conversation_history": conversation_history or [],
+                    "conversation_id": None,  # Set by caller
+                }
+
+            except Exception as e:
+                logger.warning(f"FAST-PATH: Error in '{pattern.name}': {e}")
+                return None  # Fall through to full pipeline
+
+        logger.debug(f"FAST-PATH: No pattern matched for: {user_query[:80]}")
+        return None

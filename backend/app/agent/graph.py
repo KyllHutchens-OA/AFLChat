@@ -135,6 +135,19 @@ class AFLAnalyticsAgent:
         """
         from typing import List, Any
 
+        # ── Fast-path: answer simple queries without any LLM calls ──────────
+        from app.agent.fast_path import FastPathRouter
+        fast_result = FastPathRouter.try_fast_path(
+            user_query=user_query,
+            conversation_history=conversation_history,
+            socketio_emit=socketio_emit,
+        )
+        if fast_result is not None:
+            fast_result["conversation_id"] = conversation_id
+            logger.info(f"FAST-PATH answered: {user_query[:60]}")
+            return fast_result
+        # ────────────────────────────────────────────────────────────────────
+
         initial_state = AgentState(
             user_query=user_query,
             conversation_id=conversation_id,
@@ -320,17 +333,46 @@ class AFLAnalyticsAgent:
 
                 conversation_context += "\nUse this context to resolve ambiguous references (e.g., 'What about 2023?' or 'Compare them').\n---\n\n"
 
-            # Use GPT-5-nano to understand the query (Responses API)
-            logger.info("UNDERSTAND: Calling OpenAI API (gpt-5-nano) for query understanding...")
-            response = client.responses.create(
-                model="gpt-5-nano",
-                input=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": f"""You are an AFL analytics query analyzer. Parse the user's question and extract:
+            # ── Consolidated single LLM call: intent + entities + SQL ──────────
+            # This replaces both the old standalone intent call here AND the
+            # QueryBuilder.generate_sql() call in execute_node, saving one
+            # full OpenAI round-trip per query.
+            from app.agent.consolidated_llm import ConsolidatedQueryUnderstanding
+            logger.info("UNDERSTAND: Calling consolidated LLM (intent + SQL in one call)...")
+
+            consolidated = ConsolidatedQueryUnderstanding.understand_and_generate_sql(
+                user_query=state["user_query"],
+                conversation_history=conversation_history,
+            )
+
+            import json
+            if consolidated["success"]:
+                understanding = {
+                    "intent": consolidated["intent"],
+                    "entities": consolidated["entities"],
+                    "requires_visualization": consolidated["requires_visualization"],
+                }
+                # Store the pre-generated SQL so execute_node skips its own SQL call
+                state["pre_generated_sql"] = consolidated["sql"]
+                logger.info(
+                    f"UNDERSTAND: Consolidated call OK — intent={consolidated['intent']}, "
+                    f"sql_preview={consolidated['sql'][:60]}..."
+                )
+            else:
+                # Consolidated call failed — fall back to intent-only extraction
+                logger.warning(
+                    f"UNDERSTAND: Consolidated call failed ({consolidated['error']}), "
+                    f"falling back to intent-only extraction"
+                )
+                response = client.responses.create(
+                    model="gpt-5-nano",
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "input_text",
+                                    "text": f"""You are an AFL analytics query analyzer. Parse the user's question and extract:
 1. Intent: What type of analysis are they asking for?
 2. Entities: What teams, players, seasons, or metrics are mentioned?
 
@@ -365,16 +407,15 @@ CRITICAL Rules:
 }}
 
 Current user question: {state["user_query"]}"""
-                            }
-                        ]
-                    }
-                ],
-                text={"format": {"type": "json_object"}}
-            )
+                                }
+                            ]
+                        }
+                    ],
+                    text={"format": {"type": "json_object"}}
+                )
+                understanding = json.loads(response.output_text)
+                # No pre_generated_sql — execute_node will call QueryBuilder as before
 
-            import json
-            logger.info(f"UNDERSTAND: OpenAI API call successful, parsing response...")
-            understanding = json.loads(response.output_text)
             logger.info(f"UNDERSTAND: Parsed understanding: intent={understanding.get('intent')}, entities={understanding.get('entities')}")
 
             state["intent"] = QueryIntent(understanding.get("intent", "unknown"))
@@ -584,16 +625,20 @@ Current user question: {state["user_query"]}"""
         logger.info("EXECUTE: Generating and running SQL query")
 
         try:
-            # Step 1: Generate SQL from natural language
-            # Use RESOLVED entities (normalized team names, validated seasons, etc.)
-            # Pass conversation history to resolve ambiguous references like "this", "them", etc.
-            logger.info(f"EXECUTE: Calling QueryBuilder.generate_sql with query='{state['user_query'][:100]}', entities={state.get('entities')}")
-            sql_result = QueryBuilder.generate_sql(
-                state["user_query"],
-                context=state["entities"],  # These are now validated/normalized
-                conversation_history=state.get("conversation_history", [])
-            )
-            logger.info(f"EXECUTE: SQL generation result: success={sql_result.get('success')}, error={sql_result.get('error')}")
+            # Step 1: Get SQL — use pre-generated SQL from consolidated LLM call if available,
+            # otherwise generate via QueryBuilder (fallback to separate LLM call).
+            pre_sql = state.get("pre_generated_sql")
+            if pre_sql:
+                logger.info(f"EXECUTE: Using pre-generated SQL from consolidated call: {pre_sql[:80]}...")
+                sql_result = {"success": True, "sql": pre_sql, "error": None}
+            else:
+                logger.info(f"EXECUTE: Calling QueryBuilder.generate_sql with query='{state['user_query'][:100]}', entities={state.get('entities')}")
+                sql_result = QueryBuilder.generate_sql(
+                    state["user_query"],
+                    context=state["entities"],  # These are now validated/normalized
+                    conversation_history=state.get("conversation_history", [])
+                )
+                logger.info(f"EXECUTE: SQL generation result: success={sql_result.get('success')}, error={sql_result.get('error')}")
 
             if not sql_result["success"]:
                 error_msg = f"SQL generation failed: {sql_result['error']}"
