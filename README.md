@@ -1,6 +1,5 @@
 # AFL Sports Analytics Agent
 
-> A production-ready AFL analytics agent demonstrating agentic AI capabilities through a clean chat interface with Hex-quality visualizations.
 
 ## Overview
 
