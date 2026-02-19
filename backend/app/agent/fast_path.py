@@ -114,6 +114,48 @@ class FastPathRouter:
         LIMIT 5
     """
 
+    # AFL Fantasy scoring: Kick×3, Handball×2, Mark×3, Tackle×4, Goal×8,
+    # Behind×1, Hitout×1, Free for×1, Free against×−3, Clanger×−1
+    _AFL_FANTASY_SQL = """
+        SELECT
+            p.name,
+            t.name AS team,
+            ROUND(AVG(
+                COALESCE(ps.kicks, 0) * 3 +
+                COALESCE(ps.handballs, 0) * 2 +
+                COALESCE(ps.marks, 0) * 3 +
+                COALESCE(ps.tackles, 0) * 4 +
+                COALESCE(ps.goals, 0) * 8 +
+                COALESCE(ps.behinds, 0) * 1 +
+                COALESCE(ps.hitouts, 0) * 1 +
+                COALESCE(ps.free_kicks_for, 0) * 1 +
+                COALESCE(ps.free_kicks_against, 0) * -3 +
+                COALESCE(ps.clangers, 0) * -1
+            ), 1) AS avg_fantasy,
+            SUM(
+                COALESCE(ps.kicks, 0) * 3 +
+                COALESCE(ps.handballs, 0) * 2 +
+                COALESCE(ps.marks, 0) * 3 +
+                COALESCE(ps.tackles, 0) * 4 +
+                COALESCE(ps.goals, 0) * 8 +
+                COALESCE(ps.behinds, 0) * 1 +
+                COALESCE(ps.hitouts, 0) * 1 +
+                COALESCE(ps.free_kicks_for, 0) * 1 +
+                COALESCE(ps.free_kicks_against, 0) * -3 +
+                COALESCE(ps.clangers, 0) * -1
+            ) AS total_fantasy,
+            COUNT(*) AS games_played
+        FROM player_stats ps
+        JOIN players p ON ps.player_id = p.id
+        JOIN matches m ON ps.match_id = m.id
+        JOIN teams t ON ps.team_id = t.id
+        WHERE m.season = {year}
+        GROUP BY p.name, t.name
+        HAVING COUNT(*) >= 5
+        ORDER BY avg_fantasy DESC NULLS LAST
+        LIMIT 5
+    """
+
     _BROWNLOW_SQL = """
         SELECT p.name, SUM(ps.brownlow_votes) AS total_votes, t.name AS team
         FROM player_stats ps
@@ -174,6 +216,22 @@ class FastPathRouter:
         for i, row in df.iterrows():
             lines.append(f"{i+1}. {row['name']} ({row['team']}) — {int(row['total_disposals'])} disposals")
         return f"Top disposal getters in {year}:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _fmt_afl_fantasy(df, year: int, **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        lines = []
+        for i, row in df.iterrows():
+            avg = float(row["avg_fantasy"])
+            games = int(row["games_played"])
+            lines.append(
+                f"{i+1}. {row['name']} ({row['team']}) — {avg:.1f} avg fantasy pts ({games} games)"
+            )
+        return (
+            f"Top AFL Fantasy scorers in {year} (avg pts per game, min. 5 games):\n"
+            + "\n".join(lines)
+        )
 
     @staticmethod
     def _fmt_brownlow(df, year: int, **_) -> str:
@@ -250,6 +308,22 @@ class FastPathRouter:
                 ),
                 sql_template=cls._TOP_DISPOSALS_SQL,
                 response_formatter=cls._fmt_top_disposals,
+                requires_team=False,
+                requires_season=True,
+            ),
+
+            # AFL Fantasy top scorers — "top fantasy scorer in 2024" / "who had the most fantasy points in 2023"
+            QueryPattern(
+                name="afl_fantasy_top_scorers",
+                regex=re.compile(
+                    r"(?:top|best|highest|most|who\s+(?:had|scored|averaged?)(?:\s+the)?)"
+                    r"(?:\s+afl)?\s*fantasy(?:\s+(?:scorer|score|points?|pts|player))?"
+                    r".{0,20}?(\d{4})"
+                    r"|(\d{4}).{0,20}?(?:top|best|highest|most)\s+(?:afl\s+)?fantasy",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._AFL_FANTASY_SQL,
+                response_formatter=cls._fmt_afl_fantasy,
                 requires_team=False,
                 requires_season=True,
             ),
