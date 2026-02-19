@@ -158,45 +158,6 @@ Core tables:
 - `team_stats` - Per-match team statistics
 - `conversations` - Agent conversation history
 
-## Cost
-
-- **Development**: Free (uses Supabase free tier)
-- **Production**: ~$10-20/month (OpenAI API calls)
-- All other components are free/open-source
-
-## Roadmap
-
-### ✅ Completed (Weeks 1-3)
-- ✅ Historical data (1990-2025, 6,243 matches)
-- ✅ LangGraph agent workflow (UNDERSTAND → PLAN → EXECUTE → VISUALIZE → RESPOND)
-- ✅ GPT-4 text-to-SQL generation
-- ✅ SQL validation and security
-- ✅ Plotly visualization generator with Hex-quality theme
-- ✅ Flask API with WebSocket support
-- ✅ React frontend with real-time chat
-- ✅ Chart rendering with react-plotly.js
-
-### ⏳ In Progress (Week 4)
-- 🔨 Add OPENAI_API_KEY to .env for testing
-- 📝 End-to-end testing with real queries
-- 📝 npm install for frontend dependencies
-
-### Phase 2 (Future Enhancements)
-- [ ] Player statistics ingestion (~13,000 players)
-- [ ] Advanced analytics (expected stats, form analysis)
-- [ ] Streaming "thinking" updates through LangGraph workflow
-- [ ] Conversation history and memory
-- [ ] Chart export (download as PNG/SVG)
-- [ ] User authentication
-- [ ] Production deployment (Docker, hosting)
-
-## Contributing
-
-This is a portfolio project demonstrating agentic AI capabilities. Contributions welcome!
-
-## License
-
-MIT
 
 ## Contact
 
@@ -204,4 +165,4 @@ Built as a data science portfolio project showcasing modern AI agent development
 
 ---
 
-**Built with**: LangGraph • GPT-5-mini • Flask • React • Supabase • Plotly
+**Built with**: LangGraph • GPT-5-mini • Flask • React • Supabase • Plotly • Railway
