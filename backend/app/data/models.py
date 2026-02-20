@@ -174,6 +174,7 @@ class PlayerStat(Base):
     clangers = Column(Integer, default=0)
     free_kicks_for = Column(Integer, default=0)
     free_kicks_against = Column(Integer, default=0)
+    fantasy_points = Column(Integer, default=0)
     brownlow_votes = Column(Integer, default=0)
     time_on_ground_pct = Column(Numeric(5, 2))
     created_at = Column(DateTime, default=datetime.utcnow)

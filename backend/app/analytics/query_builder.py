@@ -328,29 +328,20 @@ Question: {user_query}"""
 
             prompt_text += "\n\nGenerate the SQL query:"
 
-            # Call GPT-5-nano (cheapest and fastest) using Responses API
+            # Call GPT-5-nano (cheapest and fastest) using Chat Completions API
             logger.info(f"QueryBuilder: Calling OpenAI API (gpt-5-nano)...")
             try:
-                response = client.responses.create(
+                response = client.chat.completions.create(
                     model="gpt-5-nano",
-                    input=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": prompt_text
-                                }
-                            ]
-                        }
-                    ]
+                    messages=[{"role": "user", "content": prompt_text}],
+                    reasoning_effort="low",
                 )
                 logger.info(f"QueryBuilder: OpenAI API call successful")
             except Exception as api_error:
                 logger.error(f"QueryBuilder: OpenAI API call FAILED: {type(api_error).__name__}: {str(api_error)}")
                 raise
 
-            sql = response.output_text.strip()
+            sql = (response.choices[0].message.content or "").strip()
 
             # Log raw SQL before cleaning for debugging
             logger.info(f"Raw SQL from GPT-5-nano: {sql[:200]}")

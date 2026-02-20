@@ -17,6 +17,8 @@ from openai import OpenAI
 import httpx
 from dotenv import load_dotenv
 
+import hashlib
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,18 @@ client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
     timeout=httpx.Timeout(60.0, connect=10.0)
 )
+
+# ── LLM Response Cache ───────────────────────────────────────────────────────
+# Cache identical (query, context) pairs to avoid repeat LLM calls.
+# TTL-style: stores up to 128 recent queries in memory.
+_llm_cache: Dict[str, Dict[str, Any]] = {}
+_LLM_CACHE_MAX = 128
+
+
+def _cache_key(user_query: str, conv_ctx: str) -> str:
+    """Deterministic cache key from query + conversation context."""
+    raw = f"{user_query.strip().lower()}|{conv_ctx.strip()}"
+    return hashlib.md5(raw.encode()).hexdigest()
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -58,7 +72,7 @@ Use EXACT team names: Adelaide (NOT "Adelaide Crows"), Geelong (NOT "Geelong Cat
 
 ### players: id, name, team_id (CURRENT team only — WARNING: wrong for traded players), position, height, weight, debut_year
 
-### player_stats: match_id, player_id, team_id (team player played FOR — correct for trades!), disposals, kicks, handballs, marks, tackles, goals, behinds, hitouts, clearances, inside_50s, rebound_50s, contested_possessions, brownlow_votes, time_on_ground_pct
+### player_stats: match_id, player_id, team_id (team player played FOR — correct for trades!), disposals, kicks, handballs, marks, tackles, goals, behinds, hitouts, clearances, inside_50s, rebound_50s, contested_possessions, uncontested_possessions, contested_marks, marks_inside_50, one_percenters, bounces, goal_assist, clangers, free_kicks_for, free_kicks_against, fantasy_points, brownlow_votes, time_on_ground_pct
 
 CRITICAL RULES:
 1. Only SELECT statements (no INSERT/UPDATE/DELETE/DROP)
@@ -73,7 +87,8 @@ CRITICAL RULES:
 Common patterns:
 - Team season record: JOIN teams t, filter (home_team_id=t.id OR away_team_id=t.id), CASE for wins/losses
 - Player stats: JOIN player_stats ps, players p, matches m ON ps.match_id=m.id
-- Grand Final: WHERE m.round = 'Grand Final' AND m.season = {year}
+- Grand Final: WHERE m.round = 'Grand Final' AND m.season = <year>
+- Player name matching: ALWAYS use p.name ILIKE '%Surname%' (with leading %) because names are stored as "First Last"
 
 {conversation_context}
 
@@ -88,8 +103,20 @@ Common patterns:
     "rounds": [...]
   }},
   "requires_visualization": true|false,
+  "chart_type": "line"|"bar"|"grouped_bar"|"scatter"|null,
+  "chart_config": {{
+    "x_col_hint": "expected x-axis column name from the SQL (e.g. 'season', 'name')",
+    "y_col_hint": "expected y-axis column name from the SQL (e.g. 'total_goals', 'avg_disposals')"
+  }},
   "sql": "SELECT ..."
 }}
+
+Chart type rules:
+- trend_analysis or temporal queries -> "line"
+- player_comparison -> "grouped_bar" (multiple metrics) or "bar"
+- top-N / ranking queries -> "bar"
+- simple_stat with single number -> null (no chart)
+- If unsure, set chart_type to null
 
 User question: {user_query}"""
 
@@ -154,24 +181,27 @@ class ConsolidatedQueryUnderstanding:
         """
         try:
             conv_ctx = _build_conversation_context(conversation_history)
+
+            # Check cache first
+            key = _cache_key(user_query, conv_ctx)
+            if key in _llm_cache:
+                logger.info("CONSOLIDATED-LLM: Cache HIT — skipping API call")
+                return _llm_cache[key]
+
             prompt = _INTENT_AND_SQL_PROMPT.format(
                 user_query=user_query,
                 conversation_context=conv_ctx,
             )
 
             logger.info("CONSOLIDATED-LLM: Calling OpenAI (single intent+SQL call)...")
-            response = client.responses.create(
+            response = client.chat.completions.create(
                 model="gpt-5-nano",
-                input=[
-                    {
-                        "role": "user",
-                        "content": [{"type": "input_text", "text": prompt}]
-                    }
-                ],
-                text={"format": {"type": "json_object"}}
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                reasoning_effort="low",
             )
 
-            raw = response.output_text.strip()
+            raw = (response.choices[0].message.content or "").strip()
             logger.info(f"CONSOLIDATED-LLM: Raw response length={len(raw)}")
 
             data = json.loads(raw)
@@ -180,6 +210,8 @@ class ConsolidatedQueryUnderstanding:
             entities = data.get("entities", {})
             requires_viz = bool(data.get("requires_visualization", False))
             sql = data.get("sql", "").strip()
+            chart_type = data.get("chart_type")  # May be null/None
+            chart_config = data.get("chart_config", {})
 
             # Basic validation
             if not sql or not sql.upper().startswith("SELECT"):
@@ -197,14 +229,23 @@ class ConsolidatedQueryUnderstanding:
                 f"entities={entities}, viz={requires_viz}, sql={sql[:80]}..."
             )
 
-            return {
+            result = {
                 "success": True,
                 "intent": intent,
                 "entities": entities,
                 "requires_visualization": requires_viz,
                 "sql": sql,
+                "chart_type": chart_type,
+                "chart_config": chart_config,
                 "error": None,
             }
+
+            # Store in cache (evict oldest if full)
+            if len(_llm_cache) >= _LLM_CACHE_MAX:
+                _llm_cache.pop(next(iter(_llm_cache)))
+            _llm_cache[key] = result
+
+            return result
 
         except Exception as e:
             logger.error(f"CONSOLIDATED-LLM: Failed — {type(e).__name__}: {e}")

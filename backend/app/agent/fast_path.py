@@ -168,6 +168,69 @@ class FastPathRouter:
         LIMIT 1
     """
 
+    _PLAYER_SEASON_STATS_SQL = """
+        SELECT p.name, t.name AS team,
+               COUNT(*) AS games,
+               SUM(ps.goals) AS goals,
+               SUM(ps.disposals) AS disposals,
+               SUM(ps.kicks) AS kicks,
+               SUM(ps.handballs) AS handballs,
+               SUM(ps.marks) AS marks,
+               SUM(ps.tackles) AS tackles,
+               ROUND(AVG(ps.disposals), 1) AS avg_disposals,
+               ROUND(AVG(ps.goals), 1) AS avg_goals
+        FROM player_stats ps
+        JOIN players p ON ps.player_id = p.id
+        JOIN matches m ON ps.match_id = m.id
+        JOIN teams t ON ps.team_id = t.id
+        WHERE LOWER(p.name) LIKE LOWER('%{player}%') AND m.season = {year}
+        GROUP BY p.name, t.name
+    """
+
+    _TEAM_LADDER_SQL = """
+        SELECT t.name AS team,
+               SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score)
+                          OR (m.away_team_id = t.id AND m.away_score > m.home_score)
+                        THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score < m.away_score)
+                          OR (m.away_team_id = t.id AND m.away_score < m.home_score)
+                        THEN 1 ELSE 0 END) AS losses,
+               COUNT(*) AS games,
+               SUM(CASE WHEN m.home_team_id = t.id THEN m.home_score - m.away_score
+                        ELSE m.away_score - m.home_score END) AS points_diff
+        FROM matches m
+        JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id)
+        WHERE m.season = {year}
+        GROUP BY t.name
+        ORDER BY wins DESC, points_diff DESC
+    """
+
+    _HEAD_TO_HEAD_SQL = """
+        SELECT ht.name AS home_team, at.name AS away_team,
+               m.home_score, m.away_score, m.round, m.venue
+        FROM matches m
+        JOIN teams ht ON m.home_team_id = ht.id
+        JOIN teams at ON m.away_team_id = at.id
+        WHERE m.season = {year}
+          AND ((ht.name = '{team1}' AND at.name = '{team2}')
+               OR (ht.name = '{team2}' AND at.name = '{team1}'))
+        ORDER BY m.match_date
+    """
+
+    _HIGHEST_SCORE_SQL = """
+        SELECT ht.name AS home_team, at.name AS away_team,
+               m.home_score, m.away_score,
+               GREATEST(m.home_score, m.away_score) AS highest_score,
+               ABS(m.home_score - m.away_score) AS margin,
+               m.round, m.venue
+        FROM matches m
+        JOIN teams ht ON m.home_team_id = ht.id
+        JOIN teams at ON m.away_team_id = at.id
+        WHERE m.season = {year}
+        ORDER BY highest_score DESC NULLS LAST
+        LIMIT 1
+    """
+
     # ── Response formatters ────────────────────────────────────────────────────
 
     @staticmethod
@@ -240,6 +303,95 @@ class FastPathRouter:
         row = df.iloc[0]
         return (f"{row['name']} ({row['team']}) won the {year} Brownlow Medal "
                 f"with {int(row['total_votes'])} votes.")
+
+    @staticmethod
+    def _fmt_player_season_stats(df, year: int, player: str = "", **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        if len(df) > 1:
+            # Multiple players matched — fall through for disambiguation
+            return None
+        row = df.iloc[0]
+        name = row["name"]
+        team = row["team"]
+        games = int(row["games"])
+        goals = int(row["goals"]) if row["goals"] else 0
+        disposals = int(row["disposals"]) if row["disposals"] else 0
+        avg_disp = float(row["avg_disposals"]) if row["avg_disposals"] else 0
+        marks = int(row["marks"]) if row["marks"] else 0
+        tackles = int(row["tackles"]) if row["tackles"] else 0
+        return (
+            f"{name} ({team}) in {year}: {games} games, "
+            f"{disposals} disposals (avg {avg_disp:.1f}/game), "
+            f"{goals} goals, {marks} marks, {tackles} tackles."
+        )
+
+    @staticmethod
+    def _fmt_team_ladder(df, year: int, team: str = "", **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        # Find the requested team's rank
+        if team:
+            for i, (_, row) in enumerate(df.iterrows()):
+                if row["team"].lower() == team.lower():
+                    wins = int(row["wins"])
+                    losses = int(row["losses"])
+                    games = int(row["games"])
+                    diff = int(row["points_diff"])
+                    position = i + 1
+                    suffix = {1: "st", 2: "nd", 3: "rd"}.get(position if position < 20 else position % 10, "th")
+                    return (
+                        f"{team} finished {position}{suffix} on the {year} ladder with "
+                        f"{wins} wins, {losses} losses from {games} games "
+                        f"(percentage diff: {diff:+d} points)."
+                    )
+            return None
+        # No specific team — show top 8
+        lines = []
+        for i, (_, row) in enumerate(df.head(8).iterrows()):
+            lines.append(
+                f"{i+1}. {row['team']} — {int(row['wins'])} wins, "
+                f"{int(row['losses'])} losses"
+            )
+        return f"{year} AFL Ladder (Top 8):\n" + "\n".join(lines)
+
+    @staticmethod
+    def _fmt_head_to_head(df, year: int, team1: str = "", team2: str = "", **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        lines = []
+        for _, row in df.iterrows():
+            home = row["home_team"]
+            away = row["away_team"]
+            hs, aws = int(row["home_score"]), int(row["away_score"])
+            rd = row["round"]
+            winner = home if hs > aws else away if aws > hs else "Draw"
+            margin = abs(hs - aws)
+            if winner == "Draw":
+                lines.append(f"Round {rd}: {home} {hs} drew with {away} {aws}")
+            else:
+                loser = away if winner == home else home
+                lines.append(f"Round {rd}: {winner} def. {loser} by {margin} pts ({hs}-{aws})")
+        header = f"{team1} vs {team2} in {year}:"
+        return header + "\n" + "\n".join(lines)
+
+    @staticmethod
+    def _fmt_highest_score(df, year: int, **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        row = df.iloc[0]
+        home = row["home_team"]
+        away = row["away_team"]
+        hs, aws = int(row["home_score"]), int(row["away_score"])
+        high = int(row["highest_score"])
+        margin = int(row["margin"])
+        rd = row["round"]
+        winner = home if hs >= aws else away
+        loser = away if winner == home else home
+        return (
+            f"The highest score in {year} was {high} points by {winner} against {loser} "
+            f"in Round {rd} ({hs}-{aws}, winning by {margin} points)."
+        )
 
     # ── Pattern registry ───────────────────────────────────────────────────────
 
@@ -342,6 +494,54 @@ class FastPathRouter:
                 requires_team=False,
                 requires_season=True,
             ),
+
+            # Player season stats — "Cripps stats 2024" / "How did Dangerfield go in 2023"
+            QueryPattern(
+                name="player_season_stats",
+                regex=re.compile(
+                    r"(?:(.+?)(?:'s|s)\s+(?:stats?|statistics|season|numbers)|"
+                    r"(?:how\s+(?:did|was)\s+(.+?)\s+(?:go|perform)(?:\s+in)?)|"
+                    r"(?:stats?\s+(?:for|of)\s+(.+?)))"
+                    r"\s*(?:in\s+)?(\d{4})",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._PLAYER_SEASON_STATS_SQL,
+                response_formatter=cls._fmt_player_season_stats,
+                requires_team=False,
+                requires_season=True,
+            ),
+
+            # Team ladder position — "Where did Richmond finish in 2023"
+            QueryPattern(
+                name="team_ladder_position",
+                regex=re.compile(
+                    r"(?:where\s+did\s+.+?\s+finish|"
+                    r"(?:ladder|standings?|final\s+(?:position|standing))|"
+                    r".+?\s+(?:ladder|finish)\s+(?:position|in))"
+                    r"\s*(?:in\s+)?(\d{4})"
+                    r"|(\d{4})\s*(?:ladder|standings?|final\s+standings?)",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._TEAM_LADDER_SQL,
+                response_formatter=cls._fmt_team_ladder,
+                requires_team=True,
+                requires_season=True,
+            ),
+
+            # Highest score — "highest score in 2024" / "biggest win in 2023"
+            QueryPattern(
+                name="highest_score",
+                regex=re.compile(
+                    r"(?:highest|biggest|largest|record)\s+(?:score|win|margin|total)"
+                    r"(?:\s+in)?\s*(\d{4})"
+                    r"|(\d{4}).{0,20}?(?:highest|biggest|largest|record)\s+(?:score|win|margin)",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._HIGHEST_SCORE_SQL,
+                response_formatter=cls._fmt_highest_score,
+                requires_team=False,
+                requires_season=True,
+            ),
         ]
 
     @classmethod
@@ -369,6 +569,31 @@ class FastPathRouter:
                 if resolved:
                     return resolved
         return None
+
+    @classmethod
+    def _extract_player_name(cls, query: str) -> Optional[str]:
+        """
+        Extract a player surname from the query for fast-path patterns.
+        Returns the raw name string for SQL ILIKE matching, or None.
+        """
+        # Common AFL stop words to exclude
+        stop_words = {
+            'how', 'did', 'was', 'what', 'who', 'where', 'when', 'the', 'in',
+            'for', 'of', 'and', 'top', 'best', 'most', 'stats', 'statistics',
+            'season', 'go', 'perform', 'goals', 'disposals', 'marks', 'tackles',
+            'kicks', 'handballs', 'numbers', 'afl', 'record', 'average', 'total'
+        }
+        # Try to find capitalized words that aren't stop words or team names
+        words = re.findall(r'\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\b', query)
+        candidates = []
+        for w in words:
+            if w.lower() in stop_words:
+                continue
+            # Check if it's a team name
+            if cls._extract_team(w) is not None:
+                continue
+            candidates.append(w)
+        return candidates[0] if len(candidates) == 1 else None
 
     @classmethod
     def _is_followup(cls, query: str) -> bool:
@@ -447,6 +672,19 @@ class FastPathRouter:
                     logger.debug(f"FAST-PATH: Pattern '{pattern.name}' requires team but none found")
                     continue  # Try next pattern
 
+            # Extract player if needed (for player_season_stats pattern)
+            player = None
+            if pattern.name == "player_season_stats":
+                # Try to get player name from regex capture groups (groups 1-3 are player name)
+                player = next((g for g in match.groups()[:3] if g and not g.isdigit()), None)
+                if player:
+                    player = player.strip()
+                else:
+                    player = cls._extract_player_name(user_query)
+                if not player:
+                    logger.debug(f"FAST-PATH: player_season_stats requires player but none found")
+                    continue
+
             # Emit progress to WebSocket
             if socketio_emit:
                 socketio_emit("thinking", {
@@ -456,7 +694,9 @@ class FastPathRouter:
 
             # Build and execute SQL
             try:
-                sql = pattern.sql_template.format(year=year, team=team or "")
+                sql = pattern.sql_template.format(
+                    year=year, team=team or "", player=player or ""
+                )
                 sql = " ".join(sql.split())  # Normalise whitespace
 
                 # Check cache first
@@ -477,7 +717,7 @@ class FastPathRouter:
                     return None
 
                 # Format response
-                fmt_kwargs = {"year": year, "team": team}
+                fmt_kwargs = {"year": year, "team": team, "player": player}
                 response_text = pattern.response_formatter(df, **fmt_kwargs)
 
                 if response_text is None:
