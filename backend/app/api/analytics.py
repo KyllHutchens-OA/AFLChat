@@ -114,6 +114,7 @@ def get_data():
         rows = result.fetchall()
 
         afl_chats = []
+        aflagent_chats = []
         resume_chats = []
 
         for row in rows:
@@ -149,6 +150,8 @@ def get_data():
                 }
                 if chat_type == 'resume':
                     resume_chats.append(chat_data)
+                elif chat_type == 'aflagent':
+                    aflagent_chats.append(chat_data)
                 else:
                     afl_chats.append(chat_data)
 
@@ -158,8 +161,10 @@ def get_data():
             'unique_ips': unique_ips,
             'views_by_page': [{'page': p, 'views': v} for p, v in views_by_page],
             'afl_chats': afl_chats,
+            'aflagent_chats': aflagent_chats,
             'resume_chats': resume_chats,
             'afl_message_count': sum(c['message_count'] for c in afl_chats),
+            'aflagent_message_count': sum(c['message_count'] for c in aflagent_chats),
             'resume_message_count': sum(c['message_count'] for c in resume_chats)
         })
 
@@ -360,6 +365,10 @@ DASHBOARD_TEMPLATE = '''
             <div class="stat-value" id="aflMessages">-</div>
             <div class="stat-label">AFL Messages</div>
         </div>
+        <div class="stat">
+            <div class="stat-value" id="aflagentMessages">-</div>
+            <div class="stat-label">AFL Agent Messages</div>
+        </div>
     </div>
 
     <div class="pages" id="pagesSection"></div>
@@ -367,6 +376,7 @@ DASHBOARD_TEMPLATE = '''
     <div class="tabs">
         <button class="tab active" onclick="showTab('resume')">Resume Chat</button>
         <button class="tab" onclick="showTab('afl')">AFL Chat</button>
+        <button class="tab" onclick="showTab('aflagent')">AFL Agent</button>
     </div>
 
     <div id="resumeSection" class="chat-section active">
@@ -375,6 +385,10 @@ DASHBOARD_TEMPLATE = '''
 
     <div id="aflSection" class="chat-section">
         <div class="chat-list" id="aflChats"></div>
+    </div>
+
+    <div id="aflagentSection" class="chat-section">
+        <div class="chat-list" id="aflagentChats"></div>
     </div>
 
     <script>
@@ -416,6 +430,7 @@ DASHBOARD_TEMPLATE = '''
             document.getElementById('uniqueVisitors').textContent = data.unique_visitors;
             document.getElementById('resumeMessages').textContent = data.resume_message_count;
             document.getElementById('aflMessages').textContent = data.afl_message_count;
+            document.getElementById('aflagentMessages').textContent = data.aflagent_message_count;
 
             const pagesHtml = data.views_by_page.map(p =>
                 `<div class="page-row"><span>${p.page}</span><span>${p.views} views</span></div>`
@@ -424,6 +439,7 @@ DASHBOARD_TEMPLATE = '''
 
             renderChats(data.resume_chats, 'resumeChats');
             renderChats(data.afl_chats, 'aflChats');
+            renderChats(data.aflagent_chats, 'aflagentChats');
         }
 
         loadData();

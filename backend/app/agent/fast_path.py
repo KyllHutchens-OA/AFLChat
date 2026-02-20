@@ -26,6 +26,70 @@ _FOLLOWUP_PATTERNS = re.compile(
     re.IGNORECASE
 )
 
+# ── Off-topic detection ──────────────────────────────────────────────────────
+# AFL-related keywords — if the query contains ANY of these, it's likely on-topic.
+_AFL_KEYWORDS = re.compile(
+    r"\b(afl|footy|football|aussie rules|round|season|grand final|finals|"
+    r"preliminary|elimination|qualifying|brownlow|coleman|norm smith|"
+    r"goal|goals|kick|kicks|handball|handballs|disposal|disposals|"
+    r"mark|marks|tackle|tackles|hitout|hitouts|clearance|clearances|"
+    r"inside.?50|rebound.?50|contested|uncontested|clanger|clangers|"
+    r"free.?kick|one.?percenter|bounces?|fantasy.?points?|"
+    r"win|wins|loss|losses|draw|draws|score|scores|scoring|"
+    r"ladder|premiership|flag|wooden spoon|percentage|"
+    r"player|team|club|match|game|quarter|half.?time|"
+    r"captain|coach|debut|traded?|draft|"
+    r"mcg|marvel|gabba|scg|optus|adelaide oval|"
+    r"stat|stats|statistics|average|total|record|"
+    r"top\s?\d+|best|worst|most|least|highest|lowest|compare|comparison|"
+    r"trend|over time|year by year|historical|performance|"
+    r"home|away|attendance|venue|stadium)\b",
+    re.IGNORECASE
+)
+
+# Team names and common nicknames for quick detection
+from app.analytics.entity_resolver import EntityResolver as _ER
+_ALL_TEAM_VARIATIONS = set()
+for _variations in _ER.TEAM_NICKNAMES.values():
+    for _v in _variations:
+        _ALL_TEAM_VARIATIONS.add(_v.lower())
+
+_OFF_TOPIC_RESPONSE = (
+    "I'm an AFL analytics agent — I can only help with Australian Football League "
+    "statistics and data from 1990-2025. Try asking about players, teams, matches, "
+    "or stats! For example: \"How many goals did Hawkins kick in 2024?\" or "
+    "\"Show me Richmond's win-loss record in 2023.\""
+)
+
+
+def _is_off_topic(query: str) -> bool:
+    """Return True if the query is clearly not AFL-related."""
+    q_lower = query.strip().lower()
+
+    # Short queries (1-3 words) that are greetings or generic — let them through
+    # to get a friendly redirect from the LLM
+    words = q_lower.split()
+    if len(words) <= 2:
+        return False
+
+    # Check for AFL keywords
+    if _AFL_KEYWORDS.search(q_lower):
+        return False
+
+    # Check for team names / nicknames in query
+    for team_var in _ALL_TEAM_VARIATIONS:
+        if team_var in q_lower:
+            return False
+
+    # Check for player-like patterns (capitalized words that could be surnames)
+    # Don't filter these — they might be player name queries
+    # e.g. "Cripps 2024" has no AFL keyword but is valid
+    if re.search(r'\b(19|20)\d{2}\b', q_lower):
+        return False
+
+    # No AFL signals found — likely off-topic
+    return True
+
 
 @dataclass
 class QueryPattern:
@@ -635,6 +699,41 @@ class FastPathRouter:
         from app.agent.state import QueryIntent, WorkflowStep
         from app.agent.tools import DatabaseTool
         from app.utils.cache import get_cached_result, set_cached_result
+
+        # Off-topic detection — reject clearly non-AFL queries immediately
+        if _is_off_topic(user_query):
+            logger.info(f"FAST-PATH: Off-topic query rejected: {user_query[:80]}")
+            return {
+                "user_query": user_query,
+                "intent": QueryIntent.SIMPLE_STAT,
+                "entities": {},
+                "needs_clarification": False,
+                "clarification_question": None,
+                "analysis_plan": ["Off-topic detection"],
+                "requires_visualization": False,
+                "chart_type": None,
+                "fallback_approach": None,
+                "analysis_mode": "summary",
+                "analysis_types": [],
+                "context_insights": {},
+                "data_quality": {},
+                "stats_summary": {},
+                "sql_query": None,
+                "sql_validated": False,
+                "query_results": None,
+                "statistical_analysis": {},
+                "execution_error": None,
+                "visualization_spec": None,
+                "natural_language_summary": _OFF_TOPIC_RESPONSE,
+                "confidence": 1.0,
+                "sources": [],
+                "current_step": WorkflowStep.RESPOND,
+                "thinking_message": "Done",
+                "errors": [],
+                "socketio_emit": socketio_emit,
+                "conversation_history": conversation_history or [],
+                "conversation_id": None,
+            }
 
         # Skip if query looks like a follow-up or spans multiple seasons
         if cls._is_followup(user_query):

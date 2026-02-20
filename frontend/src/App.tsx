@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
 import AFLChat from './pages/AFLChat';
+import AFLAgent from './pages/AFLAgent';
 import ResumeChat from './pages/ResumeChat';
 import { useAnalytics } from './hooks/useAnalytics';
 
@@ -11,6 +12,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/afl" element={<AFLChat />} />
+      <Route path="/aflagent/:conversationId?" element={<AFLAgent />} />
       <Route path="/resume" element={<ResumeChat />} />
     </Routes>
   );

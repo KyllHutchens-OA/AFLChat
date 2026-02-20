@@ -346,6 +346,18 @@ class AFLAnalyticsAgent:
             )
 
             if consolidated["success"]:
+                # Off-topic detection — LLM classified as non-AFL query
+                if consolidated["intent"] == "off_topic":
+                    logger.info("UNDERSTAND: LLM flagged query as off-topic")
+                    state["needs_clarification"] = True
+                    state["clarification_question"] = (
+                        "I'm an AFL analytics agent — I can only help with Australian Football League "
+                        "statistics and data from 1990-2025. Try asking about players, teams, matches, "
+                        "or stats! For example: \"How many goals did Hawkins kick in 2024?\" or "
+                        "\"Show me Richmond's win-loss record in 2023.\""
+                    )
+                    return state
+
                 understanding = {
                     "intent": consolidated["intent"],
                     "entities": consolidated["entities"],

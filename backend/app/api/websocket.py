@@ -63,6 +63,7 @@ def handle_chat_message(data):
         user_query = data.get('message')
         conversation_id = data.get('conversation_id')
         visitor_id = data.get('visitor_id') or session_id
+        source = data.get('source')  # 'aflagent' from standalone app, or None
 
         # Get client IP
         ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -96,10 +97,11 @@ def handle_chat_message(data):
         import asyncio
 
         # Create or load conversation
+        chat_type = source if source in ('afl', 'aflagent') else 'afl'
         if not conversation_id:
-            conversation_id = ConversationService.create_conversation(chat_type='afl')
+            conversation_id = ConversationService.create_conversation(chat_type=chat_type)
             session_emit('conversation_started', {'conversation_id': conversation_id})
-            logger.info(f"Created new AFL conversation: {conversation_id}")
+            logger.info(f"Created new {chat_type} conversation: {conversation_id}")
         else:
             logger.info(f"Continuing conversation: {conversation_id}")
 

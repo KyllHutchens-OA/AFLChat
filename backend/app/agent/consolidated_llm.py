@@ -52,6 +52,7 @@ You are an AFL analytics expert. In ONE step:
 - "player_comparison": Comparing multiple players
 - "team_analysis": One team's performance in a single season/period
 - "trend_analysis": Change over TIME (keywords: "over time", "across time", "year by year", "historical", "trend", "evolution", "since")
+- "off_topic": Query is NOT about AFL football (e.g. recipes, weather, general knowledge). Return this intent with sql="" for any non-AFL question.
 
 ## Entity Extraction Rules
 - **Teams**: AFL club names (use canonical names: Adelaide, Brisbane Lions, Carlton, Collingwood, Essendon, Fremantle, Geelong, Gold Coast, Greater Western Sydney, Hawthorn, Melbourne, North Melbourne, Port Adelaide, Richmond, St Kilda, Sydney, West Coast, Western Bulldogs)
@@ -212,6 +213,20 @@ class ConsolidatedQueryUnderstanding:
             sql = data.get("sql", "").strip()
             chart_type = data.get("chart_type")  # May be null/None
             chart_config = data.get("chart_config", {})
+
+            # Off-topic queries don't need SQL
+            if intent == "off_topic":
+                logger.info("CONSOLIDATED-LLM: Off-topic query detected by LLM")
+                return {
+                    "success": True,
+                    "intent": "off_topic",
+                    "entities": entities,
+                    "requires_visualization": False,
+                    "sql": None,
+                    "chart_type": None,
+                    "chart_config": {},
+                    "error": None,
+                }
 
             # Basic validation
             if not sql or not sql.upper().startswith("SELECT"):
