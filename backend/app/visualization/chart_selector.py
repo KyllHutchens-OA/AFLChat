@@ -45,7 +45,8 @@ class ChartSelector:
         user_query: str,
         data: pd.DataFrame,
         intent: str,
-        entities: Dict[str, Any]
+        entities: Dict[str, Any],
+        **kwargs
     ) -> Dict[str, Any]:
         """
         Intelligently select optimal chart configuration.
@@ -55,6 +56,7 @@ class ChartSelector:
             data: Query results DataFrame
             intent: Classified intent (TREND_ANALYSIS, etc.)
             entities: Extracted entities (teams, metrics, etc.)
+            **kwargs: Optional llm_chart_type_hint, llm_chart_config_hint
 
         Returns:
             Dictionary with:
@@ -62,27 +64,32 @@ class ChartSelector:
             - x_col: str
             - y_col: str or List[str]
             - group_col: Optional[str]
-            - aggregation: Optional[str]
-            - orientation: Optional[str]
             - reasoning: str (why this chart was chosen)
         """
         try:
-            # Quick heuristics for obvious cases
-            quick_result = cls._quick_heuristics(data, intent)
+            # Quick heuristics for obvious cases (covers ~90% of queries)
+            quick_result = cls._quick_heuristics(data, intent, entities, user_query)
             if quick_result:
                 logger.info(f"Chart selection via quick heuristics: {quick_result['chart_type']}")
                 return quick_result
 
-            # Use LLM for intelligent selection
+            # Check if consolidated LLM provided a chart type hint
+            llm_hint = kwargs.get("llm_chart_type_hint")
+            hint_config = kwargs.get("llm_chart_config_hint", {})
+            if llm_hint:
+                validated_hint = cls._validate_llm_hint(llm_hint, hint_config, data)
+                if validated_hint:
+                    logger.info(f"Chart selection via consolidated LLM hint: {validated_hint['chart_type']}")
+                    return validated_hint
+
+            # Use LLM for intelligent selection (rare fallback)
             llm_result = cls._llm_chart_selection(user_query, data, intent, entities)
 
             if llm_result:
-                # Validate LLM result
                 validated = cls._validate_and_enhance(llm_result, data)
                 logger.info(f"Chart selection via LLM: {validated['chart_type']}")
                 return validated
 
-            # Fallback to rule-based
             logger.warning("LLM chart selection failed, using fallback")
             return cls._fallback_selection(data, intent)
 
@@ -94,45 +101,221 @@ class ChartSelector:
     def _quick_heuristics(
         cls,
         data: pd.DataFrame,
-        intent: str
+        intent: str,
+        entities: Dict[str, Any] = None,
+        user_query: str = ""
     ) -> Optional[Dict[str, Any]]:
         """
         Quick heuristics for obvious cases to avoid LLM call.
 
-        Returns None if case is not obvious.
+        Handles ~90% of AFL chart queries based on intent + data shape.
+        Returns None only for genuinely ambiguous cases.
         """
-        # Single row -> no chart needed
         if len(data) <= 1:
             return None
 
-        # Single numeric column with temporal dimension -> line chart
         numeric_cols = data.select_dtypes(include=['number']).columns.tolist()
+        # Filter out ID and temporal-identifier columns from numeric
+        numeric_cols = [c for c in numeric_cols if 'id' not in c.lower() and c not in ('season', 'year')]
+        non_numeric = data.select_dtypes(exclude=['number']).columns.tolist()
         temporal_cols = [col for col in data.columns if col in ['season', 'year', 'match_date', 'round']]
+        intent_upper = str(intent).upper() if intent else ""
 
+        # Helper: detect grouping column (non-numeric, non-temporal, with >1 unique value)
+        # Excludes team columns — SQL often JOINs home_team/away_team as context, not as chart dimension
+        TEAM_COLS = {'home_team', 'away_team', 'team', 'team_name', 'opponent'}
+        def _find_group_col():
+            candidates = [c for c in non_numeric
+                          if c not in ['season', 'year', 'match_date', 'round']
+                          and c.lower() not in TEAM_COLS]
+            for c in candidates:
+                if 1 < data[c].nunique() <= 20:
+                    return c
+            return None
+
+        # Rule 1: Single numeric + single temporal -> line chart (existing)
         if len(numeric_cols) == 1 and len(temporal_cols) == 1:
             return {
                 "chart_type": "line",
                 "x_col": temporal_cols[0],
                 "y_col": numeric_cols[0],
-                "group_col": None,
-                "reasoning": "Single metric over time - line chart is optimal",
+                "group_col": _find_group_col(),
+                "reasoning": "Single metric over time - line chart",
                 "confidence": "high"
             }
 
-        # 2-5 rows, no temporal dimension -> bar chart
-        if 2 <= len(data) <= 5 and not temporal_cols:
-            non_numeric = data.select_dtypes(exclude=['number']).columns.tolist()
-            if non_numeric and numeric_cols:
+        # Rule 2: 2-5 rows, no temporal -> bar chart (existing, extended to 20)
+        if 2 <= len(data) <= 20 and not temporal_cols and non_numeric and numeric_cols:
+            return {
+                "chart_type": "bar",
+                "x_col": non_numeric[0],
+                "y_col": numeric_cols[0],
+                "group_col": None,
+                "reasoning": "Category comparison - bar chart",
+                "confidence": "high"
+            }
+
+        # Rule 3: TREND_ANALYSIS -> always line chart
+        if "TREND" in intent_upper:
+            # Prefer round for per-match data (single season), season for multi-year
+            has_round = 'round' in data.columns
+            has_season = 'season' in data.columns
+            season_count = data['season'].nunique() if has_season else 0
+
+            if has_round and season_count <= 1:
+                temporal_col = 'round'
+            elif has_season and season_count > 1:
+                temporal_col = 'season'
+            else:
+                temporal_col = next(
+                    (c for c in data.columns if c in ['round', 'season', 'year', 'match_date']),
+                    data.columns[0]
+                )
+
+            y_candidates = [c for c in numeric_cols if c != temporal_col]
+
+            # Prefer a column matching the user's requested metrics
+            requested_metrics = [m.lower().replace(' ', '_') for m in (entities or {}).get("metrics", [])]
+            y_col = None
+            if requested_metrics:
+                for candidate in y_candidates:
+                    if candidate.lower() in requested_metrics or any(m in candidate.lower() for m in requested_metrics):
+                        y_col = candidate
+                        break
+            if not y_col:
+                y_col = y_candidates[0] if y_candidates else (numeric_cols[0] if numeric_cols else data.columns[-1])
+
+            return {
+                "chart_type": "line",
+                "x_col": temporal_col,
+                "y_col": y_col,
+                "group_col": _find_group_col(),
+                "reasoning": "Trend analysis - line chart over time",
+                "confidence": "high"
+            }
+
+        # Rule 4: PLAYER_COMPARISON -> grouped_bar or bar
+        if "COMPARISON" in intent_upper or "PLAYER_COMPARISON" in intent_upper:
+            name_col = next(
+                (c for c in data.columns if c.lower() in ['name', 'player', 'player_name']),
+                non_numeric[0] if non_numeric else data.columns[0]
+            )
+            if len(numeric_cols) > 2:
+                return {
+                    "chart_type": "grouped_bar",
+                    "x_col": name_col,
+                    "y_col": numeric_cols[:6],
+                    "group_col": name_col,
+                    "reasoning": "Player comparison with multiple metrics - grouped bar",
+                    "confidence": "high"
+                }
+            else:
+                y_col = numeric_cols[0] if numeric_cols else data.columns[-1]
+                return {
+                    "chart_type": "bar",
+                    "x_col": name_col,
+                    "y_col": y_col,
+                    "group_col": None,
+                    "reasoning": "Player comparison - bar chart",
+                    "confidence": "high"
+                }
+
+        # Rule 5: Top-N / ranking queries -> bar chart
+        query_lower = user_query.lower()
+        is_top_n = any(kw in query_lower for kw in ['top', 'most', 'best', 'highest', 'leading', 'rank', 'lowest', 'worst', 'fewest'])
+        if is_top_n and 2 <= len(data) <= 20 and non_numeric and numeric_cols:
+            return {
+                "chart_type": "bar",
+                "x_col": non_numeric[0],
+                "y_col": numeric_cols[0],
+                "group_col": None,
+                "reasoning": "Top-N ranking query - bar chart",
+                "confidence": "high"
+            }
+
+        # Rule 6: TEAM_ANALYSIS with temporal column -> line chart
+        if "TEAM" in intent_upper:
+            if temporal_cols and len(data) > 3:
+                # Same temporal priority: round for single season, season for multi-year
+                has_round = 'round' in data.columns
+                has_season = 'season' in data.columns
+                season_count = data['season'].nunique() if has_season else 0
+                if has_round and season_count <= 1:
+                    t_col = 'round'
+                else:
+                    t_col = temporal_cols[0]
+
+                # Prefer metric matching user request
+                requested_metrics = [m.lower().replace(' ', '_') for m in (entities or {}).get("metrics", [])]
+                y_col = None
+                if requested_metrics:
+                    for candidate in numeric_cols:
+                        if candidate.lower() in requested_metrics or any(m in candidate.lower() for m in requested_metrics):
+                            y_col = candidate
+                            break
+                if not y_col:
+                    y_col = numeric_cols[0] if numeric_cols else data.columns[-1]
+
+                return {
+                    "chart_type": "line",
+                    "x_col": t_col,
+                    "y_col": y_col,
+                    "group_col": None,
+                    "reasoning": "Team analysis over time - line chart",
+                    "confidence": "high"
+                }
+            elif non_numeric and numeric_cols:
                 return {
                     "chart_type": "bar",
                     "x_col": non_numeric[0],
                     "y_col": numeric_cols[0],
                     "group_col": None,
-                    "reasoning": "Few categories to compare - bar chart is optimal",
+                    "reasoning": "Team analysis - bar chart",
                     "confidence": "high"
                 }
 
-        # Not obvious, need LLM analysis
+        # Rule 7: General fallback - many data points with temporal -> line
+        if temporal_cols and len(data) > 5 and numeric_cols:
+            has_round = 'round' in data.columns
+            has_season = 'season' in data.columns
+            season_count = data['season'].nunique() if has_season else 0
+            if has_round and season_count <= 1:
+                t_col = 'round'
+            else:
+                t_col = temporal_cols[0]
+
+            # Prefer metric matching user request
+            requested_metrics = [m.lower().replace(' ', '_') for m in (entities or {}).get("metrics", [])]
+            y_col = None
+            if requested_metrics:
+                for candidate in numeric_cols:
+                    if candidate.lower() in requested_metrics or any(m in candidate.lower() for m in requested_metrics):
+                        y_col = candidate
+                        break
+            if not y_col:
+                y_col = numeric_cols[0]
+
+            return {
+                "chart_type": "line",
+                "x_col": t_col,
+                "y_col": y_col,
+                "group_col": _find_group_col(),
+                "reasoning": "Time series data - line chart",
+                "confidence": "medium"
+            }
+
+        # Rule 8: General fallback - categorical data -> bar
+        if 2 <= len(data) <= 30 and non_numeric and numeric_cols:
+            return {
+                "chart_type": "bar",
+                "x_col": non_numeric[0],
+                "y_col": numeric_cols[0],
+                "group_col": None,
+                "reasoning": "Category data - bar chart",
+                "confidence": "medium"
+            }
+
+        # Genuinely ambiguous - fall through to LLM
         return None
 
     @classmethod
@@ -211,17 +394,15 @@ Important:
 """
 
             # Call GPT-5-nano for fast decision
-            response = client.responses.create(
+            response = client.chat.completions.create(
                 model="gpt-5-nano",
-                input=[{
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": prompt}]
-                }],
-                text={"format": {"type": "json_object"}}
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                reasoning_effort="low",
             )
 
             # Parse LLM response
-            result = json.loads(response.output_text)
+            result = json.loads(response.choices[0].message.content or "{}")
 
             logger.info(f"LLM chart selection: {result.get('chart_type')} (confidence: {result.get('confidence')})")
             logger.info(f"Reasoning: {result.get('reasoning')}")
@@ -288,6 +469,50 @@ Important:
             "reasoning": llm_result.get("reasoning", ""),
             "confidence": llm_result.get("confidence", "medium"),
             "alternative": llm_result.get("alternative")
+        }
+
+    @classmethod
+    def _validate_llm_hint(
+        cls,
+        chart_type: str,
+        hint_config: Dict[str, Any],
+        data: pd.DataFrame
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Validate a chart type hint from the consolidated LLM call.
+
+        Returns validated config or None if hint is invalid.
+        """
+        if not chart_type or chart_type not in cls.CHART_TYPES:
+            return None
+
+        x_col = hint_config.get("x_col_hint")
+        y_col = hint_config.get("y_col_hint")
+
+        # Validate columns exist
+        if x_col and x_col not in data.columns:
+            x_col = None
+        if isinstance(y_col, str) and y_col not in data.columns:
+            y_col = None
+
+        # If columns are missing, try to infer them
+        if not x_col:
+            temporal = [c for c in data.columns if c in ['season', 'year', 'match_date', 'round']]
+            non_numeric = data.select_dtypes(exclude=['number']).columns.tolist()
+            x_col = temporal[0] if temporal else (non_numeric[0] if non_numeric else data.columns[0])
+
+        if not y_col:
+            numeric = data.select_dtypes(include=['number']).columns.tolist()
+            numeric = [c for c in numeric if 'id' not in c.lower()]
+            y_col = numeric[0] if numeric else data.columns[-1]
+
+        return {
+            "chart_type": chart_type,
+            "x_col": x_col,
+            "y_col": y_col,
+            "group_col": None,
+            "reasoning": "Chart type from consolidated LLM hint",
+            "confidence": "medium"
         }
 
     @classmethod

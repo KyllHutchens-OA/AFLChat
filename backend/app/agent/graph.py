@@ -3,7 +3,7 @@ AFL Analytics Agent - LangGraph Workflow
 
 Defines the agent workflow: UNDERSTAND → ANALYZE_DEPTH → PLAN → EXECUTE → VISUALIZE → RESPOND
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from langgraph.graph import StateGraph, END
 from openai import OpenAI
 import httpx
@@ -134,6 +134,19 @@ class AFLAnalyticsAgent:
             Final agent state with response
         """
         from typing import List, Any
+
+        # ── Fast-path: answer simple queries without any LLM calls ──────────
+        from app.agent.fast_path import FastPathRouter
+        fast_result = FastPathRouter.try_fast_path(
+            user_query=user_query,
+            conversation_history=conversation_history,
+            socketio_emit=socketio_emit,
+        )
+        if fast_result is not None:
+            fast_result["conversation_id"] = conversation_id
+            logger.info(f"FAST-PATH answered: {user_query[:60]}")
+            return fast_result
+        # ────────────────────────────────────────────────────────────────────
 
         initial_state = AgentState(
             user_query=user_query,
@@ -320,61 +333,74 @@ class AFLAnalyticsAgent:
 
                 conversation_context += "\nUse this context to resolve ambiguous references (e.g., 'What about 2023?' or 'Compare them').\n---\n\n"
 
-            # Use GPT-5-nano to understand the query (Responses API)
-            logger.info("UNDERSTAND: Calling OpenAI API (gpt-5-nano) for query understanding...")
-            response = client.responses.create(
-                model="gpt-5-nano",
-                input=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": f"""You are an AFL analytics query analyzer. Parse the user's question and extract:
-1. Intent: What type of analysis are they asking for?
-2. Entities: What teams, players, seasons, or metrics are mentioned?
+            # ── Consolidated single LLM call: intent + entities + SQL ──────────
+            # This replaces both the old standalone intent call here AND the
+            # QueryBuilder.generate_sql() call in execute_node, saving one
+            # full OpenAI round-trip per query.
+            from app.agent.consolidated_llm import ConsolidatedQueryUnderstanding
+            logger.info("UNDERSTAND: Calling consolidated LLM (intent + SQL in one call)...")
 
-Intent Classification:
-- "simple_stat": Single number/fact (e.g., "How many wins?", "What was the score?")
-- "player_comparison": Comparing multiple players
-- "team_analysis": Single team's performance over a SINGLE season/period
-- "trend_analysis": TEMPORAL queries showing change over TIME (keywords: "over time", "across time", "year by year", "historical", "trend", "evolution", "since joining", "throughout history")
-
-Entity Classification Rules:
-- **Players**: Surnames (e.g., "Dangerfield", "Cripps", "Bontempelli"), full names (e.g., "Patrick Dangerfield"), or nicknames
-- **Teams**: AFL club names (e.g., "Richmond", "Collingwood", "Geelong", "Brisbane Lions", "Greater Western Sydney")
-- **Metrics**: Statistics like "goals", "disposals", "marks", "tackles", "wins", "losses", "score"
-- **Seasons**: Years (e.g., "2022", "2023", "last year", "this year")
-
-CRITICAL Rules:
-- If the query contains temporal keywords (over time, across time, year-by-year, historical, trend, since, evolution), the intent MUST be "trend_analysis"
-- Single surnames (e.g., "Dangerfield", "Cripps") are ALWAYS players, NEVER teams
-- If uncertain whether something is a player or team, prefer "players" for single-word surnames
-
-{conversation_context}Return a JSON object with:
-{{
-  "intent": "simple_stat" | "player_comparison" | "team_analysis" | "trend_analysis",
-  "entities": {{
-    "teams": [...],
-    "players": [...],
-    "seasons": [...],
-    "metrics": [...],
-    "rounds": [...]
-  }},
-  "requires_visualization": true/false
-}}
-
-Current user question: {state["user_query"]}"""
-                            }
-                        ]
-                    }
-                ],
-                text={"format": {"type": "json_object"}}
+            consolidated = ConsolidatedQueryUnderstanding.understand_and_generate_sql(
+                user_query=state["user_query"],
+                conversation_history=conversation_history,
             )
 
-            import json
-            logger.info(f"UNDERSTAND: OpenAI API call successful, parsing response...")
-            understanding = json.loads(response.output_text)
+            if consolidated["success"]:
+                understanding = {
+                    "intent": consolidated["intent"],
+                    "entities": consolidated["entities"],
+                    "requires_visualization": consolidated["requires_visualization"],
+                }
+                # Store the pre-generated SQL so execute_node skips its own SQL call
+                state["pre_generated_sql"] = consolidated["sql"]
+                # Store chart hints for visualize_node (avoids separate chart LLM call)
+                state["llm_chart_type_hint"] = consolidated.get("chart_type")
+                state["llm_chart_config_hint"] = consolidated.get("chart_config", {})
+                logger.info(
+                    f"UNDERSTAND: Consolidated call OK — intent={consolidated['intent']}, "
+                    f"chart_hint={consolidated.get('chart_type')}, "
+                    f"sql_preview={consolidated['sql'][:60]}..."
+                )
+            else:
+                # Consolidated call failed — use lightweight heuristic intent instead of another LLM call
+                logger.warning(
+                    f"UNDERSTAND: Consolidated call failed ({consolidated['error']}), "
+                    f"using heuristic intent classification"
+                )
+
+                query_lower = state["user_query"].lower()
+                import re as _re
+
+                # Heuristic intent classification
+                if any(kw in query_lower for kw in ["over time", "across time", "trend", "historical", "evolution", "year by year", "since"]):
+                    heuristic_intent = "trend_analysis"
+                    heuristic_viz = True
+                elif any(kw in query_lower for kw in ["compare", " vs ", "versus", "against"]):
+                    heuristic_intent = "player_comparison"
+                    heuristic_viz = True
+                elif any(kw in query_lower for kw in ["performance", "record", "season", "how did"]):
+                    heuristic_intent = "team_analysis"
+                    heuristic_viz = True
+                else:
+                    heuristic_intent = "simple_stat"
+                    heuristic_viz = False
+
+                # Extract years with regex
+                years = _re.findall(r'\b((?:19|20)\d{2})\b', state["user_query"])
+
+                understanding = {
+                    "intent": heuristic_intent,
+                    "entities": {
+                        "teams": [],
+                        "players": [],
+                        "seasons": years,
+                        "metrics": [],
+                        "rounds": []
+                    },
+                    "requires_visualization": heuristic_viz,
+                }
+                # No pre_generated_sql — execute_node will call QueryBuilder as before
+
             logger.info(f"UNDERSTAND: Parsed understanding: intent={understanding.get('intent')}, entities={understanding.get('entities')}")
 
             state["intent"] = QueryIntent(understanding.get("intent", "unknown"))
@@ -433,8 +459,6 @@ Current user question: {state["user_query"]}"""
         - thinking_message
         """
         state["current_step"] = WorkflowStep.ANALYZE_DEPTH
-        state["thinking_message"] = "🎯 Analyzing query complexity..."
-        self._emit_progress(state, "analyze_depth", "🎯 Analyzing query complexity...")
 
         logger.info(f"ANALYZE_DEPTH: Determining analysis mode for intent={state.get('intent')}")
 
@@ -480,6 +504,10 @@ Current user question: {state["user_query"]}"""
         # Determine mode
         analysis_mode = "in_depth" if score >= 3 else "summary"
 
+        # Only emit progress for in-depth queries (summary queries are too fast to show)
+        if analysis_mode == "in_depth":
+            self._emit_progress(state, "analyze_depth", "Analyzing query complexity...")
+
         # Determine analysis types based on mode
         if analysis_mode == "in_depth":
             analysis_types = ["average"]
@@ -521,10 +549,12 @@ Current user question: {state["user_query"]}"""
         - thinking_message
         """
         state["current_step"] = WorkflowStep.PLAN
-        state["thinking_message"] = "📋 Planning the analysis..."
-        self._emit_progress(state, "plan", "📋 Planning the analysis...")
 
         intent = state.get('intent', QueryIntent.SIMPLE_STAT)
+
+        # Only emit progress for non-simple intents
+        if intent != QueryIntent.SIMPLE_STAT:
+            self._emit_progress(state, "plan", "Planning the analysis...")
         logger.info(f"PLAN: Creating analysis plan for intent: {intent}")
 
         try:
@@ -584,16 +614,20 @@ Current user question: {state["user_query"]}"""
         logger.info("EXECUTE: Generating and running SQL query")
 
         try:
-            # Step 1: Generate SQL from natural language
-            # Use RESOLVED entities (normalized team names, validated seasons, etc.)
-            # Pass conversation history to resolve ambiguous references like "this", "them", etc.
-            logger.info(f"EXECUTE: Calling QueryBuilder.generate_sql with query='{state['user_query'][:100]}', entities={state.get('entities')}")
-            sql_result = QueryBuilder.generate_sql(
-                state["user_query"],
-                context=state["entities"],  # These are now validated/normalized
-                conversation_history=state.get("conversation_history", [])
-            )
-            logger.info(f"EXECUTE: SQL generation result: success={sql_result.get('success')}, error={sql_result.get('error')}")
+            # Step 1: Get SQL — use pre-generated SQL from consolidated LLM call if available,
+            # otherwise generate via QueryBuilder (fallback to separate LLM call).
+            pre_sql = state.get("pre_generated_sql")
+            if pre_sql:
+                logger.info(f"EXECUTE: Using pre-generated SQL from consolidated call: {pre_sql[:80]}...")
+                sql_result = {"success": True, "sql": pre_sql, "error": None}
+            else:
+                logger.info(f"EXECUTE: Calling QueryBuilder.generate_sql with query='{state['user_query'][:100]}', entities={state.get('entities')}")
+                sql_result = QueryBuilder.generate_sql(
+                    state["user_query"],
+                    context=state["entities"],  # These are now validated/normalized
+                    conversation_history=state.get("conversation_history", [])
+                )
+                logger.info(f"EXECUTE: SQL generation result: success={sql_result.get('success')}, error={sql_result.get('error')}")
 
             if not sql_result["success"]:
                 error_msg = f"SQL generation failed: {sql_result['error']}"
@@ -604,6 +638,16 @@ Current user question: {state["user_query"]}"""
                 return state
 
             state["sql_query"] = sql_result["sql"]
+
+            # Fix common LLM SQL mistake: ILIKE 'Name%' should be ILIKE '%Name%'
+            # because player names are stored as "First Last"
+            import re as _re
+            state["sql_query"] = _re.sub(
+                r"ILIKE\s+'([^%'])",
+                r"ILIKE '%\1",
+                state["sql_query"]
+            )
+
             logger.info(f"Generated SQL: {state['sql_query']}")
 
             # Step 2: Execute query (check cache first)
@@ -731,6 +775,24 @@ Current user question: {state["user_query"]}"""
             intent = state.get("intent")
             entities = state.get("entities", {})
 
+            # FIX ROUND ORDERING: round is VARCHAR so SQL sorts lexicographically.
+            # Sort numerics first (ascending), then finals in correct AFL order.
+            if "round" in data.columns:
+                _FINALS_ORDER = {
+                    "Qualifying Final": 100, "Elimination Final": 101,
+                    "Semi Final": 102, "Preliminary Final": 103, "Grand Final": 104,
+                }
+                def _round_sort_key(r):
+                    r_str = str(r).strip()
+                    if r_str in _FINALS_ORDER:
+                        return _FINALS_ORDER[r_str]
+                    try:
+                        return int(r_str)
+                    except ValueError:
+                        return 999
+                data = data.iloc[data["round"].map(_round_sort_key).argsort()].reset_index(drop=True)
+                state["query_results"] = data
+
             # VALIDATION: Check if we have enough data points for a useful chart
             MIN_DATA_POINTS = 2  # Need at least 2 points for a trend
             if len(data) < MIN_DATA_POINTS:
@@ -746,7 +808,9 @@ Current user question: {state["user_query"]}"""
                 user_query=user_query,
                 data=data,
                 intent=str(intent),
-                entities=entities
+                entities=entities,
+                llm_chart_type_hint=state.get("llm_chart_type_hint"),
+                llm_chart_config_hint=state.get("llm_chart_config_hint", {}),
             )
 
             logger.info(f"ChartSelector recommendation: {chart_config.get('chart_type')} "
@@ -832,9 +896,15 @@ Current user question: {state["user_query"]}"""
                            f"x_rotation={layout_config.get('xaxis', {}).get('tickangle')}")
 
                 # OVERRIDE: If preprocessor recommends bar chart (e.g., for count metrics), use it
-                if recommendations.get("prefer_bar_chart") and chart_type == "line":
+                # BUT skip for temporal/sequential x-axes — line charts are correct for
+                # round-by-round or season-by-season progression even with count metrics.
+                temporal_x_cols = {"round", "season", "year", "match_date", "date", "round_number", "round_num"}
+                x_is_temporal = x_col and x_col.lower().strip() in temporal_x_cols
+                if recommendations.get("prefer_bar_chart") and chart_type == "line" and not x_is_temporal:
                     logger.info(f"Overriding chart type: line → bar (count metric detected: {y_col})")
                     chart_type = "bar"
+                elif recommendations.get("prefer_bar_chart") and chart_type == "line" and x_is_temporal:
+                    logger.info(f"Keeping line chart despite count metric ({y_col}) — x-axis is temporal ({x_col})")
 
             # Generate smart title
             params["title"] = ChartHelper.generate_chart_title(
@@ -973,6 +1043,116 @@ Current user question: {state["user_query"]}"""
 
         return "\n".join(parts)
 
+    @staticmethod
+    def _try_template_response(state: AgentState) -> Optional[str]:
+        """
+        Try to generate a response from templates without an LLM call.
+
+        Returns a response string, or None to fall through to LLM.
+
+        Handles:
+        - Single-row simple_stat results (1 fact/number)
+        - Top-N list results (ranking tables)
+        - Chart-accompaniment one-liners
+        """
+        intent = state.get("intent")
+        data = state.get("query_results")
+        entities = state.get("entities", {})
+        has_chart = state.get("visualization_spec") is not None
+        analysis_mode = state.get("analysis_mode", "summary")
+
+        if data is None or len(data) == 0:
+            return None
+
+        # Complex in-depth queries without charts still use LLM
+        if analysis_mode == "in_depth" and not has_chart:
+            return None
+
+        teams = entities.get("teams", [])
+        players = entities.get("players", [])
+        seasons = entities.get("seasons", [])
+
+        # --- PATTERN 1: Single-row result (simple_stat) ---
+        if intent == QueryIntent.SIMPLE_STAT and len(data) == 1:
+            row = data.iloc[0]
+            numeric_cols = data.select_dtypes(include=['number']).columns.tolist()
+
+            def _fmt_val(v):
+                if isinstance(v, float) and v == int(v):
+                    return str(int(v))
+                elif isinstance(v, float):
+                    return f"{v:.1f}"
+                return str(v)
+
+            if len(numeric_cols) == 1:
+                col = numeric_cols[0]
+                value = row[col]
+                col_label = col.replace("_", " ")
+                subject = players[0] if players else teams[0] if teams else ""
+                season_str = f" in {seasons[0]}" if seasons else ""
+
+                if subject:
+                    return f"{subject} had {_fmt_val(value)} {col_label}{season_str}."
+                else:
+                    return f"The result is {_fmt_val(value)} {col_label}{season_str}."
+
+            elif 2 <= len(numeric_cols) <= 5:
+                subject = players[0] if players else teams[0] if teams else ""
+                season_str = f" in {seasons[0]}" if seasons else ""
+                parts = []
+                for col in numeric_cols:
+                    parts.append(f"{_fmt_val(row[col])} {col.replace('_', ' ')}")
+                stats_str = ", ".join(parts)
+                if subject:
+                    return f"{subject}{season_str}: {stats_str}."
+                else:
+                    return f"Results{season_str}: {stats_str}."
+
+        # --- PATTERN 2: Top-N list (2-10 rows, has name column + numeric) ---
+        if intent == QueryIntent.SIMPLE_STAT and 2 <= len(data) <= 10:
+            name_cols = [c for c in data.columns if c.lower() in ['name', 'player', 'player_name', 'team', 'winner']]
+            numeric_cols = data.select_dtypes(include=['number']).columns.tolist()
+            # Filter out ID columns
+            numeric_cols = [c for c in numeric_cols if 'id' not in c.lower()]
+
+            if name_cols and numeric_cols:
+                name_col = name_cols[0]
+                metric_col = numeric_cols[0]
+                season_str = f" in {seasons[0]}" if seasons else ""
+                metric_label = metric_col.replace("_", " ")
+
+                # Detect team column for context
+                team_col = next((c for c in data.columns if c.lower() == 'team' and c != name_col), None)
+
+                lines = []
+                for i, (_, row) in enumerate(data.iterrows()):
+                    val = row[metric_col]
+                    if isinstance(val, float) and val == int(val):
+                        val = int(val)
+                    team_str = f" ({row[team_col]})" if team_col else ""
+                    lines.append(f"{i+1}. {row[name_col]}{team_str} — {val} {metric_label}")
+
+                header = f"Top {metric_label}{season_str}:"
+                return header + "\n" + "\n".join(lines)
+
+        # --- PATTERN 3: Chart accompaniment (very brief text) ---
+        if has_chart:
+            subject = players[0] if players else teams[0] if teams else "the data"
+            season_str = f" ({seasons[0]})" if seasons else ""
+            intent_str = str(intent).upper() if intent else ""
+
+            if "TREND" in intent_str:
+                return f"Here's {subject}'s trend over time{season_str}. The chart shows the progression across seasons."
+            elif "COMPARISON" in intent_str:
+                compared = " and ".join(players[:3]) if players else "the players"
+                return f"Here's a comparison of {compared}{season_str}. See the chart for the full breakdown."
+            elif "TEAM" in intent_str:
+                return f"Here's {subject}'s performance breakdown{season_str}."
+            else:
+                return f"Here are the results for {subject}{season_str}."
+
+        return None
+
     async def respond_node(self, state: AgentState) -> AgentState:
         """
         RESPOND node: Format natural language response.
@@ -983,8 +1163,8 @@ Current user question: {state["user_query"]}"""
         - thinking_message
         """
         state["current_step"] = WorkflowStep.RESPOND
-        state["thinking_message"] = "✍️ Writing response..."
-        self._emit_progress(state, "respond", "✍️ Writing response...")
+        state["thinking_message"] = "Writing response..."
+        self._emit_progress(state, "respond", "Writing response...")
 
         logger.info("RESPOND: Generating natural language response")
 
@@ -1002,7 +1182,6 @@ Current user question: {state["user_query"]}"""
                 error_detail = state.get("execution_error", "Unknown error")
                 logger.error(f"RESPOND: execution_error detected: {error_detail}")
 
-                # Include error details for debugging (helps diagnose deployment issues)
                 state["natural_language_summary"] = (
                     f"I encountered an issue while analyzing your query.\n\n"
                     f"**Debug info:** {error_detail}\n\n"
@@ -1014,15 +1193,12 @@ Current user question: {state["user_query"]}"""
 
             # Check if we have results
             if state.get("query_results") is None or len(state["query_results"]) == 0:
-                # Provide helpful suggestions based on what went wrong
                 raw_query = state.get("user_query", "")
                 suggestions = []
 
-                # Check if there were entity resolution issues
                 if state.get("needs_clarification"):
                     suggestions.append(state.get("clarification_question", ""))
 
-                # Suggest checking team names
                 if "entities" in state and "teams" in state["entities"]:
                     if not state["entities"]["teams"]:
                         suggestions.append(
@@ -1044,17 +1220,14 @@ Current user question: {state["user_query"]}"""
             # Check if results are all NULL (query succeeded but no data for that filter)
             data = state["query_results"]
 
-            # Check if ALL columns are NULL (indicates no data for this query)
             all_null = data.isnull().all().all() if len(data) > 0 else False
             logger.info(f"NULL check: len(data)={len(data)}, all_null={all_null}, data=\n{data}")
 
             if all_null:
-                # All columns are NULL - no data exists for this query
                 entities = state.get("entities", {})
                 players = entities.get("players", [])
                 seasons = entities.get("seasons", [])
 
-                # Build helpful message
                 if players and seasons:
                     player_name = players[0] if players else "this player"
                     season = seasons[0] if seasons else "this season"
@@ -1071,6 +1244,17 @@ Current user question: {state["user_query"]}"""
                     )
 
                 state["confidence"] = 0.4
+                return state
+
+            # Try template response first (avoids LLM call for simple queries)
+            template_response = self._try_template_response(state)
+            if template_response is not None:
+                state["natural_language_summary"] = template_response
+                state["confidence"] = 0.9
+                state["sources"] = ["AFL Tables (1990-2025)"]
+                state["thinking_message"] = "Response complete"
+                self._emit_progress(state, "respond", "Response complete")
+                logger.info("RESPOND: Used template response (no LLM call)")
                 return state
 
             # Format statistics for GPT consumption
@@ -1234,23 +1418,14 @@ Statistical Insights:
 
 Provide a concise analysis (3-5 sentences):"""
 
-            # Generate response using GPT-5-nano (Responses API)
-            response = client.responses.create(
+            # Generate response using GPT-5-nano (Chat Completions API, low reasoning)
+            response = client.chat.completions.create(
                 model="gpt-5-nano",
-                input=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": prompt
-                            }
-                        ]
-                    }
-                ]
+                messages=[{"role": "user", "content": prompt}],
+                reasoning_effort="low",
             )
 
-            state["natural_language_summary"] = response.output_text.strip()
+            state["natural_language_summary"] = (response.choices[0].message.content or "").strip()
             state["confidence"] = 0.9
             state["sources"] = ["AFL Tables (1990-2025)"]
             state["thinking_message"] = "Response complete"

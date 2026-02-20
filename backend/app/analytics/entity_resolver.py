@@ -279,6 +279,26 @@ class EntityResolver:
 
         session = Session()
         try:
+            # Check for exact name match first (case-insensitive)
+            exact_result = session.execute(
+                text("""
+                    SELECT DISTINCT p.name, p.id
+                    FROM players p
+                    WHERE LOWER(p.name) = LOWER(:name)
+                """),
+                {"name": player_name}
+            )
+            exact_matches = exact_result.fetchall()
+            if len(exact_matches) == 1:
+                logger.info(f"Exact name match for '{player_name}': {exact_matches[0][0]}")
+                return {
+                    "needs_clarification": False,
+                    "resolved_name": exact_matches[0][0],
+                    "candidates": [exact_matches[0][0]],
+                    "clarification_question": None,
+                    "warning": None
+                }
+
             # Find all players matching the name (using ILIKE for case-insensitive partial match)
             result = session.execute(
                 text("""
