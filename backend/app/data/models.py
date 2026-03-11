@@ -12,6 +12,7 @@ from sqlalchemy import (
     Numeric,
     ForeignKey,
     UniqueConstraint,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -349,3 +350,225 @@ class APIUsage(Base):
 
     def __repr__(self):
         return f"<APIUsage {self.visitor_id} ${self.estimated_cost_usd}>"
+
+
+class LiveGame(Base):
+    """Live game data with real-time updates from Squiggle SSE."""
+
+    __tablename__ = "live_games"
+
+    id = Column(Integer, primary_key=True)
+    squiggle_game_id = Column(Integer, nullable=False, unique=True, index=True)
+    match_id = Column(
+        Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=True
+    )  # Link to Match when completed
+
+    # Game identification
+    season = Column(Integer, nullable=False)
+    round = Column(String(50), nullable=False)
+
+    # Teams
+    home_team_id = Column(
+        Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
+    )
+    away_team_id = Column(
+        Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Live scoring
+    home_score = Column(Integer, default=0)
+    away_score = Column(Integer, default=0)
+    home_goals = Column(Integer, default=0)
+    home_behinds = Column(Integer, default=0)
+    away_goals = Column(Integer, default=0)
+    away_behinds = Column(Integer, default=0)
+
+    # Quarter-by-quarter (for progressive updates)
+    home_q1_score = Column(Integer, default=0)
+    home_q2_score = Column(Integer, default=0)
+    home_q3_score = Column(Integer, default=0)
+    home_q4_score = Column(Integer, default=0)
+    away_q1_score = Column(Integer, default=0)
+    away_q2_score = Column(Integer, default=0)
+    away_q3_score = Column(Integer, default=0)
+    away_q4_score = Column(Integer, default=0)
+
+    # Game state
+    status = Column(
+        String(20), nullable=False, default="scheduled", index=True
+    )  # scheduled, live, completed
+    complete_percent = Column(Integer, default=0)  # 0-100
+    time_str = Column(String(50))  # "Q2 15:32", "Half Time", etc.
+    current_quarter = Column(Integer)  # 1-4
+
+    # Match details
+    venue = Column(String(100))
+    match_date = Column(DateTime, nullable=False)
+
+    # Winner (null until game completes)
+    winner_team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
+
+    # Metadata
+    last_updated = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
+    )
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    home_team = relationship("Team", foreign_keys=[home_team_id])
+    away_team = relationship("Team", foreign_keys=[away_team_id])
+    winner_team = relationship("Team", foreign_keys=[winner_team_id])
+    match = relationship("Match", foreign_keys=[match_id])
+    events = relationship(
+        "LiveGameEvent", back_populates="game", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self):
+        return f"<LiveGame {self.season} R{self.round}: {self.home_team_id} vs {self.away_team_id} ({self.status})>"
+
+
+class LiveGameEvent(Base):
+    """Individual scoring events during live games."""
+
+    __tablename__ = "live_game_events"
+
+    id = Column(Integer, primary_key=True)
+    game_id = Column(
+        Integer,
+        ForeignKey("live_games.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Event details
+    event_type = Column(
+        String(20), nullable=False
+    )  # 'goal', 'behind', 'quarter_end', 'game_start'
+    team_id = Column(
+        Integer, ForeignKey("teams.id"), nullable=True
+    )  # Null for quarter_end events
+    player_name = Column(String(200))  # Player who scored (if available from API)
+
+    # Scoring context
+    home_score_after = Column(Integer)
+    away_score_after = Column(Integer)
+    quarter = Column(Integer)
+    time_str = Column(String(50))
+
+    # Metadata
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    game = relationship("LiveGame", back_populates="events")
+    team = relationship("Team")
+
+    def __repr__(self):
+        return f"<LiveGameEvent {self.event_type} Game:{self.game_id} Q{self.quarter}>"
+
+
+class NewsArticle(Base):
+    """AFL news articles from RSS feeds and web search."""
+
+    __tablename__ = "news_articles"
+
+    id = Column(Integer, primary_key=True)
+    source = Column(String(100), nullable=False)  # 'afl.com.au', 'foxsports', etc.
+    title = Column(String(500), nullable=False)
+    url = Column(String(1000), nullable=False, unique=True)  # Prevents duplicates
+    published_date = Column(DateTime, nullable=False, index=True)
+    content = Column(String)  # Summary/excerpt
+    author = Column(String(200))
+
+    # Search optimization
+    is_injury_related = Column(Boolean, default=False, index=True)
+    related_teams = Column(JSONB)  # ['Collingwood', 'Richmond']
+    related_players = Column(JSONB)  # ['Dustin Martin']
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_news_injury_published', 'is_injury_related', 'published_date'),
+    )
+
+    def __repr__(self):
+        return f"<NewsArticle {self.source}: {self.title[:50]}>"
+
+
+class BettingOdds(Base):
+    """Betting odds from The Odds API."""
+
+    __tablename__ = "betting_odds"
+
+    id = Column(Integer, primary_key=True)
+    match_id = Column(Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=False)
+    bookmaker = Column(String(100), nullable=False)
+
+    # Head-to-head odds (decimal format)
+    home_odds = Column(Numeric(6, 2))
+    away_odds = Column(Numeric(6, 2))
+
+    odds_fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('match_id', 'bookmaker', 'odds_fetched_at'),
+        Index('idx_odds_match_fetched', 'match_id', 'odds_fetched_at'),
+    )
+
+    # Relationships
+    match = relationship("Match", backref="betting_odds")
+
+    def __repr__(self):
+        return f"<BettingOdds Match:{self.match_id} {self.bookmaker}>"
+
+
+class SquigglePrediction(Base):
+    """Match predictions from Squiggle API."""
+
+    __tablename__ = "squiggle_predictions"
+
+    id = Column(Integer, primary_key=True)
+    match_id = Column(Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=False)
+
+    predicted_winner_id = Column(Integer, ForeignKey("teams.id"))
+    predicted_margin = Column(Numeric(5, 1))
+    home_win_probability = Column(Numeric(5, 2))  # 0-100
+    away_win_probability = Column(Numeric(5, 2))
+
+    source_model = Column(String(100))  # 'Squiggle', 'ELO'
+    prediction_date = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('match_id', 'source_model', 'prediction_date'),
+    )
+
+    # Relationships
+    match = relationship("Match", backref="predictions")
+    predicted_winner = relationship("Team", foreign_keys=[predicted_winner_id])
+
+    def __repr__(self):
+        return f"<SquigglePrediction Match:{self.match_id} Winner:{self.predicted_winner_id}>"
+
+
+class APIRequestLog(Base):
+    """Log API requests for cost monitoring and rate limiting."""
+
+    __tablename__ = "api_request_logs"
+
+    id = Column(Integer, primary_key=True)
+    api_name = Column(String(50), nullable=False, index=True)  # 'theoddsapi', 'tavily'
+    endpoint = Column(String(200))
+    request_timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    status_code = Column(Integer)
+    success = Column(Boolean, default=False)
+    error_message = Column(String)
+    response_time_ms = Column(Integer)
+
+    estimated_cost = Column(Numeric(10, 6))  # USD
+
+    __table_args__ = (
+        Index('idx_api_name_timestamp', 'api_name', 'request_timestamp'),
+    )
+
+    def __repr__(self):
+        return f"<APIRequestLog {self.api_name} {self.request_timestamp}>"

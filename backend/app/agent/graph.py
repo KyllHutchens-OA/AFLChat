@@ -620,6 +620,68 @@ class AFLAnalyticsAgent:
         - thinking_message
         """
         state["current_step"] = WorkflowStep.EXECUTE
+        intent = state.get("intent")
+
+        # Route to appropriate tool based on intent
+        # NEWS QUERIES
+        if intent in [QueryIntent.AFL_NEWS, QueryIntent.INJURY_NEWS]:
+            from app.agent.tools import NewsTool
+
+            state["thinking_message"] = "📰 Searching for AFL news..."
+            self._emit_progress(state, "execute", "📰 Searching for AFL news...")
+
+            filters = {
+                'injury_only': intent == QueryIntent.INJURY_NEWS,
+                'teams': state.get("entities", {}).get("teams", []),
+                'days_back': 7
+            }
+
+            result = NewsTool.search_news(state["user_query"], filters, max_results=5)
+            state["query_results"] = result.get("articles", [])
+            state["requires_visualization"] = False
+            state["thinking_message"] = f"Found {len(state['query_results'])} news articles"
+            self._emit_progress(state, "execute", state["thinking_message"])
+            return state
+
+        # BETTING ODDS
+        elif intent == QueryIntent.BETTING_ODDS:
+            from app.agent.tools import BettingTool
+
+            state["thinking_message"] = "💰 Fetching betting odds..."
+            self._emit_progress(state, "execute", "💰 Fetching betting odds...")
+
+            entities = state.get("entities", {})
+            result = BettingTool.get_odds(
+                team_name=entities.get("teams", [None])[0] if entities.get("teams") else None,
+                round_num=entities.get("rounds", [None])[0] if entities.get("rounds") else None,
+                season=entities.get("seasons", [None])[0] if entities.get("seasons") else None
+            )
+            state["query_results"] = result.get("matches", [])
+            state["requires_visualization"] = False
+            state["thinking_message"] = f"Found odds for {len(state['query_results'])} matches"
+            self._emit_progress(state, "execute", state["thinking_message"])
+            return state
+
+        # TIPPING ADVICE
+        elif intent == QueryIntent.TIPPING_ADVICE:
+            from app.agent.tools import TippingTool
+
+            state["thinking_message"] = "🎯 Getting tipping predictions..."
+            self._emit_progress(state, "execute", "🎯 Getting tipping predictions...")
+
+            entities = state.get("entities", {})
+            result = TippingTool.get_tips(
+                teams=entities.get("teams"),
+                round_num=entities.get("rounds", [None])[0] if entities.get("rounds") else None,
+                season=entities.get("seasons", [None])[0] if entities.get("seasons") else None
+            )
+            state["query_results"] = result.get("predictions", [])
+            state["requires_visualization"] = False
+            state["thinking_message"] = f"Found predictions for {len(state['query_results'])} matches"
+            self._emit_progress(state, "execute", state["thinking_message"])
+            return state
+
+        # DATABASE QUERIES (existing flow)
         state["thinking_message"] = "🔨 Generating SQL query..."
         self._emit_progress(state, "execute", "🔨 Generating SQL query...")
 
@@ -1083,6 +1145,70 @@ class AFLAnalyticsAgent:
         teams = entities.get("teams", [])
         players = entities.get("players", [])
         seasons = entities.get("seasons", [])
+
+        # --- NEWS RESPONSE ---
+        if intent in [QueryIntent.AFL_NEWS, QueryIntent.INJURY_NEWS]:
+            if not data:
+                return "I couldn't find any recent news matching your query."
+
+            lines = []
+            for i, article in enumerate(data[:5], 1):
+                lines.append(
+                    f"{i}. **{article['title']}** ({article['source']})\n"
+                    f"   {article['url']}"
+                )
+
+            header = "Recent injury news:" if intent == QueryIntent.INJURY_NEWS else "Latest AFL news:"
+            return header + "\n\n" + "\n\n".join(lines)
+
+        # --- BETTING ODDS RESPONSE ---
+        if intent == QueryIntent.BETTING_ODDS:
+            if not data:
+                return "I couldn't find betting odds for the specified matches."
+
+            lines = []
+            for match in data[:5]:
+                lines.append(f"\n**{match['home_team']} vs {match['away_team']}**")
+                lines.append(f"📅 {match['match_date'][:10]} • {match['round']} • {match['venue']}")
+
+                odds = match.get('odds', [])
+                if not odds:
+                    lines.append("  No odds available yet")
+                else:
+                    for odd in odds[:3]:  # Limit to 3 bookmakers
+                        lines.append(
+                            f"  {odd['bookmaker']}: Home ${odd['home_odds']:.2f}, "
+                            f"Away ${odd['away_odds']:.2f}"
+                        )
+
+            return "Current betting odds:\n" + "\n".join(lines)
+
+        # --- TIPPING ADVICE RESPONSE ---
+        if intent == QueryIntent.TIPPING_ADVICE:
+            if not data:
+                return "I don't have predictions available for those matches."
+
+            lines = []
+            for pred in data[:5]:
+                match = pred['match']
+                prediction = pred['prediction']
+
+                winner = prediction.get('predicted_winner', 'Unknown')
+                margin = prediction.get('predicted_margin', 0)
+                prob = prediction.get('home_win_probability', 50)
+
+                # Determine if home or away team is predicted winner
+                is_home_winner = prob > 50
+                confidence_pct = prob if is_home_winner else (100 - prob)
+
+                lines.append(
+                    f"**{match['home_team']} vs {match['away_team']}**\n"
+                    f"  💡 Tip: **{winner}** by {abs(margin):.1f} points\n"
+                    f"  📊 Confidence: {confidence_pct:.0f}%\n"
+                    f"  📅 {match['match_date'][:10]} • {match['round']}"
+                )
+
+            return "Tipping recommendations from Squiggle:\n\n" + "\n\n".join(lines)
 
         # --- PATTERN 1: Single-row result (simple_stat) ---
         if intent == QueryIntent.SIMPLE_STAT and len(data) == 1:

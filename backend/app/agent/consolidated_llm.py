@@ -52,7 +52,13 @@ You are an AFL analytics expert. In ONE step:
 - "player_comparison": Comparing multiple players
 - "team_analysis": One team's performance in a single season/period
 - "trend_analysis": Change over TIME (keywords: "over time", "across time", "year by year", "historical", "trend", "evolution", "since")
+- "afl_news": Latest AFL news or articles (e.g., "What's the latest AFL news?", "Show me recent news")
+- "injury_news": Injury reports or player availability (e.g., "Any injuries for Collingwood?", "Who's out this week?")
+- "betting_odds": Betting odds or lines (e.g., "What are the odds for next round?", "Show me betting odds")
+- "tipping_advice": Tipping recommendations (e.g., "Who should I tip?", "Predictions for this round")
 - "off_topic": Query is NOT about AFL football (e.g. recipes, weather, general knowledge). Return this intent with sql="" for any non-AFL question.
+
+**IMPORTANT**: For news, injury, betting, or tipping queries, set sql="" (empty string) as these queries do NOT require database SQL queries.
 
 ## Entity Extraction Rules
 - **Teams**: AFL club names (use canonical names: Adelaide, Brisbane Lions, Carlton, Collingwood, Essendon, Fremantle, Geelong, Gold Coast, Greater Western Sydney, Hawthorn, Melbourne, North Melbourne, Port Adelaide, Richmond, St Kilda, Sydney, West Coast, Western Bulldogs)

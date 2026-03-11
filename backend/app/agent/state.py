@@ -23,6 +23,10 @@ class QueryIntent(str, Enum):
     PLAYER_COMPARISON = "player_comparison"  # "Compare Cripps vs Oliver"
     TEAM_ANALYSIS = "team_analysis"  # "Show Collingwood's scoring trend"
     TREND_ANALYSIS = "trend_analysis"  # "Max Gawn's hitout average over time"
+    AFL_NEWS = "afl_news"  # "What's the latest AFL news?"
+    INJURY_NEWS = "injury_news"  # "Any injuries for Collingwood?"
+    BETTING_ODDS = "betting_odds"  # "What are the odds for next round?"
+    TIPPING_ADVICE = "tipping_advice"  # "Who should I tip in Collingwood v Adelaide?"
     UNKNOWN = "unknown"
 
 

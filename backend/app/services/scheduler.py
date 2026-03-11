@@ -1,0 +1,175 @@
+"""
+Background Scheduler - Lightweight cleanup tasks for live games.
+SSE handles real-time updates, so this just manages housekeeping.
+"""
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+from datetime import datetime, timedelta
+import logging
+import atexit
+
+from app.data.database import get_session
+from app.data.models import LiveGame
+
+logger = logging.getLogger(__name__)
+
+
+class LiveGameScheduler:
+    """Manages background jobs for live game system."""
+
+    def __init__(self, sse_listener=None):
+        """
+        Initialize scheduler.
+
+        Args:
+            sse_listener: SSE listener instance to monitor
+        """
+        self.scheduler = BackgroundScheduler(daemon=True)
+        self.sse_listener = sse_listener
+        self.is_running = False
+
+    def start(self):
+        """Start background scheduler."""
+        if self.is_running:
+            logger.warning("Scheduler already running")
+            return
+
+        # Job 1: Cleanup old completed games (daily at 3 AM)
+        self.scheduler.add_job(
+            func=self._cleanup_old_games,
+            trigger=CronTrigger(hour=3, minute=0),
+            id="cleanup_old_games",
+            name="Cleanup old completed games",
+            replace_existing=True,
+        )
+
+        # Job 2: Health check SSE connection (every 5 minutes)
+        self.scheduler.add_job(
+            func=self._health_check,
+            trigger=IntervalTrigger(minutes=5),
+            id="sse_health_check",
+            name="SSE connection health check",
+            replace_existing=True,
+        )
+
+        # Job 3: Fetch RSS news (every hour)
+        self.scheduler.add_job(
+            func=self._fetch_rss_news,
+            trigger=IntervalTrigger(hours=1),
+            id="fetch_rss_news",
+            name="Fetch RSS news feeds",
+            replace_existing=True,
+        )
+
+        # Job 4: Update betting odds (daily at 9 AM AEST)
+        self.scheduler.add_job(
+            func=self._update_betting_odds,
+            trigger=CronTrigger(hour=9, minute=0, timezone='Australia/Melbourne'),
+            id="update_betting_odds",
+            name="Update betting odds",
+            replace_existing=True,
+        )
+
+        # Job 5: Update Squiggle predictions (daily at 8 AM AEST)
+        self.scheduler.add_job(
+            func=self._update_squiggle_predictions,
+            trigger=CronTrigger(hour=8, minute=0, timezone='Australia/Melbourne'),
+            id="update_squiggle_predictions",
+            name="Update Squiggle predictions",
+            replace_existing=True,
+        )
+
+        self.scheduler.start()
+        self.is_running = True
+
+        # Register shutdown handler
+        atexit.register(lambda: self.scheduler.shutdown(wait=False))
+
+        logger.info("✓ Background scheduler started")
+
+    def stop(self):
+        """Stop scheduler gracefully."""
+        if not self.is_running:
+            return
+
+        self.scheduler.shutdown(wait=False)
+        self.is_running = False
+        logger.info("✓ Background scheduler stopped")
+
+    def _cleanup_old_games(self):
+        """Remove completed games older than 7 days."""
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=7)
+
+            with get_session() as session:
+                deleted_count = (
+                    session.query(LiveGame)
+                    .filter(
+                        LiveGame.status == "completed", LiveGame.last_updated < cutoff
+                    )
+                    .delete()
+                )
+
+                session.commit()
+
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} old completed games")
+
+        except Exception as e:
+            logger.error(f"Error in cleanup job: {e}")
+
+    def _health_check(self):
+        """Verify SSE listener is running, restart if needed."""
+        try:
+            if not self.sse_listener:
+                return
+
+            if not self.sse_listener.is_running:
+                logger.warning("SSE listener not running, restarting...")
+                self.sse_listener.start()
+
+        except Exception as e:
+            logger.error(f"Error in health check: {e}")
+
+    def _fetch_rss_news(self):
+        """Hourly: Fetch RSS feeds."""
+        try:
+            from app.data.ingestion.rss_news_fetcher import RSSNewsFetcher
+
+            articles_added = RSSNewsFetcher.fetch_all_feeds()
+            logger.info(f"RSS job complete: {articles_added} new articles")
+        except Exception as e:
+            logger.error(f"RSS job failed: {e}")
+
+    def _update_betting_odds(self):
+        """Daily: Update odds with rate limiting."""
+        try:
+            from app.data.ingestion.odds_fetcher import OddsFetcher
+
+            requests_made = OddsFetcher.update_upcoming_matches(days_ahead=7, max_requests=16)
+            logger.info(f"Odds job complete: {requests_made} API requests")
+        except Exception as e:
+            logger.error(f"Odds job failed: {e}")
+
+    def _update_squiggle_predictions(self):
+        """Daily: Update predictions."""
+        try:
+            from app.data.ingestion.squiggle_fetcher import SquiggleFetcher
+
+            predictions = SquiggleFetcher.fetch_current_round_predictions()
+            logger.info(f"Predictions job complete: {predictions} updated")
+        except Exception as e:
+            logger.error(f"Predictions job failed: {e}")
+
+
+# Global singleton
+_scheduler_instance = None
+
+
+def get_scheduler(sse_listener=None):
+    """Get or create global scheduler instance."""
+    global _scheduler_instance
+    if _scheduler_instance is None:
+        _scheduler_instance = LiveGameScheduler(sse_listener=sse_listener)
+    return _scheduler_instance
