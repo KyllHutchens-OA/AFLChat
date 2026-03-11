@@ -993,3 +993,252 @@ class StatisticsTool:
             summary_parts.append(f"leads by {gap:.2f}")
 
         return "; ".join(summary_parts)
+
+
+class NewsTool:
+    """Search AFL news with cache-first, web fallback strategy."""
+
+    @staticmethod
+    def search_news(query: str, filters: Optional[Dict] = None, max_results: int = 5) -> Dict[str, Any]:
+        """
+        Search for AFL news.
+
+        Strategy:
+        1. Search cached RSS articles (fast, free)
+        2. If <3 results, fallback to web search API (future)
+
+        Args:
+            query: Search query
+            filters: Optional filters (injury_only, teams, days_back)
+            max_results: Maximum number of results
+
+        Returns:
+            Dictionary with success, articles, and source
+        """
+        filters = filters or {}
+
+        # Search cache first
+        cached = NewsTool._search_cache(query, filters, max_results)
+
+        if len(cached) >= 3:
+            return {'success': True, 'articles': cached, 'source': 'cache'}
+
+        # For now, just return cached results
+        # Future: Add web search fallback with Tavily API
+        return {'success': True, 'articles': cached, 'source': 'cache'}
+
+    @staticmethod
+    def _search_cache(query: str, filters: Dict, max_results: int) -> list:
+        """Search NewsArticle table with filters."""
+        from app.data.models import NewsArticle
+        from datetime import datetime, timedelta
+
+        session = Session()
+
+        try:
+            q = session.query(NewsArticle)
+
+            # Filter by injury flag if requested
+            if filters.get('injury_only'):
+                q = q.filter(NewsArticle.is_injury_related == True)
+
+            # Filter by teams (JSONB contains)
+            if filters.get('teams'):
+                # For now, simple approach - future: use JSONB operators
+                pass
+
+            # Recency filter (default 7 days)
+            days_back = filters.get('days_back', 7)
+            cutoff = datetime.utcnow() - timedelta(days=days_back)
+            q = q.filter(NewsArticle.published_date >= cutoff)
+
+            # Text search
+            if query:
+                search_pattern = f'%{query}%'
+                q = q.filter(
+                    (NewsArticle.title.ilike(search_pattern)) |
+                    (NewsArticle.content.ilike(search_pattern))
+                )
+
+            articles = q.order_by(NewsArticle.published_date.desc()).limit(max_results).all()
+
+            return [{
+                'title': a.title,
+                'url': a.url,
+                'source': a.source,
+                'published_date': a.published_date.isoformat(),
+                'content': a.content[:200] if a.content else None
+            } for a in articles]
+
+        finally:
+            session.close()
+
+
+class BettingTool:
+    """Query betting odds from database."""
+
+    @staticmethod
+    def get_odds(match_id=None, team_name=None, round_num=None, season=None) -> Dict[str, Any]:
+        """
+        Get betting odds for matches.
+
+        Args:
+            match_id: Specific match ID
+            team_name: Team name to filter
+            round_num: Round number
+            season: Season year (defaults to current)
+
+        Returns:
+            Dictionary with success and matches with odds
+        """
+        from app.data.models import Match, BettingOdds, Team
+        from datetime import datetime
+
+        session = Session()
+
+        try:
+            # Find matches based on params
+            q = session.query(Match)
+
+            if match_id:
+                q = q.filter(Match.id == match_id)
+
+            if team_name:
+                # Match home or away team by name
+                team = session.query(Team).filter(Team.name.ilike(f'%{team_name}%')).first()
+                if team:
+                    q = q.filter((Match.home_team_id == team.id) | (Match.away_team_id == team.id))
+
+            if round_num:
+                q = q.filter(Match.round == str(round_num))
+
+            if season:
+                q = q.filter(Match.season == season)
+            else:
+                # Default to current season
+                q = q.filter(Match.season == datetime.now().year)
+
+            # Get recent upcoming matches if no filters
+            if not any([match_id, team_name, round_num]):
+                q = q.filter(Match.match_date > datetime.now()).order_by(Match.match_date).limit(10)
+
+            matches = q.all()
+
+            # Format with odds
+            result = []
+            for match in matches:
+                # Get most recent odds per bookmaker
+                odds = session.query(BettingOdds).filter_by(match_id=match.id).\
+                       order_by(BettingOdds.odds_fetched_at.desc()).limit(5).all()
+
+                result.append({
+                    'match_id': match.id,
+                    'home_team': match.home_team.name,
+                    'away_team': match.away_team.name,
+                    'match_date': match.match_date.isoformat(),
+                    'round': match.round,
+                    'venue': match.venue,
+                    'odds': [{
+                        'bookmaker': o.bookmaker,
+                        'home_odds': float(o.home_odds),
+                        'away_odds': float(o.away_odds),
+                        'fetched_at': o.odds_fetched_at.isoformat()
+                    } for o in odds]
+                })
+
+            return {'success': True, 'matches': result}
+
+        except Exception as e:
+            logger.error(f"Error getting odds: {e}")
+            return {'success': False, 'error': str(e), 'matches': []}
+        finally:
+            session.close()
+
+
+class TippingTool:
+    """Query Squiggle match predictions."""
+
+    @staticmethod
+    def get_tips(match_id=None, teams=None, round_num=None, season=None) -> Dict[str, Any]:
+        """
+        Get tipping predictions.
+
+        Args:
+            match_id: Specific match ID
+            teams: List of team names
+            round_num: Round number
+            season: Season year (defaults to current)
+
+        Returns:
+            Dictionary with success and predictions
+        """
+        from app.data.models import Match, SquigglePrediction, Team
+        from datetime import datetime
+
+        session = Session()
+
+        try:
+            # Find matches
+            q = session.query(Match)
+
+            if match_id:
+                q = q.filter(Match.id == match_id)
+
+            if teams and len(teams) >= 2:
+                # Match specific teams
+                team1 = session.query(Team).filter(Team.name.ilike(f'%{teams[0]}%')).first()
+                team2 = session.query(Team).filter(Team.name.ilike(f'%{teams[1]}%')).first()
+
+                if team1 and team2:
+                    q = q.filter(
+                        ((Match.home_team_id == team1.id) & (Match.away_team_id == team2.id)) |
+                        ((Match.home_team_id == team2.id) & (Match.away_team_id == team1.id))
+                    )
+
+            if round_num:
+                q = q.filter(Match.round == str(round_num))
+
+            if season:
+                q = q.filter(Match.season == season)
+            else:
+                q = q.filter(Match.season == datetime.now().year)
+
+            # Default: upcoming matches
+            if not any([match_id, teams, round_num]):
+                q = q.filter(Match.match_date > datetime.now()).order_by(Match.match_date).limit(10)
+
+            matches = q.all()
+
+            # Get predictions
+            predictions = []
+            for match in matches:
+                pred = session.query(SquigglePrediction).filter_by(match_id=match.id).\
+                       order_by(SquigglePrediction.prediction_date.desc()).first()
+
+                if pred:
+                    predictions.append({
+                        'match': {
+                            'match_id': match.id,
+                            'home_team': match.home_team.name,
+                            'away_team': match.away_team.name,
+                            'match_date': match.match_date.isoformat(),
+                            'round': match.round,
+                            'venue': match.venue
+                        },
+                        'prediction': {
+                            'predicted_winner': pred.predicted_winner.name if pred.predicted_winner else None,
+                            'predicted_margin': float(pred.predicted_margin) if pred.predicted_margin else None,
+                            'home_win_probability': float(pred.home_win_probability) if pred.home_win_probability else None,
+                            'away_win_probability': float(pred.away_win_probability) if pred.away_win_probability else None,
+                            'source_model': pred.source_model,
+                            'prediction_date': pred.prediction_date.isoformat()
+                        }
+                    })
+
+            return {'success': True, 'predictions': predictions}
+
+        except Exception as e:
+            logger.error(f"Error getting tips: {e}")
+            return {'success': False, 'error': str(e), 'predictions': []}
+        finally:
+            session.close()
