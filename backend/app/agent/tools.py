@@ -1023,9 +1023,11 @@ class NewsTool:
         if len(cached) >= 3:
             return {'success': True, 'articles': cached, 'source': 'cache'}
 
-        # For now, just return cached results
-        # Future: Add web search fallback with Tavily API
-        return {'success': True, 'articles': cached, 'source': 'cache'}
+        # Cache has fewer than 3 results — fallback to Tavily web search (expensive, last resort)
+        web_results = NewsTool._search_web(query, filters, max_results - len(cached))
+        combined = cached + web_results
+        source = 'cache+web' if web_results else 'cache'
+        return {'success': True, 'articles': combined, 'source': source}
 
     @staticmethod
     def _search_cache(query: str, filters: Dict, max_results: int) -> list:
@@ -1042,10 +1044,19 @@ class NewsTool:
             if filters.get('injury_only'):
                 q = q.filter(NewsArticle.is_injury_related == True)
 
-            # Filter by teams (JSONB contains)
+            # Filter by teams (JSONB contains — related_teams is a JSON array of team name strings)
             if filters.get('teams'):
-                # For now, simple approach - future: use JSONB operators
-                pass
+                from sqlalchemy import cast
+                from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+                teams = filters['teams']
+                if isinstance(teams, str):
+                    teams = [teams]
+                team_filters = [
+                    NewsArticle.related_teams.contains(cast([team], PG_JSONB))
+                    for team in teams
+                ]
+                from sqlalchemy import or_
+                q = q.filter(or_(*team_filters))
 
             # Recency filter (default 7 days)
             days_back = filters.get('days_back', 7)
@@ -1072,6 +1083,94 @@ class NewsTool:
 
         finally:
             session.close()
+
+    @staticmethod
+    def _search_web(query: str, filters: Dict, max_results: int) -> list:
+        """
+        Fallback web search via Tavily API.
+        Only called when cache returns < 3 results. Logs cost to APIRequestLog.
+        """
+        import os
+        import time
+        from app.data.database import Session as DbSession
+        from app.data.models import APIRequestLog
+
+        api_key = os.getenv("TAVILY_API_KEY")
+        if not api_key:
+            logger.warning("TAVILY_API_KEY not set, skipping web search fallback")
+            return []
+
+        try:
+            from tavily import TavilyClient
+        except ImportError:
+            logger.warning("tavily-python not installed, skipping web search fallback")
+            return []
+
+        # Build a focused AFL news query
+        search_query = f"AFL {query}"
+        if filters.get('injury_only'):
+            search_query = f"AFL injury {query}"
+        if filters.get('teams'):
+            teams = filters['teams']
+            if isinstance(teams, str):
+                teams = [teams]
+            search_query = f"AFL {' '.join(teams)} {query}"
+
+        start_time = time.time()
+        db_session = DbSession()
+
+        try:
+            client = TavilyClient(api_key=api_key)
+            response = client.search(
+                query=search_query,
+                search_depth="basic",
+                max_results=max_results,
+                include_domains=["afl.com.au", "foxsports.com.au", "theage.com.au",
+                                 "heraldsun.com.au", "abc.net.au", "espn.com.au"],
+            )
+
+            elapsed_ms = int((time.time() - start_time) * 1000)
+
+            # Log cost ($0.005 per basic search)
+            log = APIRequestLog(
+                api_name='tavily',
+                endpoint='search',
+                request_timestamp=datetime.utcnow(),
+                status_code=200,
+                success=True,
+                response_time_ms=elapsed_ms,
+                estimated_cost=0.005,
+            )
+            db_session.add(log)
+            db_session.commit()
+
+            results = response.get('results', [])
+            return [{
+                'title': r.get('title', ''),
+                'url': r.get('url', ''),
+                'source': 'web',
+                'published_date': r.get('published_date') or datetime.utcnow().isoformat(),
+                'content': r.get('content', '')[:200] if r.get('content') else None,
+            } for r in results]
+
+        except Exception as e:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            log = APIRequestLog(
+                api_name='tavily',
+                endpoint='search',
+                request_timestamp=datetime.utcnow(),
+                status_code=500,
+                success=False,
+                error_message=str(e),
+                response_time_ms=elapsed_ms,
+                estimated_cost=0.0,
+            )
+            db_session.add(log)
+            db_session.commit()
+            logger.error(f"Tavily web search failed: {e}")
+            return []
+        finally:
+            db_session.close()
 
 
 class BettingTool:
