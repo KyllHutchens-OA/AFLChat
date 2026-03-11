@@ -113,29 +113,6 @@ def get_conversation(conversation_id):
         return jsonify({'error': 'Failed to retrieve conversation'}), 500
 
 
-# ==================== RESUME ENDPOINTS ====================
-
-@bp.route('/resume/data', methods=['GET'])
-def get_resume_data():
-    """
-    Get resume data for visualizations.
-    Returns skills and experience data formatted for charts.
-    """
-    try:
-        from app.resume.data import get_skills_for_visualization, get_experience_for_visualization, RESUME_DATA
-
-        return jsonify({
-            'name': RESUME_DATA['name'],
-            'title': RESUME_DATA['title'],
-            'skills': get_skills_for_visualization(),
-            'experience': get_experience_for_visualization()
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Error getting resume data: {e}")
-        return jsonify({'error': 'Failed to load resume data'}), 500
-
-
 # ==================== ANALYTICS ENDPOINTS ====================
 
 @bp.route('/analytics/track', methods=['POST'])
