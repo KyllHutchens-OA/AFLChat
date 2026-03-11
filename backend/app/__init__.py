@@ -94,6 +94,19 @@ def create_app(config=None):
     # Register WebSocket handlers
     from app.api import websocket
 
+    # Start background scheduler (news, odds, predictions refresh)
+    from app.services.scheduler import get_scheduler
+    scheduler = get_scheduler()
+    scheduler.start()
+    logger.info("✓ Background data scheduler started")
+
+    # Log env var status for scheduler-dependent APIs
+    theoddsapi_key = os.getenv("THEODDSAPI_KEY")
+    if theoddsapi_key:
+        logger.info("THEODDSAPI_KEY: SET")
+    else:
+        logger.warning("THEODDSAPI_KEY: NOT SET - betting odds updates will be skipped")
+
     # Add security headers to all responses
     @app.after_request
     def add_security_headers(response):
