@@ -365,12 +365,11 @@ def get_upcoming_matches():
         data = response.json()
         games = data.get('games', [])
 
-        # Filter for upcoming games (not started yet or in progress)
-        now = datetime.utcnow()
-        upcoming = []
-
-        # Australian Eastern timezone (handles AEDT/AEST automatically)
+        # Filter for upcoming games (not started yet)
+        # Get current time in Australian timezone for accurate comparison
         aus_tz = ZoneInfo('Australia/Melbourne')
+        now = datetime.now(aus_tz)
+        upcoming = []
 
         for game in games:
             # Parse date
@@ -391,9 +390,10 @@ def get_upcoming_matches():
             except (ValueError, AttributeError):
                 continue
 
-            # Include games that haven't started or are in progress
+            # Only include games that haven't started yet
+            # A game has started if: complete > 0 OR current time > game time
             complete = game.get('complete', 0)
-            if complete < 100:
+            if complete == 0 and game_date > now:
                 upcoming.append({
                     'id': game.get('id'),
                     'round': game.get('round'),
