@@ -400,6 +400,9 @@ Question: {user_query}"""
         elif "```" in sql:
             sql = sql.split("```")[1].split("```")[0]
 
+        # Replace literal escaped newlines and tabs with spaces
+        sql = sql.replace("\\n", " ").replace("\\t", " ").replace("\\r", " ")
+
         # Remove extra whitespace
         sql = " ".join(sql.split())
 

@@ -243,6 +243,11 @@ class ConsolidatedQueryUnderstanding:
                 sql = sql.split("```sql")[1].split("```")[0]
             elif "```" in sql:
                 sql = sql.split("```")[1].split("```")[0]
+
+            # Replace literal escaped newlines and tabs with spaces
+            sql = sql.replace("\\n", " ").replace("\\t", " ").replace("\\r", " ")
+
+            # Normalize all whitespace to single spaces
             sql = " ".join(sql.split())
 
             logger.info(
