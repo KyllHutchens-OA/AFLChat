@@ -204,3 +204,137 @@ def get_analytics_summary():
     except Exception as e:
         logger.error(f"Error getting analytics summary: {e}")
         return jsonify({'error': 'Failed to get analytics'}), 500
+
+
+# ========== LIVE GAMES ENDPOINTS ==========
+
+@bp.route('/live-games', methods=['GET'])
+def get_live_games():
+    """Get all currently live or recent games."""
+    try:
+        from app.services.live_game_service import LiveGameService
+
+        games = LiveGameService.get_active_games(hours=2)
+
+        # Serialize games
+        games_data = []
+        for game in games:
+            games_data.append({
+                'id': game.id,
+                'squiggle_id': game.squiggle_game_id,
+                'season': game.season,
+                'round': game.round,
+                'home_team': {
+                    'id': game.home_team.id,
+                    'name': game.home_team.name,
+                    'abbreviation': game.home_team.abbreviation,
+                },
+                'away_team': {
+                    'id': game.away_team.id,
+                    'name': game.away_team.name,
+                    'abbreviation': game.away_team.abbreviation,
+                },
+                'home_score': game.home_score,
+                'away_score': game.away_score,
+                'home_goals': game.home_goals,
+                'home_behinds': game.home_behinds,
+                'away_goals': game.away_goals,
+                'away_behinds': game.away_behinds,
+                'status': game.status,
+                'complete_percent': game.complete_percent,
+                'time_str': game.time_str,
+                'current_quarter': game.current_quarter,
+                'venue': game.venue,
+                'match_date': game.match_date.isoformat() if game.match_date else None,
+                'last_updated': game.last_updated.isoformat() if game.last_updated else None,
+            })
+
+        return jsonify({'games': games_data}), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching live games: {e}")
+        return jsonify({'error': 'Failed to fetch live games'}), 500
+
+
+@bp.route('/live-games/<int:game_id>', methods=['GET'])
+def get_live_game_detail(game_id):
+    """Get detailed data for a specific live game including events."""
+    try:
+        from app.data.models import LiveGame, LiveGameEvent
+
+        session = Session()
+        game = session.query(LiveGame).filter_by(id=game_id).first()
+
+        if not game:
+            session.close()
+            return jsonify({'error': 'Game not found'}), 404
+
+        # Get events (last 50)
+        events = (
+            session.query(LiveGameEvent)
+            .filter_by(game_id=game_id)
+            .order_by(LiveGameEvent.timestamp.desc())
+            .limit(50)
+            .all()
+        )
+
+        events_data = []
+        for event in events:
+            events_data.append({
+                'id': event.id,
+                'event_type': event.event_type,
+                'team': {
+                    'id': event.team.id,
+                    'name': event.team.name,
+                    'abbreviation': event.team.abbreviation,
+                } if event.team else None,
+                'home_score_after': event.home_score_after,
+                'away_score_after': event.away_score_after,
+                'quarter': event.quarter,
+                'time_str': event.time_str,
+                'timestamp': event.timestamp.isoformat(),
+            })
+
+        # Game data
+        game_data = {
+            'id': game.id,
+            'squiggle_id': game.squiggle_game_id,
+            'season': game.season,
+            'round': game.round,
+            'home_team': {
+                'id': game.home_team.id,
+                'name': game.home_team.name,
+                'abbreviation': game.home_team.abbreviation,
+                'primary_color': game.home_team.primary_color,
+                'secondary_color': game.home_team.secondary_color,
+            },
+            'away_team': {
+                'id': game.away_team.id,
+                'name': game.away_team.name,
+                'abbreviation': game.away_team.abbreviation,
+                'primary_color': game.away_team.primary_color,
+                'secondary_color': game.away_team.secondary_color,
+            },
+            'home_score': game.home_score,
+            'away_score': game.away_score,
+            'home_goals': game.home_goals,
+            'home_behinds': game.home_behinds,
+            'away_goals': game.away_goals,
+            'away_behinds': game.away_behinds,
+            'status': game.status,
+            'complete_percent': game.complete_percent,
+            'time_str': game.time_str,
+            'current_quarter': game.current_quarter,
+            'venue': game.venue,
+            'match_date': game.match_date.isoformat() if game.match_date else None,
+            'last_updated': game.last_updated.isoformat() if game.last_updated else None,
+            'events': events_data,
+        }
+
+        session.close()
+
+        return jsonify(game_data), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching live game detail: {e}")
+        return jsonify({'error': 'Failed to fetch game detail'}), 500
