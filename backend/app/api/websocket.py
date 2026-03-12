@@ -257,3 +257,48 @@ def handle_chat_message(data):
             session_emit('error', {'message': f'Error: {str(e)}'})
         except:
             socketio.emit('error', {'message': f'Error: {str(e)}'}, room=session_id)
+
+
+# ========== LIVE GAMES WEBSOCKET HANDLERS ==========
+
+@socketio.on('subscribe_live_game')
+def handle_subscribe_live_game(data):
+    """
+    Subscribe client to live game updates.
+
+    Expected data:
+        {
+            "game_id": 123  // LiveGame.id
+        }
+    """
+    from flask import request
+    from flask_socketio import join_room
+
+    session_id = request.sid
+    game_id = data.get('game_id')
+
+    if not game_id:
+        socketio.emit('error', {'message': 'No game_id provided'}, room=session_id)
+        return
+
+    # Join room for this specific game
+    room = f"live_game_{game_id}"
+    join_room(room)
+
+    logger.info(f"Client {session_id} subscribed to live game {game_id}")
+    socketio.emit('subscribed', {'game_id': game_id}, room=session_id)
+
+
+@socketio.on('unsubscribe_live_game')
+def handle_unsubscribe_live_game(data):
+    """Unsubscribe from live game updates."""
+    from flask import request
+    from flask_socketio import leave_room
+
+    session_id = request.sid
+    game_id = data.get('game_id')
+
+    if game_id:
+        room = f"live_game_{game_id}"
+        leave_room(room)
+        logger.info(f"Client {session_id} unsubscribed from live game {game_id}")

@@ -204,3 +204,215 @@ def get_analytics_summary():
     except Exception as e:
         logger.error(f"Error getting analytics summary: {e}")
         return jsonify({'error': 'Failed to get analytics'}), 500
+
+
+# ========== LIVE GAMES ENDPOINTS ==========
+
+@bp.route('/live-games', methods=['GET'])
+@limiter.exempt  # Exempt from rate limiting (polled frequently)
+def get_live_games():
+    """Get all currently live or recent games."""
+    try:
+        from app.services.live_game_service import LiveGameService
+
+        games = LiveGameService.get_active_games(hours=2)
+
+        # Serialize games
+        games_data = []
+        for game in games:
+            games_data.append({
+                'id': game.id,
+                'squiggle_id': game.squiggle_game_id,
+                'season': game.season,
+                'round': game.round,
+                'home_team': {
+                    'id': game.home_team.id,
+                    'name': game.home_team.name,
+                    'abbreviation': game.home_team.abbreviation,
+                },
+                'away_team': {
+                    'id': game.away_team.id,
+                    'name': game.away_team.name,
+                    'abbreviation': game.away_team.abbreviation,
+                },
+                'home_score': game.home_score,
+                'away_score': game.away_score,
+                'home_goals': game.home_goals,
+                'home_behinds': game.home_behinds,
+                'away_goals': game.away_goals,
+                'away_behinds': game.away_behinds,
+                'status': game.status,
+                'complete_percent': game.complete_percent,
+                'time_str': game.time_str,
+                'current_quarter': game.current_quarter,
+                'venue': game.venue,
+                'match_date': game.match_date.isoformat() if game.match_date else None,
+                'last_updated': game.last_updated.isoformat() if game.last_updated else None,
+            })
+
+        return jsonify({'games': games_data}), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching live games: {e}")
+        return jsonify({'error': 'Failed to fetch live games'}), 500
+
+
+@bp.route('/live-games/<int:game_id>', methods=['GET'])
+@limiter.exempt  # Exempt from rate limiting (polled frequently)
+def get_live_game_detail(game_id):
+    """Get detailed data for a specific live game including events."""
+    try:
+        from app.data.models import LiveGame, LiveGameEvent
+
+        session = Session()
+        game = session.query(LiveGame).filter_by(id=game_id).first()
+
+        if not game:
+            session.close()
+            return jsonify({'error': 'Game not found'}), 404
+
+        # Get events (last 50)
+        events = (
+            session.query(LiveGameEvent)
+            .filter_by(game_id=game_id)
+            .order_by(LiveGameEvent.timestamp.desc())
+            .limit(50)
+            .all()
+        )
+
+        events_data = []
+        for event in events:
+            events_data.append({
+                'id': event.id,
+                'event_type': event.event_type,
+                'team': {
+                    'id': event.team.id,
+                    'name': event.team.name,
+                    'abbreviation': event.team.abbreviation,
+                } if event.team else None,
+                'home_score_after': event.home_score_after,
+                'away_score_after': event.away_score_after,
+                'quarter': event.quarter,
+                'time_str': event.time_str,
+                'timestamp': event.timestamp.isoformat(),
+            })
+
+        # Game data
+        game_data = {
+            'id': game.id,
+            'squiggle_id': game.squiggle_game_id,
+            'season': game.season,
+            'round': game.round,
+            'home_team': {
+                'id': game.home_team.id,
+                'name': game.home_team.name,
+                'abbreviation': game.home_team.abbreviation,
+                'primary_color': game.home_team.primary_color,
+                'secondary_color': game.home_team.secondary_color,
+            },
+            'away_team': {
+                'id': game.away_team.id,
+                'name': game.away_team.name,
+                'abbreviation': game.away_team.abbreviation,
+                'primary_color': game.away_team.primary_color,
+                'secondary_color': game.away_team.secondary_color,
+            },
+            'home_score': game.home_score,
+            'away_score': game.away_score,
+            'home_goals': game.home_goals,
+            'home_behinds': game.home_behinds,
+            'away_goals': game.away_goals,
+            'away_behinds': game.away_behinds,
+            'status': game.status,
+            'complete_percent': game.complete_percent,
+            'time_str': game.time_str,
+            'current_quarter': game.current_quarter,
+            'venue': game.venue,
+            'match_date': game.match_date.isoformat() if game.match_date else None,
+            'last_updated': game.last_updated.isoformat() if game.last_updated else None,
+            'events': events_data,
+        }
+
+        session.close()
+
+        return jsonify(game_data), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching live game detail: {e}")
+        return jsonify({'error': 'Failed to fetch game detail'}), 500
+
+
+@bp.route('/upcoming-matches', methods=['GET'])
+@limiter.exempt  # Exempt from rate limiting (polled frequently)
+def get_upcoming_matches():
+    """Get upcoming scheduled AFL matches from Squiggle API."""
+    try:
+        import requests
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        # Fetch from Squiggle API
+        current_year = datetime.now().year
+        response = requests.get(
+            f"https://api.squiggle.com.au/?q=games;year={current_year}",
+            headers={"User-Agent": "AFL-Analytics-App/1.0"},
+            timeout=10
+        )
+
+        if response.status_code != 200:
+            return jsonify({'error': 'Failed to fetch from Squiggle'}), 500
+
+        data = response.json()
+        games = data.get('games', [])
+
+        # Filter for upcoming games (not started yet)
+        # Get current time in Australian timezone for accurate comparison
+        aus_tz = ZoneInfo('Australia/Melbourne')
+        now = datetime.now(aus_tz)
+        upcoming = []
+
+        for game in games:
+            # Parse date
+            date_str = game.get('date')
+            if not date_str:
+                continue
+
+            try:
+                # Squiggle returns dates in Australian Eastern time without timezone info
+                # Parse as naive datetime, then localize to Australian timezone
+                if 'Z' in date_str or '+' in date_str:
+                    # Already has timezone info
+                    game_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                else:
+                    # No timezone info - assume Australian Eastern time
+                    naive_date = datetime.fromisoformat(date_str)
+                    game_date = naive_date.replace(tzinfo=aus_tz)
+            except (ValueError, AttributeError):
+                continue
+
+            # Only include games that haven't started yet
+            # A game has started if: complete > 0 OR current time > game time
+            complete = game.get('complete', 0)
+            if complete == 0 and game_date > now:
+                upcoming.append({
+                    'id': game.get('id'),
+                    'round': game.get('round'),
+                    'home_team': game.get('hteam'),
+                    'away_team': game.get('ateam'),
+                    'venue': game.get('venue'),
+                    'date': game_date.isoformat(),  # Now includes timezone info
+                    'complete': complete,
+                    'is_final': game.get('is_final', False),
+                })
+
+        # Sort by date (earliest first)
+        upcoming.sort(key=lambda x: x['date'])
+
+        # Limit to next 10 games
+        upcoming = upcoming[:10]
+
+        return jsonify({'matches': upcoming}), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching upcoming matches: {e}")
+        return jsonify({'error': 'Failed to fetch upcoming matches'}), 500

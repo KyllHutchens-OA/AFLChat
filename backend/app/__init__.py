@@ -96,7 +96,15 @@ def create_app(config=None):
 
     # Start background scheduler (news, odds, predictions refresh)
     from app.services.scheduler import get_scheduler
-    scheduler = get_scheduler()
+
+    # Start SSE listener for live games
+    from app.services.sse_listener import get_sse_listener
+    sse_listener = get_sse_listener(socketio=socketio)
+    sse_listener.start()
+    logger.info("✓ SSE listener started for live games")
+
+    # Start scheduler
+    scheduler = get_scheduler(sse_listener=sse_listener)
     scheduler.start()
     logger.info("✓ Background data scheduler started")
 
