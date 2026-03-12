@@ -209,6 +209,7 @@ def get_analytics_summary():
 # ========== LIVE GAMES ENDPOINTS ==========
 
 @bp.route('/live-games', methods=['GET'])
+@limiter.exempt  # Exempt from rate limiting (polled frequently)
 def get_live_games():
     """Get all currently live or recent games."""
     try:
@@ -257,6 +258,7 @@ def get_live_games():
 
 
 @bp.route('/live-games/<int:game_id>', methods=['GET'])
+@limiter.exempt  # Exempt from rate limiting (polled frequently)
 def get_live_game_detail(game_id):
     """Get detailed data for a specific live game including events."""
     try:
@@ -341,6 +343,7 @@ def get_live_game_detail(game_id):
 
 
 @bp.route('/upcoming-matches', methods=['GET'])
+@limiter.exempt  # Exempt from rate limiting (polled frequently)
 def get_upcoming_matches():
     """Get upcoming scheduled AFL matches from Squiggle API."""
     try:
