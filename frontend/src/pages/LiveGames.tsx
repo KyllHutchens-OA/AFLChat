@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useLiveGames } from '../hooks/useLiveGames';
 import { useUpcomingMatches } from '../hooks/useUpcomingMatches';
 import GamePicker from '../components/LiveGames/GamePicker';
@@ -11,6 +12,37 @@ const LiveGames = () => {
   const { matches: upcomingMatches, nextMatch } = useUpcomingMatches();
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
 
+  // Count of live games for badge
+  const liveCount = games.filter(g => g.status === 'live').length;
+
+  // Reusable header component
+  const Header = () => (
+    <header className="glass border-b border-apple-gray-200/50 sticky top-0 z-20">
+      <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <h1 className="text-3xl font-semibold text-apple-gray-900">Live Games</h1>
+          {liveCount > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-apple-red/10 border border-apple-red/30 rounded-full">
+              <div className="w-2 h-2 bg-apple-red rounded-full animate-pulse"></div>
+              <span className="text-sm font-medium text-apple-red">
+                {liveCount} {liveCount === 1 ? 'Game' : 'Games'} Live
+              </span>
+            </div>
+          )}
+        </div>
+        <Link
+          to="/aflagent"
+          className="px-4 py-2 bg-apple-gray-100 text-apple-gray-700 rounded-apple hover:bg-apple-gray-200 transition-colors flex items-center gap-2 text-sm font-medium"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          Chat
+        </Link>
+      </div>
+    </header>
+  );
+
   // Auto-select first live game, or first available game
   useEffect(() => {
     if (games.length > 0 && selectedGameId === null) {
@@ -21,18 +53,10 @@ const LiveGames = () => {
     }
   }, [games, selectedGameId]);
 
-  // Count of live games for badge
-  const liveCount = games.filter(g => g.status === 'live').length;
-
   if (loading) {
     return (
       <div className="min-h-screen bg-apple-gray-50">
-        {/* Header */}
-        <header className="glass border-b border-apple-gray-200/50 sticky top-0 z-20">
-          <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-4">
-            <h1 className="text-3xl font-semibold text-apple-gray-900">Live Games</h1>
-          </div>
-        </header>
+        <Header />
 
         {/* Loading shimmer */}
         <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-8">
@@ -48,12 +72,7 @@ const LiveGames = () => {
   if (error) {
     return (
       <div className="min-h-screen bg-apple-gray-50">
-        {/* Header */}
-        <header className="glass border-b border-apple-gray-200/50 sticky top-0 z-20">
-          <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-4">
-            <h1 className="text-3xl font-semibold text-apple-gray-900">Live Games</h1>
-          </div>
-        </header>
+        <Header />
 
         {/* Error state */}
         <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-8">
@@ -72,12 +91,7 @@ const LiveGames = () => {
   if (games.length === 0) {
     return (
       <div className="min-h-screen bg-apple-gray-50">
-        {/* Header */}
-        <header className="glass border-b border-apple-gray-200/50 sticky top-0 z-20">
-          <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-4">
-            <h1 className="text-3xl font-semibold text-apple-gray-900">Live Games</h1>
-          </div>
-        </header>
+        <Header />
 
         {/* Empty state with schedule */}
         <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-8 space-y-6">
@@ -171,22 +185,7 @@ const LiveGames = () => {
 
   return (
     <div className="min-h-screen bg-apple-gray-50">
-      {/* Header */}
-      <header className="glass border-b border-apple-gray-200/50 sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-4 flex items-center justify-between">
-          <h1 className="text-3xl font-semibold text-apple-gray-900">Live Games</h1>
-
-          {/* Live indicator badge */}
-          {liveCount > 0 && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-apple-red/10 border border-apple-red/30 rounded-full">
-              <div className="w-2 h-2 bg-apple-red rounded-full animate-pulse"></div>
-              <span className="text-sm font-medium text-apple-red">
-                {liveCount} {liveCount === 1 ? 'Game' : 'Games'} Live
-              </span>
-            </div>
-          )}
-        </div>
-      </header>
+      <Header />
 
       {/* Main content */}
       <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-8 space-y-6">
