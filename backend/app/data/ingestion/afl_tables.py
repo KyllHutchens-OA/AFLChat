@@ -191,20 +191,27 @@ class AFLTablesIngester:
             games = data["games"]
             logger.info(f"Found {len(games)} matches for {year}")
 
-            # Process each game
+            # Process each game (commit individually to avoid transaction failures)
+            success_count = 0
+            error_count = 0
+
             for game in games:
-                self._process_game(game, year)
+                try:
+                    self._process_game(game, year)
+                    self.session.commit()  # Commit each game individually
+                    success_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to process game {game.get('id')}: {e}")
+                    self.session.rollback()  # Rollback failed game
+                    error_count += 1
                 time.sleep(0.1)  # Small delay between processing
 
-            self.session.commit()
-            logger.info(f"Successfully ingested {year} season")
+            logger.info(f"Successfully ingested {year} season: {success_count} games added, {error_count} errors")
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching data from Squiggle API: {e}")
-            self.session.rollback()
         except Exception as e:
-            logger.error(f"Error processing season {year}: {e}")
-            self.session.rollback()
+            logger.error(f"Error during season fetch: {e}")
 
     def _process_game(self, game_data: dict, year: int):
         """
@@ -214,7 +221,7 @@ class AFLTablesIngester:
             # Extract match data
             home_team = game_data.get("hteam")
             away_team = game_data.get("ateam")
-            round_num = game_data.get("round")
+            round_num = str(game_data.get("round"))  # Convert to string (round column is VARCHAR)
 
             # Get team IDs
             home_team_id = self.get_team_id(home_team)
@@ -280,6 +287,7 @@ class AFLTablesIngester:
         except Exception as e:
             logger.error(f"Error processing game: {e}")
             logger.error(f"Game data: {game_data}")
+            raise  # Re-raise to be caught by outer try/except
 
     def ingest_seasons(self, start_year: int, end_year: int):
         """
