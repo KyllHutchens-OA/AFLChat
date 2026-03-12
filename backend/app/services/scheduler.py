@@ -80,6 +80,17 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
+        # Job 6: Ingest current season match results (daily at 11 PM AEST)
+        # Runs after evening games finish — inserts new matches and updates
+        # any previously-scheduled games that have since completed.
+        self.scheduler.add_job(
+            func=self._update_current_season_matches,
+            trigger=CronTrigger(hour=23, minute=0, timezone='Australia/Melbourne'),
+            id="update_current_season_matches",
+            name="Ingest current season match results",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         self.is_running = True
 
@@ -161,6 +172,24 @@ class LiveGameScheduler:
             logger.info(f"Predictions job complete: {predictions} updated")
         except Exception as e:
             logger.error(f"Predictions job failed: {e}")
+
+    def _update_current_season_matches(self):
+        """Daily 11 PM AEST: Fetch current season results from Squiggle API.
+
+        Inserts any new matches (e.g. upcoming rounds added to schedule) and
+        updates scores for games that were previously 'scheduled' but are now
+        complete. Squiggle is free with no rate limits so this is safe to run
+        nightly.
+        """
+        try:
+            from app.data.ingestion.afl_tables import AFLTablesIngester
+
+            current_year = datetime.utcnow().year
+            ingester = AFLTablesIngester()
+            ingester._scrape_season_from_squiggle(current_year)
+            logger.info(f"Match results job complete: {current_year} season synced from Squiggle")
+        except Exception as e:
+            logger.error(f"Match results job failed: {e}")
 
 
 # Global singleton
