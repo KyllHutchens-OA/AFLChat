@@ -349,7 +349,8 @@ def get_upcoming_matches():
     try:
         import requests
         from datetime import datetime
-        
+        from zoneinfo import ZoneInfo
+
         # Fetch from Squiggle API
         current_year = datetime.now().year
         response = requests.get(
@@ -357,28 +358,39 @@ def get_upcoming_matches():
             headers={"User-Agent": "AFL-Analytics-App/1.0"},
             timeout=10
         )
-        
+
         if response.status_code != 200:
             return jsonify({'error': 'Failed to fetch from Squiggle'}), 500
-        
+
         data = response.json()
         games = data.get('games', [])
-        
+
         # Filter for upcoming games (not started yet or in progress)
         now = datetime.utcnow()
         upcoming = []
-        
+
+        # Australian Eastern timezone (handles AEDT/AEST automatically)
+        aus_tz = ZoneInfo('Australia/Melbourne')
+
         for game in games:
             # Parse date
             date_str = game.get('date')
             if not date_str:
                 continue
-                
+
             try:
-                game_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                # Squiggle returns dates in Australian Eastern time without timezone info
+                # Parse as naive datetime, then localize to Australian timezone
+                if 'Z' in date_str or '+' in date_str:
+                    # Already has timezone info
+                    game_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                else:
+                    # No timezone info - assume Australian Eastern time
+                    naive_date = datetime.fromisoformat(date_str)
+                    game_date = naive_date.replace(tzinfo=aus_tz)
             except (ValueError, AttributeError):
                 continue
-            
+
             # Include games that haven't started or are in progress
             complete = game.get('complete', 0)
             if complete < 100:
@@ -388,19 +400,19 @@ def get_upcoming_matches():
                     'home_team': game.get('hteam'),
                     'away_team': game.get('ateam'),
                     'venue': game.get('venue'),
-                    'date': game_date.isoformat(),
+                    'date': game_date.isoformat(),  # Now includes timezone info
                     'complete': complete,
                     'is_final': game.get('is_final', False),
                 })
-        
+
         # Sort by date (earliest first)
         upcoming.sort(key=lambda x: x['date'])
-        
+
         # Limit to next 10 games
         upcoming = upcoming[:10]
-        
+
         return jsonify({'matches': upcoming}), 200
-        
+
     except Exception as e:
         logger.error(f"Error fetching upcoming matches: {e}")
         return jsonify({'error': 'Failed to fetch upcoming matches'}), 500
