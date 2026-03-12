@@ -124,16 +124,22 @@ const LiveGames = () => {
                 <Countdown targetDate={nextMatch.date} />
               </div>
 
-              <div className="text-center mt-4 text-sm text-apple-gray-500">
-                {new Date(nextMatch.date).toLocaleString('en-AU', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  timeZoneName: 'short',
-                })}
+              <div className="text-center mt-4 space-y-1">
+                <div className="text-sm font-medium text-apple-gray-700">
+                  {new Date(nextMatch.date).toLocaleString('en-AU', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </div>
+                <div className="text-xs text-apple-gray-500">
+                  {new Date(nextMatch.date).toLocaleString('en-AU', {
+                    timeZoneName: 'long',
+                  }).split(', ').pop()}
+                </div>
               </div>
             </div>
           )}
@@ -170,7 +176,7 @@ const LiveGames = () => {
                         {new Date(match.date).toLocaleTimeString('en-AU', {
                           hour: '2-digit',
                           minute: '2-digit',
-                        })}
+                        })} AEDT
                       </div>
                     </div>
                   </div>

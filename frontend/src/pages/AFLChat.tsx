@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import ChatContainer from '../components/Chat/ChatContainer';
+import LiveScoreWidget from '../components/LiveGames/LiveScoreWidget';
 
 const AFLChat: React.FC = () => {
   return (
@@ -40,6 +41,9 @@ const AFLChat: React.FC = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <ChatContainer />
       </main>
+
+      {/* Live score widget */}
+      <LiveScoreWidget />
     </div>
   );
 };
