@@ -77,14 +77,20 @@ class LiveGameService:
             return live_game
 
         # Create new game
-        home_team_abbr = game_data.get("hteam")
-        away_team_abbr = game_data.get("ateam")
+        home_team_name = game_data.get("hteam")
+        away_team_name = game_data.get("ateam")
 
-        home_team = session.query(Team).filter_by(abbreviation=home_team_abbr).first()
-        away_team = session.query(Team).filter_by(abbreviation=away_team_abbr).first()
+        # Try to find teams by name first, then by abbreviation (Squiggle uses full names)
+        home_team = session.query(Team).filter_by(name=home_team_name).first()
+        if not home_team:
+            home_team = session.query(Team).filter_by(abbreviation=home_team_name).first()
+
+        away_team = session.query(Team).filter_by(name=away_team_name).first()
+        if not away_team:
+            away_team = session.query(Team).filter_by(abbreviation=away_team_name).first()
 
         if not home_team or not away_team:
-            logger.warning(f"Teams not found: {home_team_abbr} vs {away_team_abbr}")
+            logger.warning(f"Teams not found: {home_team_name} vs {away_team_name}")
             return None
 
         # Parse date
@@ -314,11 +320,15 @@ class LiveGameService:
         Returns:
             List of LiveGame objects
         """
+        from sqlalchemy.orm import joinedload
+
         cutoff = datetime.utcnow() - timedelta(hours=hours)
 
         with get_session() as session:
             games = (
                 session.query(LiveGame)
+                .options(joinedload(LiveGame.home_team))
+                .options(joinedload(LiveGame.away_team))
                 .filter(LiveGame.last_updated >= cutoff)
                 .order_by(LiveGame.match_date.desc())
                 .all()

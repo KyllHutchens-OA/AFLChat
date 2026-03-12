@@ -44,7 +44,16 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
-        # Job 2: Health check SSE connection (every 5 minutes)
+        # Job 2: Poll for live games (every 20 seconds)
+        self.scheduler.add_job(
+            func=self._poll_live_games,
+            trigger=IntervalTrigger(seconds=20),
+            id="poll_live_games",
+            name="Poll Squiggle for live games",
+            replace_existing=True,
+        )
+
+        # Job 3: Health check SSE connection (every 5 minutes)
         self.scheduler.add_job(
             func=self._health_check,
             trigger=IntervalTrigger(minutes=5),
@@ -53,7 +62,7 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
-        # Job 3: Fetch RSS news (every hour)
+        # Job 4: Fetch RSS news (every hour)
         self.scheduler.add_job(
             func=self._fetch_rss_news,
             trigger=IntervalTrigger(hours=1),
@@ -62,7 +71,7 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
-        # Job 4: Update betting odds (daily at 9 AM AEST)
+        # Job 5: Update betting odds (daily at 9 AM AEST)
         self.scheduler.add_job(
             func=self._update_betting_odds,
             trigger=CronTrigger(hour=9, minute=0, timezone='Australia/Melbourne'),
@@ -71,7 +80,7 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
-        # Job 5: Update Squiggle predictions (daily at 8 AM AEST)
+        # Job 6: Update Squiggle predictions (daily at 8 AM AEST)
         self.scheduler.add_job(
             func=self._update_squiggle_predictions,
             trigger=CronTrigger(hour=8, minute=0, timezone='Australia/Melbourne'),
@@ -96,6 +105,41 @@ class LiveGameScheduler:
         self.scheduler.shutdown(wait=False)
         self.is_running = False
         logger.info("✓ Background scheduler stopped")
+
+    def _poll_live_games(self):
+        """Poll Squiggle API for live games and update database."""
+        try:
+            import requests
+            from app.services.live_game_service import LiveGameService
+            from app import socketio
+
+            # Fetch games from Squiggle API
+            current_year = datetime.now().year
+            response = requests.get(
+                f"https://api.squiggle.com.au/?q=games;year={current_year}",
+                headers={"User-Agent": "AFL-Analytics-App/1.0"},
+                timeout=10
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch games from Squiggle: {response.status_code}")
+                return
+
+            data = response.json()
+            games = data.get('games', [])
+
+            # Filter for live games (complete > 0 and complete < 100)
+            live_games = [g for g in games if 0 < g.get('complete', 0) < 100]
+
+            if live_games:
+                logger.info(f"Found {len(live_games)} live games, updating...")
+                for game in live_games:
+                    LiveGameService.process_game_update(game, socketio=socketio)
+            else:
+                logger.debug("No live games found")
+
+        except Exception as e:
+            logger.error(f"Error polling live games: {e}")
 
     def _cleanup_old_games(self):
         """Remove completed games older than 7 days."""
