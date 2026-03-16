@@ -215,42 +215,19 @@ def get_live_games():
     try:
         from app.services.live_game_service import LiveGameService
 
+        # get_active_games now returns pre-serialized dicts
         games = LiveGameService.get_active_games(hours=2)
 
-        # Serialize games
-        games_data = []
+        # Convert datetime objects to ISO strings
         for game in games:
-            games_data.append({
-                'id': game.id,
-                'squiggle_id': game.squiggle_game_id,
-                'season': game.season,
-                'round': game.round,
-                'home_team': {
-                    'id': game.home_team.id,
-                    'name': game.home_team.name,
-                    'abbreviation': game.home_team.abbreviation,
-                },
-                'away_team': {
-                    'id': game.away_team.id,
-                    'name': game.away_team.name,
-                    'abbreviation': game.away_team.abbreviation,
-                },
-                'home_score': game.home_score,
-                'away_score': game.away_score,
-                'home_goals': game.home_goals,
-                'home_behinds': game.home_behinds,
-                'away_goals': game.away_goals,
-                'away_behinds': game.away_behinds,
-                'status': game.status,
-                'complete_percent': game.complete_percent,
-                'time_str': game.time_str,
-                'current_quarter': game.current_quarter,
-                'venue': game.venue,
-                'match_date': game.match_date.isoformat() if game.match_date else None,
-                'last_updated': game.last_updated.isoformat() if game.last_updated else None,
-            })
+            if game.get('match_date'):
+                game['match_date'] = game['match_date'].isoformat()
+            if game.get('last_updated'):
+                game['last_updated'] = game['last_updated'].isoformat()
+            # Rename squiggle_game_id to squiggle_id for frontend compatibility
+            game['squiggle_id'] = game.pop('squiggle_game_id', None)
 
-        return jsonify({'games': games_data}), 200
+        return jsonify({'games': games}), 200
 
     except Exception as e:
         logger.error(f"Error fetching live games: {e}")
@@ -294,7 +271,9 @@ def get_live_game_detail(game_id):
                 'away_score_after': event.away_score_after,
                 'quarter': event.quarter,
                 'time_str': event.time_str,
-                'timestamp': event.timestamp.isoformat(),
+                'timestamp': event.timestamp.isoformat() + 'Z',  # UTC timestamp
+                'player_name': event.player_name,
+                'player_api_sports_id': event.player_api_sports_id,
             })
 
         # Game data
@@ -331,6 +310,13 @@ def get_live_game_detail(game_id):
             'match_date': game.match_date.isoformat() if game.match_date else None,
             'last_updated': game.last_updated.isoformat() if game.last_updated else None,
             'events': events_data,
+            # AI summary (only for completed games)
+            'ai_summary': game.ai_summary if game.status == 'completed' else None,
+            # Quarter scores
+            'quarter_scores': {
+                'home': [game.home_q1_score, game.home_q2_score, game.home_q3_score, game.home_q4_score],
+                'away': [game.away_q1_score, game.away_q2_score, game.away_q3_score, game.away_q4_score],
+            },
         }
 
         session.close()
@@ -416,3 +402,117 @@ def get_upcoming_matches():
     except Exception as e:
         logger.error(f"Error fetching upcoming matches: {e}")
         return jsonify({'error': 'Failed to fetch upcoming matches'}), 500
+
+
+@bp.route('/live-games/<int:game_id>/stats', methods=['GET'])
+@limiter.exempt
+def get_game_stats(game_id):
+    """Get top player stats for a completed game."""
+    try:
+        from app.data.models import LiveGame
+        from app.services.api_sports_service import APISportsService
+
+        session = Session()
+        game = session.query(LiveGame).filter_by(id=game_id).first()
+
+        if not game:
+            session.close()
+            return jsonify({'error': 'Game not found'}), 404
+
+        if game.status != 'completed':
+            session.close()
+            return jsonify({'error': 'Stats only available for completed games'}), 400
+
+        # Get game date for API-Sports query
+        game_date = game.match_date.strftime('%Y-%m-%d') if game.match_date else None
+
+        # Find game in API-Sports by teams
+        api_game = APISportsService.get_game_by_teams(
+            game.home_team.abbreviation,
+            game.away_team.abbreviation,
+            game_date
+        )
+
+        if not api_game:
+            session.close()
+            return jsonify({
+                'top_goal_kickers': [],
+                'top_disposals': [],
+                'top_fantasy': [],
+                'message': 'Player stats not available for this game'
+            }), 200
+
+        # Get player stats - note: game ID is nested under 'game'
+        api_game_id = api_game.get('game', {}).get('id') or api_game.get('id')
+        stats_data = APISportsService.get_game_player_stats(api_game_id)
+
+        if not stats_data:
+            session.close()
+            return jsonify({
+                'top_goal_kickers': [],
+                'top_disposals': [],
+                'top_fantasy': [],
+                'message': 'Player stats not available'
+            }), 200
+
+        # Get team names from the api_game response
+        home_team_name = api_game.get('teams', {}).get('home', {}).get('name', 'Home')
+        away_team_name = api_game.get('teams', {}).get('away', {}).get('name', 'Away')
+
+        # Process player stats
+        all_players = []
+        for idx, team_data in enumerate(stats_data.get('teams', [])):
+            # Team name from api_game since stats_data doesn't include it
+            team_name = home_team_name if idx == 0 else away_team_name
+
+            for player in team_data.get('players', []):
+                player_info = player.get('player', {})
+                player_id = player_info.get('id')
+
+                # Get player name from cached players
+                player_name = 'Unknown'
+                if player_id:
+                    cached_player = APISportsService.get_cached_player(player_id)
+                    if cached_player:
+                        player_name = cached_player.get('name', 'Unknown')
+
+                # Stats are directly on the player object, not nested
+                goals = player.get('goals', {}).get('total', 0) or 0
+                disposals = player.get('disposals', 0) or 0
+                kicks = player.get('kicks', 0) or 0
+                handballs = player.get('handballs', 0) or 0
+                marks = player.get('marks', 0) or 0
+                tackles = player.get('tackles', 0) or 0
+
+                # Simple fantasy calculation: goals*6 + disposals + marks + tackles
+                fantasy = (goals * 6) + disposals + marks + tackles
+
+                all_players.append({
+                    'name': player_name,
+                    'team': team_name,
+                    'goals': goals,
+                    'disposals': disposals,
+                    'fantasy': fantasy,
+                })
+
+        # Sort and get top 3 for each category
+        top_goals = sorted(all_players, key=lambda x: x['goals'], reverse=True)[:3]
+        top_disposals = sorted(all_players, key=lambda x: x['disposals'], reverse=True)[:3]
+        top_fantasy = sorted(all_players, key=lambda x: x['fantasy'], reverse=True)[:3]
+
+        # Filter out zero values
+        top_goals = [p for p in top_goals if p['goals'] > 0]
+        top_disposals = [p for p in top_disposals if p['disposals'] > 0]
+        top_fantasy = [p for p in top_fantasy if p['fantasy'] > 0]
+
+        session.close()
+
+        return jsonify({
+            'top_goal_kickers': [{'name': p['name'], 'team': p['team'], 'goals': p['goals']} for p in top_goals],
+            'top_disposals': [{'name': p['name'], 'team': p['team'], 'disposals': p['disposals']} for p in top_disposals],
+            'top_fantasy': [{'name': p['name'], 'team': p['team'], 'points': p['fantasy']} for p in top_fantasy],
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching game stats: {e}")
+        return jsonify({'error': 'Failed to fetch game stats'}), 500

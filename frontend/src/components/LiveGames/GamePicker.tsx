@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 
 interface LiveGame {
   id: number;
@@ -37,76 +38,156 @@ interface GamePickerProps {
 }
 
 const GamePicker: React.FC<GamePickerProps> = ({ games, selectedGameId, onSelectGame }) => {
+  const { hideScores } = useSpoilerMode();
+  const liveGames = games.filter(g => g.status === 'live');
+
+  // Get completed games from the current round only
+  const allCompletedGames = games.filter(g => g.status === 'completed');
+  const currentRound = liveGames.length > 0
+    ? liveGames[0].round
+    : allCompletedGames.length > 0
+      ? allCompletedGames[0].round
+      : null;
+  const completedGames = currentRound
+    ? allCompletedGames.filter(g => g.round === currentRound)
+    : allCompletedGames;
+
+  // Helper to display scores based on spoiler mode
+  const displayScore = (score: number) => hideScores ? '?' : score;
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {games.map((game) => {
-        const isSelected = game.id === selectedGameId;
-        const isLive = game.status === 'live';
+    <div className="space-y-4">
+      {/* Live Games - Full Cards */}
+      {liveGames.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {liveGames.map((game) => {
+            const isSelected = game.id === selectedGameId;
 
-        return (
-          <button
-            key={game.id}
-            onClick={() => onSelectGame(game.id)}
-            className={`
-              card-apple p-4 text-left transition-all duration-200 ease-apple
-              ${isSelected
-                ? 'border-apple-blue-500 bg-apple-blue-50 shadow-apple-md'
-                : 'border-apple-gray-200 hover:border-apple-blue-300 hover:shadow-apple'
-              }
-              active:scale-95
-            `}
-          >
-            {/* Header: Round, Venue, Live Badge */}
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-apple-gray-700">
-                  {game.round} • {game.venue}
-                </p>
-              </div>
+            return (
+              <button
+                key={game.id}
+                onClick={() => onSelectGame(game.id)}
+                className={`
+                  card-apple p-4 text-left transition-all duration-200 ease-apple
+                  ${isSelected
+                    ? 'border-apple-blue-500 bg-apple-blue-50 shadow-apple-md'
+                    : 'border-apple-gray-200 hover:border-apple-blue-300 hover:shadow-apple'
+                  }
+                  active:scale-95
+                `}
+              >
+                {/* Header: Round, Venue, Live Badge */}
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-apple-gray-700">
+                      Round {game.round} • {game.venue}
+                    </p>
+                  </div>
 
-              {/* LIVE Badge */}
-              {isLive && (
-                <div className="flex items-center gap-1.5 px-2 py-1 bg-apple-red/10 border border-apple-red/30 rounded-full">
-                  <div className="w-1.5 h-1.5 bg-apple-red rounded-full animate-pulse"></div>
-                  <span className="text-xs font-semibold text-apple-red uppercase">Live</span>
+                  {/* LIVE Badge */}
+                  <div className="flex items-center gap-1.5 px-2 py-1 bg-apple-red/10 border border-apple-red/30 rounded-full">
+                    <div className="w-1.5 h-1.5 bg-apple-red rounded-full animate-pulse"></div>
+                    <span className="text-xs font-semibold text-apple-red uppercase">Live</span>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            {/* Teams and Scores */}
-            <div className="space-y-2 mb-3">
-              {/* Home Team */}
-              <div className="flex items-center justify-between">
-                <span className="text-lg font-semibold text-apple-gray-900">
-                  {game.home_team.abbreviation}
-                </span>
-                <span className="text-2xl font-bold text-apple-gray-900">
-                  {game.home_score}
-                </span>
-              </div>
+                {/* Teams and Scores */}
+                <div className="space-y-2 mb-3">
+                  {/* Home Team */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-semibold text-apple-gray-900">
+                      {game.home_team.abbreviation}
+                    </span>
+                    <span className={`text-2xl font-bold text-apple-gray-900 ${hideScores ? 'blur-sm select-none' : ''}`}>
+                      {displayScore(game.home_score)}
+                    </span>
+                  </div>
 
-              {/* Away Team */}
-              <div className="flex items-center justify-between">
-                <span className="text-lg font-semibold text-apple-gray-900">
-                  {game.away_team.abbreviation}
-                </span>
-                <span className="text-2xl font-bold text-apple-gray-900">
-                  {game.away_score}
-                </span>
-              </div>
-            </div>
+                  {/* Away Team */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-semibold text-apple-gray-900">
+                      {game.away_team.abbreviation}
+                    </span>
+                    <span className={`text-2xl font-bold text-apple-gray-900 ${hideScores ? 'blur-sm select-none' : ''}`}>
+                      {displayScore(game.away_score)}
+                    </span>
+                  </div>
+                </div>
 
-            {/* Time/Status */}
-            <div className="text-sm text-apple-gray-500 font-medium">
-              {game.status === 'live' && game.time_str
-                ? game.time_str
-                : game.status === 'completed'
-                ? 'Final'
-                : 'Scheduled'}
+                {/* Time/Status */}
+                <div className="text-sm text-apple-gray-500 font-medium">
+                  {game.time_str || 'Live'}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Completed Games - Compact List (hidden in spoiler mode) */}
+      {!hideScores && completedGames.length > 0 && (
+        <div>
+          {liveGames.length > 0 && (
+            <div className="text-sm font-medium text-apple-gray-500 mb-2 px-1">
+              Recent Results
             </div>
-          </button>
-        );
-      })}
+          )}
+          <div className="space-y-2">
+            {completedGames.map((game) => {
+              const isSelected = game.id === selectedGameId;
+              const winner = game.home_score > game.away_score ? 'home' : 'away';
+
+              return (
+                <button
+                  key={game.id}
+                  onClick={() => onSelectGame(game.id)}
+                  className={`
+                    w-full card-apple px-3 py-2 text-left transition-all duration-200 ease-apple
+                    ${isSelected
+                      ? 'border-apple-blue-500 bg-apple-blue-50 shadow-apple'
+                      : 'border-apple-gray-200 hover:border-apple-gray-300 hover:bg-apple-gray-50'
+                    }
+                    active:scale-[0.99]
+                  `}
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    {/* Teams and Scores - Compact */}
+                    <div className="flex-1 flex items-center gap-3">
+                      <div className="flex items-center gap-2 min-w-[140px]">
+                        <span className={`text-sm font-semibold ${!hideScores && winner === 'home' ? 'text-apple-gray-900' : 'text-apple-gray-500'}`}>
+                          {game.home_team.abbreviation}
+                        </span>
+                        <span className={`text-base font-bold ${!hideScores && winner === 'home' ? 'text-apple-gray-900' : 'text-apple-gray-500'} ${hideScores ? 'blur-sm select-none' : ''}`}>
+                          {displayScore(game.home_score)}
+                        </span>
+                      </div>
+                      <span className="text-apple-gray-400 text-sm">vs</span>
+                      <div className="flex items-center gap-2 min-w-[140px]">
+                        <span className={`text-sm font-semibold ${!hideScores && winner === 'away' ? 'text-apple-gray-900' : 'text-apple-gray-500'}`}>
+                          {game.away_team.abbreviation}
+                        </span>
+                        <span className={`text-base font-bold ${!hideScores && winner === 'away' ? 'text-apple-gray-900' : 'text-apple-gray-500'} ${hideScores ? 'blur-sm select-none' : ''}`}>
+                          {displayScore(game.away_score)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Venue - Compact */}
+                    <div className="text-xs text-apple-gray-500 hidden sm:block">
+                      {game.venue}
+                    </div>
+
+                    {/* Final badge */}
+                    <div className="text-xs font-medium text-apple-gray-400 px-2 py-0.5 bg-apple-gray-100 rounded">
+                      Final
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

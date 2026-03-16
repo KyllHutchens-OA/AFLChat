@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
@@ -16,6 +16,14 @@ interface GameEvent {
   quarter: number;
   time_str: string;
   timestamp: string;
+  // Player info
+  player_name?: string;
+  player_api_sports_id?: number;
+}
+
+interface QuarterScores {
+  home: (number | null)[];
+  away: (number | null)[];
 }
 
 interface LiveGameDetail {
@@ -51,16 +59,20 @@ interface LiveGameDetail {
   match_date: string;
   last_updated: string;
   events: GameEvent[];
+  ai_summary?: string | null;
+  quarter_scores?: QuarterScores;
 }
 
 export const useLiveGameDetail = (gameId: number) => {
   const [game, setGame] = useState<LiveGameDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
-  // Fetch initial game data
+  // Fetch game data (initial and periodic refresh for non-completed games)
   useEffect(() => {
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+
     const fetchGame = async () => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/live-games/${gameId}`);
@@ -69,6 +81,12 @@ export const useLiveGameDetail = (gameId: number) => {
         const data = await response.json();
         setGame(data);
         setError(null);
+
+        // Stop polling if game is completed
+        if (data.status === 'completed' && pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -77,24 +95,44 @@ export const useLiveGameDetail = (gameId: number) => {
     };
 
     fetchGame();
+
+    // Start polling - will be cleared if game is completed
+    pollInterval = setInterval(fetchGame, 30000);
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
   }, [gameId]);
 
-  // WebSocket subscription for real-time updates
+  // WebSocket subscription for real-time updates (only for live games)
   useEffect(() => {
+    // Only connect WebSocket if game is loaded AND is live (not completed/scheduled)
+    const shouldConnect = game?.status === 'live';
+
+    if (!shouldConnect) {
+      // Close any existing connection
+      if (socketRef.current) {
+        socketRef.current.emit('unsubscribe_live_game', { game_id: gameId });
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+      return;
+    }
+
+    // Avoid creating duplicate connections (StrictMode double-invoke)
+    if (socketRef.current?.connected) {
+      return;
+    }
+
     const newSocket = io(BACKEND_URL);
-    setSocket(newSocket);
+    socketRef.current = newSocket;
 
     // Subscribe to this game's updates
     newSocket.emit('subscribe_live_game', { game_id: gameId });
 
-    newSocket.on('subscribed', (data) => {
-      console.log('Subscribed to live game:', data.game_id);
-    });
-
-    // Listen for live updates
+    // Listen for live score updates
     newSocket.on('live_game_update', (data) => {
       if (data.game_id === gameId) {
-        console.log('Live game update:', data);
         // Update game state
         setGame((prev) => {
           if (!prev) return prev;
@@ -111,11 +149,48 @@ export const useLiveGameDetail = (gameId: number) => {
       }
     });
 
+    // Listen for new scoring events (goals/behinds)
+    newSocket.on('live_game_event', (data) => {
+      if (data.game_id === gameId) {
+        // Add new event to the events list
+        setGame((prev) => {
+          if (!prev) return prev;
+
+          // Create the new event from WebSocket data
+          const newEvent: GameEvent = {
+            id: Date.now(), // Temporary ID until we refetch
+            event_type: data.event_type,
+            team: {
+              id: 0,
+              name: data.team_name,
+              abbreviation: data.team_abbreviation,
+            },
+            home_score_after: data.home_score,
+            away_score_after: data.away_score,
+            quarter: prev.current_quarter || 0,
+            time_str: data.time_str,
+            timestamp: data.timestamp,
+            player_name: data.player_name,
+          };
+
+          return {
+            ...prev,
+            home_score: data.home_score,
+            away_score: data.away_score,
+            events: [newEvent, ...prev.events],
+          };
+        });
+      }
+    });
+
     return () => {
-      newSocket.emit('unsubscribe_live_game', { game_id: gameId });
-      newSocket.close();
+      if (socketRef.current) {
+        socketRef.current.emit('unsubscribe_live_game', { game_id: gameId });
+        socketRef.current.close();
+        socketRef.current = null;
+      }
     };
-  }, [gameId]);
+  }, [gameId, game?.status]);
 
   return { game, loading, error };
 };

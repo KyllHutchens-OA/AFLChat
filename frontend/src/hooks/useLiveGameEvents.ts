@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
@@ -14,34 +14,48 @@ interface ScoringEvent {
   quarter: number;
   time_str: string;
   timestamp: string;
+  // Player info (from API-Sports)
+  player_name?: string;
+  player_id?: number;
+  jersey_number?: number;
+  player_total_goals?: number;
 }
 
-export const useLiveGameEvents = () => {
+export const useLiveGameEvents = (enabled: boolean = true) => {
   const [latestEvent, setLatestEvent] = useState<ScoringEvent | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
+    // Don't connect if disabled (no live games)
+    if (!enabled) {
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+      return;
+    }
+
+    // Avoid creating duplicate connections (StrictMode double-invoke)
+    if (socketRef.current?.connected) {
+      return;
+    }
+
     // Create global socket connection
     const newSocket = io(BACKEND_URL);
-    setSocket(newSocket);
-
-    console.log('Global event listener connected');
+    socketRef.current = newSocket;
 
     // Listen for all live game events (not room-specific)
-    // These are broadcast by the backend when scoring events occur
     newSocket.on('live_game_event', (data: ScoringEvent) => {
-      console.log('Received scoring event:', data);
       setLatestEvent(data);
     });
 
-    newSocket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
-    });
-
     return () => {
-      newSocket.close();
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
     };
-  }, []);
+  }, [enabled]);
 
-  return { latestEvent, socket };
+  return { latestEvent, socket: socketRef.current };
 };

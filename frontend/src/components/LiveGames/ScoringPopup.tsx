@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveGameEvents } from '../../hooks/useLiveGameEvents';
+import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 
 interface Notification {
   id: string;
@@ -10,11 +11,25 @@ interface Notification {
   away_score: number;
   time_str: string;
   timestamp: string;
+  // Player info
+  player_name?: string;
+  jersey_number?: number;
+  player_total_goals?: number;
 }
 
-const ScoringPopup: React.FC = () => {
-  const { latestEvent } = useLiveGameEvents();
+interface ScoringPopupProps {
+  enabled?: boolean;
+}
+
+const ScoringPopup: React.FC<ScoringPopupProps> = ({ enabled = false }) => {
+  const { hideScores } = useSpoilerMode();
+  const { latestEvent } = useLiveGameEvents(enabled);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  // Don't show notifications when spoiler mode is on
+  if (hideScores) {
+    return null;
+  }
 
   // Listen for new scoring events
   useEffect(() => {
@@ -30,6 +45,9 @@ const ScoringPopup: React.FC = () => {
       away_score: latestEvent.away_score,
       time_str: latestEvent.time_str,
       timestamp: latestEvent.timestamp,
+      player_name: latestEvent.player_name,
+      jersey_number: latestEvent.jersey_number,
+      player_total_goals: latestEvent.player_total_goals,
     };
 
     // Add to notifications (max 3)
@@ -74,8 +92,19 @@ const ScoringPopup: React.FC = () => {
               {/* Content */}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-apple-gray-900 mb-0.5">
-                  {isGoal ? 'GOAL!' : 'Behind'} - {notification.team_name}
+                  {isGoal ? 'GOAL!' : 'Behind'} - {notification.team_abbreviation}
                 </p>
+                {notification.player_name && (
+                  <p className="text-sm font-medium text-apple-gray-800 mb-0.5">
+                    {notification.jersey_number && `#${notification.jersey_number} `}
+                    {notification.player_name}
+                    {isGoal && notification.player_total_goals && notification.player_total_goals > 1 && (
+                      <span className="text-apple-gray-500 ml-1">
+                        ({notification.player_total_goals} goals)
+                      </span>
+                    )}
+                  </p>
+                )}
                 <p className="text-xs text-apple-gray-600 mb-1">
                   {notification.time_str}
                 </p>

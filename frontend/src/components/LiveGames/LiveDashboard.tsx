@@ -1,7 +1,9 @@
 import React from 'react';
 import { useLiveGameDetail } from '../../hooks/useLiveGameDetail';
+import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 import ProgressBar from './ProgressBar';
 import EventTimeline from './EventTimeline';
+import GameStats from './GameStats';
 
 interface LiveDashboardProps {
   gameId: number;
@@ -9,6 +11,11 @@ interface LiveDashboardProps {
 
 const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
   const { game, loading, error } = useLiveGameDetail(gameId);
+  const { hideScores } = useSpoilerMode();
+
+  // Helper to display scores based on spoiler mode
+  const displayScore = (score: number) => hideScores ? '?' : score;
+  const displayBreakdown = (goals: number, behinds: number) => hideScores ? '?.?' : `${goals}.${behinds}`;
 
   if (loading) {
     return (
@@ -38,7 +45,7 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
         {/* Round and Venue */}
         <div className="text-center mb-6">
           <p className="text-sm font-medium text-apple-gray-500 uppercase tracking-wide">
-            {game.round} • {game.venue}
+            Round {game.round} • {game.venue}
           </p>
         </div>
 
@@ -49,11 +56,11 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
             <h2 className="text-2xl font-semibold text-apple-gray-900 mb-2">
               {game.home_team.name}
             </h2>
-            <p className="text-6xl font-bold text-apple-gray-900 mb-1">
-              {game.home_score}
+            <p className={`text-6xl font-bold text-apple-gray-900 mb-1 ${hideScores ? 'blur-md select-none' : ''}`}>
+              {displayScore(game.home_score)}
             </p>
-            <p className="text-sm text-apple-gray-500">
-              {game.home_goals}.{game.home_behinds}
+            <p className={`text-sm text-apple-gray-500 ${hideScores ? 'blur-sm select-none' : ''}`}>
+              {displayBreakdown(game.home_goals, game.home_behinds)}
             </p>
           </div>
 
@@ -62,11 +69,11 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
             <h2 className="text-2xl font-semibold text-apple-gray-900 mb-2">
               {game.away_team.name}
             </h2>
-            <p className="text-6xl font-bold text-apple-gray-900 mb-1">
-              {game.away_score}
+            <p className={`text-6xl font-bold text-apple-gray-900 mb-1 ${hideScores ? 'blur-md select-none' : ''}`}>
+              {displayScore(game.away_score)}
             </p>
-            <p className="text-sm text-apple-gray-500">
-              {game.away_goals}.{game.away_behinds}
+            <p className={`text-sm text-apple-gray-500 ${hideScores ? 'blur-sm select-none' : ''}`}>
+              {displayBreakdown(game.away_goals, game.away_behinds)}
             </p>
           </div>
         </div>
@@ -93,13 +100,36 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
         </div>
       </div>
 
-      {/* Event Timeline */}
-      <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
-        <h3 className="text-xl font-semibold text-apple-gray-900 mb-4">
-          Recent Events
-        </h3>
-        <EventTimeline events={game.events} />
-      </div>
+      {/* AI Summary for completed games - hidden when spoiler mode is on */}
+      {!hideScores && game.status === 'completed' && game.ai_summary && (
+        <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
+          <h3 className="text-xl font-semibold text-apple-gray-900 mb-3">
+            Match Summary
+          </h3>
+          <p className="text-apple-gray-700 leading-relaxed">
+            {game.ai_summary}
+          </p>
+        </div>
+      )}
+
+      {/* Top Performers for completed games - hidden when spoiler mode is on */}
+      {!hideScores && game.status === 'completed' && (
+        <GameStats gameId={game.id} />
+      )}
+
+      {/* Event Timeline - only show for live games, hidden when spoiler mode is on */}
+      {!hideScores && game.status === 'live' && (
+        <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
+          <h3 className="text-xl font-semibold text-apple-gray-900 mb-4">
+            Recent Events
+          </h3>
+          <EventTimeline
+            events={game.events}
+            homeTeamAbbr={game.home_team.abbreviation}
+            awayTeamAbbr={game.away_team.abbreviation}
+          />
+        </div>
+      )}
     </div>
   );
 };

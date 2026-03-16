@@ -32,20 +32,53 @@ interface LiveGame {
   last_updated: string;
 }
 
+// Polling intervals
+const LIVE_POLL_INTERVAL = 30000;    // 30 seconds when live games
+const IDLE_POLL_INTERVAL = 300000;   // 5 minutes when no live games
+
 export const useLiveGames = () => {
   const [games, setGames] = useState<LiveGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let currentInterval = LIVE_POLL_INTERVAL;
+
     const fetchGames = async () => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/live-games`);
         if (!response.ok) throw new Error('Failed to fetch games');
 
         const data = await response.json();
-        setGames(data.games || []);
+        const fetchedGames = data.games || [];
+        setGames(fetchedGames);
         setError(null);
+
+        // Adjust polling based on game states
+        const hasLiveGames = fetchedGames.some((g: LiveGame) => g.status === 'live');
+        const hasScheduledGames = fetchedGames.some((g: LiveGame) => g.status === 'scheduled');
+
+        // If all games are completed, stop polling entirely
+        if (!hasLiveGames && !hasScheduledGames && fetchedGames.length > 0) {
+          if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+          }
+          return;
+        }
+
+        // Adjust interval: 30s for live games, 5 min otherwise
+        const newInterval = hasLiveGames ? LIVE_POLL_INTERVAL : IDLE_POLL_INTERVAL;
+
+        // Only reset interval if it changed
+        if (newInterval !== currentInterval) {
+          currentInterval = newInterval;
+          if (intervalId) {
+            clearInterval(intervalId);
+          }
+          intervalId = setInterval(fetchGames, currentInterval);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -53,11 +86,17 @@ export const useLiveGames = () => {
       }
     };
 
+    // Initial fetch
     fetchGames();
 
-    // Poll every 30 seconds for game list updates
-    const interval = setInterval(fetchGames, 30000);
-    return () => clearInterval(interval);
+    // Start polling
+    intervalId = setInterval(fetchGames, currentInterval);
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, []);
 
   return { games, loading, error };
