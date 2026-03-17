@@ -839,15 +839,15 @@ class LiveGameService:
 
                 disposals = kicks + handballs
 
-                # AFL Fantasy scoring formula:
-                # Kick: 3, Handball: 2, Mark: 3, Tackle: 4, Goal: 8,
+                # AFL Fantasy scoring formula (official):
+                # Kick: 3, Handball: 2, Mark: 3, Tackle: 4, Goal: 6,
                 # Behind: 1, Hitout: 1, Free For: 1, Free Against: -3
                 fantasy = (
                     (kicks * 3) +
                     (handballs * 2) +
                     (marks * 3) +
                     (tackles * 4) +
-                    (goals * 8) +
+                    (goals * 6) +
                     (behinds * 1) +
                     (hitouts * 1) +
                     (free_for * 1) +
