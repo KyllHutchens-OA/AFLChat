@@ -1214,6 +1214,8 @@ class AFLAnalyticsAgent:
         if intent == QueryIntent.SIMPLE_STAT and len(data) == 1:
             row = data.iloc[0]
             numeric_cols = data.select_dtypes(include=['number']).columns.tolist()
+            # Check for name columns in the result (player_name, winner, team, name)
+            name_cols = [c for c in data.columns if c.lower() in ['name', 'player', 'player_name', 'team', 'team_name', 'winner']]
 
             def _fmt_val(v):
                 if isinstance(v, float) and v == int(v):
@@ -1226,7 +1228,16 @@ class AFLAnalyticsAgent:
                 col = numeric_cols[0]
                 value = row[col]
                 col_label = col.replace("_", " ")
-                subject = players[0] if players else teams[0] if teams else ""
+
+                # Try to get subject from: 1) name column in result, 2) entities, 3) empty
+                subject = ""
+                if name_cols:
+                    subject = str(row[name_cols[0]])
+                elif players:
+                    subject = players[0]
+                elif teams:
+                    subject = teams[0]
+
                 season_str = f" in {seasons[0]}" if seasons else ""
 
                 if subject:
@@ -1235,7 +1246,15 @@ class AFLAnalyticsAgent:
                     return f"The result is {_fmt_val(value)} {col_label}{season_str}."
 
             elif 2 <= len(numeric_cols) <= 5:
-                subject = players[0] if players else teams[0] if teams else ""
+                # Try to get subject from: 1) name column in result, 2) entities, 3) empty
+                subject = ""
+                if name_cols:
+                    subject = str(row[name_cols[0]])
+                elif players:
+                    subject = players[0]
+                elif teams:
+                    subject = teams[0]
+
                 season_str = f" in {seasons[0]}" if seasons else ""
                 parts = []
                 for col in numeric_cols:

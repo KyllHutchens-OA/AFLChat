@@ -6,6 +6,7 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
+    Text,
     Boolean,
     DateTime,
     Date,
@@ -414,6 +415,9 @@ class LiveGame(Base):
     )
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # AI-generated summary (created when game completes)
+    ai_summary = Column(Text, nullable=True)
+
     # Relationships
     home_team = relationship("Team", foreign_keys=[home_team_id])
     away_team = relationship("Team", foreign_keys=[away_team_id])
@@ -448,6 +452,7 @@ class LiveGameEvent(Base):
         Integer, ForeignKey("teams.id"), nullable=True
     )  # Null for quarter_end events
     player_name = Column(String(200))  # Player who scored (if available from API)
+    player_api_sports_id = Column(Integer)  # API-Sports player ID for lookups
 
     # Scoring context
     home_score_after = Column(Integer)
@@ -464,6 +469,46 @@ class LiveGameEvent(Base):
 
     def __repr__(self):
         return f"<LiveGameEvent {self.event_type} Game:{self.game_id} Q{self.quarter}>"
+
+
+class APISportsPlayer(Base):
+    """Cached player data from API-Sports for player name lookups."""
+
+    __tablename__ = "api_sports_players"
+
+    id = Column(Integer, primary_key=True)
+    api_sports_id = Column(Integer, nullable=False, unique=True, index=True)
+    name = Column(String(200), nullable=False)
+    team_api_sports_id = Column(Integer, index=True)  # API-Sports team ID
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)  # Our team ID
+    jersey_number = Column(Integer)
+
+    # Metadata
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    team = relationship("Team")
+
+    def __repr__(self):
+        return f"<APISportsPlayer {self.api_sports_id}: {self.name}>"
+
+
+class APISportsTeamMapping(Base):
+    """Mapping between API-Sports team IDs and our team IDs."""
+
+    __tablename__ = "api_sports_team_mappings"
+
+    id = Column(Integer, primary_key=True)
+    api_sports_id = Column(Integer, nullable=False, unique=True, index=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    api_sports_name = Column(String(200))
+
+    # Relationships
+    team = relationship("Team")
+
+    def __repr__(self):
+        return f"<APISportsTeamMapping {self.api_sports_id} -> {self.team_id}>"
 
 
 class NewsArticle(Base):

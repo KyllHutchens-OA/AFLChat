@@ -36,6 +36,7 @@ _AFL_KEYWORDS = re.compile(
     r"inside.?50|rebound.?50|contested|uncontested|clanger|clangers|"
     r"free.?kick|one.?percenter|bounces?|fantasy.?points?|"
     r"win|wins|loss|losses|draw|draws|score|scores|scoring|"
+    r"played|game|games|match|matches|last.?night|yesterday|today|"
     r"ladder|premiership|flag|wooden spoon|percentage|"
     r"player|team|club|match|game|quarter|half.?time|"
     r"captain|coach|debut|traded?|draft|"
@@ -178,8 +179,8 @@ class FastPathRouter:
         LIMIT 5
     """
 
-    # AFL Fantasy scoring: Kick×3, Handball×2, Mark×3, Tackle×4, Goal×8,
-    # Behind×1, Hitout×1, Free for×1, Free against×−3, Clanger×−1
+    # AFL Fantasy scoring (official): Kick×3, Handball×2, Mark×3, Tackle×4, Goal×6,
+    # Behind×1, Hitout×1, Free for×1, Free against×−3
     _AFL_FANTASY_SQL = """
         SELECT
             p.name,
@@ -189,24 +190,22 @@ class FastPathRouter:
                 COALESCE(ps.handballs, 0) * 2 +
                 COALESCE(ps.marks, 0) * 3 +
                 COALESCE(ps.tackles, 0) * 4 +
-                COALESCE(ps.goals, 0) * 8 +
+                COALESCE(ps.goals, 0) * 6 +
                 COALESCE(ps.behinds, 0) * 1 +
                 COALESCE(ps.hitouts, 0) * 1 +
                 COALESCE(ps.free_kicks_for, 0) * 1 +
-                COALESCE(ps.free_kicks_against, 0) * -3 +
-                COALESCE(ps.clangers, 0) * -1
+                COALESCE(ps.free_kicks_against, 0) * -3
             ), 1) AS avg_fantasy,
             SUM(
                 COALESCE(ps.kicks, 0) * 3 +
                 COALESCE(ps.handballs, 0) * 2 +
                 COALESCE(ps.marks, 0) * 3 +
                 COALESCE(ps.tackles, 0) * 4 +
-                COALESCE(ps.goals, 0) * 8 +
+                COALESCE(ps.goals, 0) * 6 +
                 COALESCE(ps.behinds, 0) * 1 +
                 COALESCE(ps.hitouts, 0) * 1 +
                 COALESCE(ps.free_kicks_for, 0) * 1 +
-                COALESCE(ps.free_kicks_against, 0) * -3 +
-                COALESCE(ps.clangers, 0) * -1
+                COALESCE(ps.free_kicks_against, 0) * -3
             ) AS total_fantasy,
             COUNT(*) AS games_played
         FROM player_stats ps
