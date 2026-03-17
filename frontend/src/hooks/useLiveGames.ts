@@ -44,6 +44,7 @@ export const useLiveGames = () => {
   useEffect(() => {
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let currentInterval = LIVE_POLL_INTERVAL;
+    let isFirstFetch = true;
 
     const fetchGames = async () => {
       try {
@@ -68,11 +69,17 @@ export const useLiveGames = () => {
           return;
         }
 
-        // Adjust interval: 30s for live games, 5 min otherwise
+        // Determine appropriate interval
         const newInterval = hasLiveGames ? LIVE_POLL_INTERVAL : IDLE_POLL_INTERVAL;
 
-        // Only reset interval if it changed
-        if (newInterval !== currentInterval) {
+        // Start or adjust polling interval
+        if (isFirstFetch) {
+          // Start polling after first fetch (now we know the game states)
+          isFirstFetch = false;
+          currentInterval = newInterval;
+          intervalId = setInterval(fetchGames, currentInterval);
+        } else if (newInterval !== currentInterval) {
+          // Adjust interval if it changed
           currentInterval = newInterval;
           if (intervalId) {
             clearInterval(intervalId);
@@ -86,11 +93,8 @@ export const useLiveGames = () => {
       }
     };
 
-    // Initial fetch
+    // Initial fetch only - polling starts after first fetch completes
     fetchGames();
-
-    // Start polling
-    intervalId = setInterval(fetchGames, currentInterval);
 
     return () => {
       if (intervalId) {

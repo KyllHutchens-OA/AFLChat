@@ -41,22 +41,22 @@ const LiveGames = () => {
     }
   }, [games, selectedGameId]);
 
-  // Auto-deselect when selected game completes (after a brief delay to show final score)
+  // Auto-switch to next live game when current game completes (only if live games exist)
   useEffect(() => {
     if (!selectedGameId || games.length === 0) return;
 
     const selectedGame = games.find(g => g.id === selectedGameId);
     if (!selectedGame) return;
 
-    // When game completes, wait 15 seconds then switch to next live game or fixtures
-    if (selectedGame.status === 'completed') {
+    // Only auto-switch if there are other live games to watch
+    // Don't deselect when all games are completed (let user browse finals)
+    const hasOtherLiveGames = games.some(g => g.status === 'live' && g.id !== selectedGameId);
+
+    if (selectedGame.status === 'completed' && hasOtherLiveGames) {
       const timeout = setTimeout(() => {
         const nextLiveGame = games.find(g => g.status === 'live' && g.id !== selectedGameId);
         if (nextLiveGame) {
           setSelectedGameId(nextLiveGame.id);
-        } else {
-          // No more live games - deselect to show upcoming schedule
-          setSelectedGameId(null);
         }
       }, 15000); // 15 second delay to view final score
 
