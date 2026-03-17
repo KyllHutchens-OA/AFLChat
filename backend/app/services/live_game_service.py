@@ -825,12 +825,34 @@ class LiveGameService:
                 player_obj = APISportsService.get_cached_player(player_id)
                 player_name = player_obj.get("name", "Unknown") if player_obj else "Unknown"
 
+                # Extract stats (direct integers, not nested)
                 goals = player.get("goals", {}).get("total", 0) or 0
-                disposals = (player.get("kicks", {}).get("total", 0) or 0) + \
-                           (player.get("handballs", {}).get("total", 0) or 0)
+                behinds = player.get("behinds", 0) or 0
+                kicks = player.get("kicks", 0) or 0
+                handballs = player.get("handballs", 0) or 0
+                marks = player.get("marks", 0) or 0
+                tackles = player.get("tackles", 0) or 0
+                hitouts = player.get("hitouts", 0) or 0
+                free_kicks = player.get("free_kicks", {})
+                free_for = free_kicks.get("for", 0) or 0
+                free_against = free_kicks.get("against", 0) or 0
 
-                # Simple fantasy calculation: goals*6 + disposals
-                fantasy = goals * 6 + disposals
+                disposals = kicks + handballs
+
+                # AFL Fantasy scoring formula:
+                # Kick: 3, Handball: 2, Mark: 3, Tackle: 4, Goal: 8,
+                # Behind: 1, Hitout: 1, Free For: 1, Free Against: -3
+                fantasy = (
+                    (kicks * 3) +
+                    (handballs * 2) +
+                    (marks * 3) +
+                    (tackles * 4) +
+                    (goals * 8) +
+                    (behinds * 1) +
+                    (hitouts * 1) +
+                    (free_for * 1) +
+                    (free_against * -3)
+                )
 
                 all_players.append({
                     "name": player_name,
