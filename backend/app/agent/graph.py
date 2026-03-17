@@ -1575,9 +1575,9 @@ Statistical Insights:
 
 Provide a concise analysis (3-5 sentences):"""
 
-            # Generate response using GPT-5-nano (Chat Completions API, low reasoning)
+            # Generate response using a more capable model for better NL quality
             response = client.chat.completions.create(
-                model="gpt-5-nano",
+                model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
                 messages=[{"role": "user", "content": prompt}],
                 reasoning_effort="low",
             )

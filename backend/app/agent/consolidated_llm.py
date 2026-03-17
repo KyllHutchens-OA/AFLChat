@@ -202,7 +202,7 @@ class ConsolidatedQueryUnderstanding:
 
             logger.info("CONSOLIDATED-LLM: Calling OpenAI (single intent+SQL call)...")
             response = client.chat.completions.create(
-                model="gpt-5-nano",
+                model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano"),
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 reasoning_effort="low",

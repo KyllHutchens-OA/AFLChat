@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 import logging
 import asyncio
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,7 @@ def handle_chat_message(data):
         UsageTracker.track_usage(
             visitor_id=visitor_id,
             ip_address=ip_address or '',
-            model="gpt-5-nano",
+            model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano"),
             input_tokens=500,   # Per-request estimate (2 OpenAI calls per query)
             output_tokens=200,
             endpoint="afl_chat"
