@@ -244,7 +244,15 @@ class AFLTablesIngester:
             ).first()
 
             if existing_match:
-                logger.debug(f"Match already exists: {year} R{round_num} {home_team} vs {away_team}")
+                # If match was previously scheduled and is now complete, update scores
+                if (existing_match.match_status != "completed"
+                        and game_data.get("complete") == 100
+                        and game_data.get("hscore") is not None):
+                    existing_match.home_score = game_data.get("hscore")
+                    existing_match.away_score = game_data.get("ascore")
+                    existing_match.match_status = "completed"
+                    logger.info(f"Updated result: {year} R{round_num} {home_team} vs {away_team} "
+                                f"({existing_match.home_score}-{existing_match.away_score})")
                 return
 
             # Create match
