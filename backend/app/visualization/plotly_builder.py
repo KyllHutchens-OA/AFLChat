@@ -298,7 +298,7 @@ class PlotlyBuilder:
             "bordercolor": "#e5e7eb",
             "borderwidth": 1
         },
-        "margin": {"l": 80, "r": 40, "t": 100, "b": 100},
+        "margin": {"l": 80, "r": 40, "t": 100, "b": 140},
         "xaxis": {
             "showgrid": True,
             "gridwidth": 1,

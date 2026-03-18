@@ -19,7 +19,7 @@ class WorkflowStep(str, Enum):
 
 class QueryIntent(str, Enum):
     """Types of queries the agent can handle."""
-    SIMPLE_STAT = "simple_stat"  # "Who won the 2024 grand final?"
+    SIMPLE_STAT = "simple_stat"  # "Who won the 2024 grand final?", "Who won last night?"
     PLAYER_COMPARISON = "player_comparison"  # "Compare Cripps vs Oliver"
     TEAM_ANALYSIS = "team_analysis"  # "Show Collingwood's scoring trend"
     TREND_ANALYSIS = "trend_analysis"  # "Max Gawn's hitout average over time"

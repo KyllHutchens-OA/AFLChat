@@ -25,6 +25,6 @@ if __name__ == '__main__':
         app,
         host='0.0.0.0',
         port=5001,  # Changed from 5000 due to macOS AirPlay Receiver
-        debug=True,
+        debug=False,  # Temporarily disabled for testing
         allow_unsafe_werkzeug=True  # For development only
     )

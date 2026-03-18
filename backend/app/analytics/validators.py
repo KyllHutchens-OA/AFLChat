@@ -26,6 +26,7 @@ class SQLValidator:
     # Allowlisted tables
     ALLOWED_TABLES = {
         "matches",
+        "live_games",  # Live/recent games table (2026+)
         "teams",
         "players",
         "player_stats",
