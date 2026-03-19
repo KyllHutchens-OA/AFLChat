@@ -67,27 +67,41 @@ class DatabaseTool:
                 logger.info("DatabaseTool: Query executed, fetching results...")
                 df = pd.DataFrame(result.fetchall(), columns=result.keys())
                 logger.info(f"DatabaseTool: Results fetched, {len(df)} rows")
-
-                # Convert Decimal types to float for JSON serialization
-                if len(df) > 0:
-                    for col in df.columns:
-                        if df[col].dtype == 'object':
-                            # Check if column contains Decimal objects
-                            first_non_null = df[col].dropna().head(1)
-                            if len(first_non_null) > 0 and isinstance(first_non_null.iloc[0], Decimal):
-                                df[col] = df[col].apply(lambda x: float(x) if isinstance(x, Decimal) else x)
-
-                logger.info(f"Query executed successfully: {len(df)} rows returned")
-
-                return {
-                    "success": True,
-                    "data": df,
-                    "error": None,
-                    "rows_returned": len(df)
-                }
-
+            except Exception as exec_error:
+                # Auto-fix common SQL errors
+                error_str = str(exec_error).lower()
+                if "group by" in error_str or "grouping" in error_str:
+                    logger.info("DatabaseTool: Attempting to auto-fix GROUP BY error...")
+                    fixed_sql = DatabaseTool._auto_fix_group_by(sql)
+                    if fixed_sql and fixed_sql != sql:
+                        logger.info(f"DatabaseTool: Retrying with fixed SQL: {fixed_sql[:200]}...")
+                        result = session.execute(text(fixed_sql))
+                        df = pd.DataFrame(result.fetchall(), columns=result.keys())
+                        logger.info(f"DatabaseTool: Auto-fix successful, {len(df)} rows")
+                    else:
+                        raise exec_error
+                else:
+                    raise exec_error
             finally:
                 session.close()
+
+            # Convert Decimal types to float for JSON serialization
+            if len(df) > 0:
+                for col in df.columns:
+                    if df[col].dtype == 'object':
+                        # Check if column contains Decimal objects
+                        first_non_null = df[col].dropna().head(1)
+                        if len(first_non_null) > 0 and isinstance(first_non_null.iloc[0], Decimal):
+                            df[col] = df[col].apply(lambda x: float(x) if isinstance(x, Decimal) else x)
+
+            logger.info(f"Query executed successfully: {len(df)} rows returned")
+
+            return {
+                "success": True,
+                "data": df,
+                "error": None,
+                "rows_returned": len(df)
+            }
 
         except Exception as e:
             import traceback
@@ -114,6 +128,85 @@ class DatabaseTool:
                 "data": None,
                 "rows_returned": 0
             }
+
+    @staticmethod
+    def _auto_fix_group_by(sql: str) -> Optional[str]:
+        """
+        Attempt to fix a SQL query that's missing GROUP BY clause.
+
+        Extracts non-aggregated columns from SELECT and adds GROUP BY.
+        Returns None if unable to fix.
+        """
+        import re
+
+        try:
+            sql_upper = sql.upper()
+
+            # Don't fix if already has GROUP BY
+            if "GROUP BY" in sql_upper:
+                return None
+
+            # Extract SELECT columns (between SELECT and FROM)
+            select_match = re.search(r'SELECT\s+(.+?)\s+FROM', sql, re.IGNORECASE | re.DOTALL)
+            if not select_match:
+                return None
+
+            select_clause = select_match.group(1)
+
+            # Find columns that are NOT aggregated (don't have SUM, COUNT, AVG, MAX, MIN, etc.)
+            # Split by comma, but be careful with nested parentheses
+            columns = []
+            paren_depth = 0
+            current_col = ""
+            for char in select_clause:
+                if char == '(':
+                    paren_depth += 1
+                    current_col += char
+                elif char == ')':
+                    paren_depth -= 1
+                    current_col += char
+                elif char == ',' and paren_depth == 0:
+                    columns.append(current_col.strip())
+                    current_col = ""
+                else:
+                    current_col += char
+            if current_col.strip():
+                columns.append(current_col.strip())
+
+            # Find non-aggregated columns
+            aggregate_funcs = ['SUM(', 'COUNT(', 'AVG(', 'MAX(', 'MIN(', 'COALESCE(']
+            non_agg_cols = []
+            for col in columns:
+                col_upper = col.upper()
+                is_aggregate = any(func in col_upper for func in aggregate_funcs)
+                if not is_aggregate:
+                    # Extract the actual column reference (before AS if present)
+                    if ' AS ' in col.upper():
+                        col_ref = col.split(' AS ')[0].split(' as ')[0].strip()
+                    else:
+                        col_ref = col.strip()
+                    non_agg_cols.append(col_ref)
+
+            if not non_agg_cols:
+                return None
+
+            # Find where to insert GROUP BY (before ORDER BY, or at end)
+            group_by_clause = "GROUP BY " + ", ".join(non_agg_cols)
+
+            if "ORDER BY" in sql_upper:
+                # Insert before ORDER BY
+                order_pos = sql_upper.find("ORDER BY")
+                fixed_sql = sql[:order_pos] + group_by_clause + " " + sql[order_pos:]
+            else:
+                # Append at end (remove trailing semicolon if present)
+                fixed_sql = sql.rstrip(";").rstrip() + " " + group_by_clause + ";"
+
+            logger.info(f"DatabaseTool: Auto-fixed GROUP BY: {group_by_clause}")
+            return fixed_sql
+
+        except Exception as e:
+            logger.warning(f"DatabaseTool: Failed to auto-fix GROUP BY: {e}")
+            return None
 
 
 class StatisticsTool:
@@ -1031,31 +1124,34 @@ class NewsTool:
 
     @staticmethod
     def _search_cache(query: str, filters: Dict, max_results: int) -> list:
-        """Search NewsArticle table with filters."""
+        """Search NewsArticle table using LLM-enriched structured fields."""
         from app.data.models import NewsArticle
         from datetime import datetime, timedelta
+        from sqlalchemy import or_, cast, String
 
         session = Session()
 
         try:
-            q = session.query(NewsArticle)
+            q = session.query(NewsArticle).filter(NewsArticle.is_afl == True)
 
-            # Filter by injury flag if requested
+            # Filter by category
             if filters.get('injury_only'):
                 q = q.filter(NewsArticle.is_injury_related == True)
+            if filters.get('category'):
+                q = q.filter(NewsArticle.category == filters['category'])
 
-            # Filter by teams (JSONB contains — related_teams is a JSON array of team name strings)
+            # Filter by teams using the enriched related_teams JSONB field
             if filters.get('teams'):
-                from sqlalchemy import cast
-                from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
                 teams = filters['teams']
                 if isinstance(teams, str):
                     teams = [teams]
-                team_filters = [
-                    NewsArticle.related_teams.contains(cast([team], PG_JSONB))
-                    for team in teams
-                ]
-                from sqlalchemy import or_
+
+                team_filters = []
+                for team in teams:
+                    # Search in JSONB array (cast to text for ILIKE)
+                    team_filters.append(
+                        cast(NewsArticle.related_teams, String).ilike(f'%{team}%')
+                    )
                 q = q.filter(or_(*team_filters))
 
             # Recency filter (default 7 days)
@@ -1063,23 +1159,38 @@ class NewsTool:
             cutoff = datetime.utcnow() - timedelta(days=days_back)
             q = q.filter(NewsArticle.published_date >= cutoff)
 
-            # Text search
+            # Text search (fallback for free-text queries)
             if query:
                 search_pattern = f'%{query}%'
                 q = q.filter(
                     (NewsArticle.title.ilike(search_pattern)) |
-                    (NewsArticle.content.ilike(search_pattern))
+                    (NewsArticle.summary.ilike(search_pattern))
                 )
 
-            articles = q.order_by(NewsArticle.published_date.desc()).limit(max_results).all()
+            articles = q.order_by(NewsArticle.published_date.desc()).limit(max_results * 2).all()
+
+            # Deduplicate by title (SMH and The Age often syndicate same articles)
+            seen_titles = set()
+            unique_articles = []
+            for a in articles:
+                title_key = a.title.lower().strip()
+                if title_key not in seen_titles:
+                    seen_titles.add(title_key)
+                    unique_articles.append(a)
+                    if len(unique_articles) >= max_results:
+                        break
 
             return [{
                 'title': a.title,
                 'url': a.url,
                 'source': a.source,
                 'published_date': a.published_date.isoformat(),
-                'content': a.content[:200] if a.content else None
-            } for a in articles]
+                'summary': a.summary or (a.content[:300] if a.content else None),
+                'category': a.category,
+                'teams': a.related_teams or [],
+                'players': a.related_players or [],
+                'injury_details': a.injury_details,
+            } for a in unique_articles]
 
         finally:
             session.close()
@@ -1150,7 +1261,11 @@ class NewsTool:
                 'url': r.get('url', ''),
                 'source': 'web',
                 'published_date': r.get('published_date') or datetime.utcnow().isoformat(),
-                'content': r.get('content', '')[:200] if r.get('content') else None,
+                'summary': r.get('content', '')[:200] if r.get('content') else None,
+                'category': None,
+                'teams': [],
+                'players': [],
+                'injury_details': None,
             } for r in results]
 
         except Exception as e:
@@ -1223,12 +1338,14 @@ class BettingTool:
 
             matches = q.all()
 
-            # Format with odds
+            # Format with odds (use sportsbet only, no bookmaker branding)
             result = []
             for match in matches:
-                # Get most recent odds per bookmaker
-                odds = session.query(BettingOdds).filter_by(match_id=match.id).\
-                       order_by(BettingOdds.odds_fetched_at.desc()).limit(5).all()
+                # Get most recent sportsbet odds only
+                odds = session.query(BettingOdds).filter_by(
+                    match_id=match.id,
+                    bookmaker='sportsbet'
+                ).order_by(BettingOdds.odds_fetched_at.desc()).first()
 
                 result.append({
                     'match_id': match.id,
@@ -1237,12 +1354,8 @@ class BettingTool:
                     'match_date': match.match_date.isoformat(),
                     'round': match.round,
                     'venue': match.venue,
-                    'odds': [{
-                        'bookmaker': o.bookmaker,
-                        'home_odds': float(o.home_odds),
-                        'away_odds': float(o.away_odds),
-                        'fetched_at': o.odds_fetched_at.isoformat()
-                    } for o in odds]
+                    'home_odds': float(odds.home_odds) if odds else None,
+                    'away_odds': float(odds.away_odds) if odds else None,
                 })
 
             return {'success': True, 'matches': result}

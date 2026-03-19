@@ -62,21 +62,30 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
-        # Job 4: Fetch RSS news (every hour)
+        # Job 4: Fetch RSS news (every 6 hours)
         self.scheduler.add_job(
             func=self._fetch_rss_news,
-            trigger=IntervalTrigger(hours=1),
+            trigger=IntervalTrigger(hours=6),
             id="fetch_rss_news",
-            name="Fetch RSS news feeds",
+            name="Fetch and enrich RSS news feeds",
             replace_existing=True,
         )
 
-        # Job 5: Update betting odds (daily at 9 AM AEST)
+        # Job 5a: Update betting odds (morning at 9 AM AEST)
         self.scheduler.add_job(
             func=self._update_betting_odds,
             trigger=CronTrigger(hour=9, minute=0, timezone='Australia/Melbourne'),
-            id="update_betting_odds",
-            name="Update betting odds",
+            id="update_betting_odds_morning",
+            name="Update betting odds (morning)",
+            replace_existing=True,
+        )
+
+        # Job 5b: Update betting odds (evening at 5 PM AEST)
+        self.scheduler.add_job(
+            func=self._update_betting_odds,
+            trigger=CronTrigger(hour=17, minute=0, timezone='Australia/Melbourne'),
+            id="update_betting_odds_evening",
+            name="Update betting odds (evening)",
             replace_existing=True,
         )
 
@@ -199,12 +208,12 @@ class LiveGameScheduler:
             logger.error(f"RSS job failed: {e}")
 
     def _update_betting_odds(self):
-        """Daily: Update odds with rate limiting."""
+        """Update odds with single efficient API call."""
         try:
             from app.data.ingestion.odds_fetcher import OddsFetcher
 
-            requests_made = OddsFetcher.update_upcoming_matches(days_ahead=7, max_requests=16)
-            logger.info(f"Odds job complete: {requests_made} API requests")
+            requests_made = OddsFetcher.update_upcoming_matches(days_ahead=7)
+            logger.info(f"Odds job complete: {requests_made} API request(s)")
         except Exception as e:
             logger.error(f"Odds job failed: {e}")
 

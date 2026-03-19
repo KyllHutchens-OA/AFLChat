@@ -512,26 +512,32 @@ class APISportsTeamMapping(Base):
 
 
 class NewsArticle(Base):
-    """AFL news articles from RSS feeds and web search."""
+    """AFL news articles from RSS feeds, enriched by LLM at ingestion."""
 
     __tablename__ = "news_articles"
 
     id = Column(Integer, primary_key=True)
-    source = Column(String(100), nullable=False)  # 'afl.com.au', 'foxsports', etc.
+    source = Column(String(100), nullable=False)  # 'smh', 'theage', 'abc'
     title = Column(String(500), nullable=False)
     url = Column(String(1000), nullable=False, unique=True)  # Prevents duplicates
     published_date = Column(DateTime, nullable=False, index=True)
-    content = Column(String)  # Summary/excerpt
+    content = Column(String)  # Raw summary/excerpt from RSS
     author = Column(String(200))
 
-    # Search optimization
+    # LLM-enriched fields (populated at ingestion by GPT-5-nano)
+    is_afl = Column(Boolean, default=True, index=True)
+    category = Column(String(50), index=True)  # match_result, match_preview, injury, trade, off_field, analysis, other
+    summary = Column(String(500))  # LLM-generated one-line summary
     is_injury_related = Column(Boolean, default=False, index=True)
+    injury_details = Column(JSONB)  # [{"player": "...", "type": "...", "severity": "..."}]
     related_teams = Column(JSONB)  # ['Collingwood', 'Richmond']
-    related_players = Column(JSONB)  # ['Dustin Martin']
+    related_players = Column(JSONB)  # ['Nick Daicos', 'Patrick Cripps']
+    enriched_at = Column(DateTime)  # When LLM enrichment ran
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
+        Index('idx_news_category_published', 'category', 'published_date'),
         Index('idx_news_injury_published', 'is_injury_related', 'published_date'),
     )
 
