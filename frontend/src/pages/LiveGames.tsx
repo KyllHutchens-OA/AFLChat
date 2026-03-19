@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLiveGames } from '../hooks/useLiveGames';
 import { useUpcomingMatches } from '../hooks/useUpcomingMatches';
+import { useSpoilerMode } from '../hooks/useSpoilerMode';
 import GamePicker from '../components/LiveGames/GamePicker';
 import LiveDashboard from '../components/LiveGames/LiveDashboard';
 import ScoringPopup from '../components/LiveGames/ScoringPopup';
@@ -9,6 +10,8 @@ import Countdown from '../components/LiveGames/Countdown';
 const LiveGames = () => {
   const { games, loading, error } = useLiveGames();
   const { matches: upcomingMatches, nextMatch } = useUpcomingMatches();
+  // Subscribe to spoiler mode to ensure re-renders when it changes
+  useSpoilerMode();
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
 
   // Count of live games for badge
@@ -101,9 +104,11 @@ const LiveGames = () => {
 
   // Check if there are any live (non-completed) games
   const hasLiveGames = games.some(g => g.status === 'live');
+  const hasCompletedGames = games.some(g => g.status === 'completed');
 
-  // Show upcoming schedule when no games or no live games and nothing selected
-  if (games.length === 0 || (!hasLiveGames && selectedGameId === null)) {
+  // Show upcoming schedule only when there are no games at all
+  // When there are completed games, show them (even without live games)
+  if (games.length === 0 || (!hasLiveGames && !hasCompletedGames)) {
     return (
       <div>
         <PageHeader />

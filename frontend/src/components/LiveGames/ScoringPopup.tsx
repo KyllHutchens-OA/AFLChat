@@ -26,13 +26,11 @@ const ScoringPopup: React.FC<ScoringPopupProps> = ({ enabled = false }) => {
   const { latestEvent } = useLiveGameEvents(enabled);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  // Don't show notifications when spoiler mode is on
-  if (hideScores) {
-    return null;
-  }
-
   // Listen for new scoring events
+  // Note: This hook must be called unconditionally (before any returns)
   useEffect(() => {
+    // Don't add notifications when spoiler mode is on
+    if (hideScores) return;
     if (!latestEvent) return;
 
     // Create notification
@@ -60,9 +58,10 @@ const ScoringPopup: React.FC<ScoringPopupProps> = ({ enabled = false }) => {
     setTimeout(() => {
       setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
     }, 6000);
-  }, [latestEvent]);
+  }, [latestEvent, hideScores]);
 
-  if (notifications.length === 0) {
+  // Don't show notifications when spoiler mode is on or no notifications
+  if (hideScores || notifications.length === 0) {
     return null;
   }
 

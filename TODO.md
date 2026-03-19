@@ -2,9 +2,9 @@
 
 ## Features & UX
 
-- [ ] **"Was this response an error?" button** — Add to the bottom of each AI chat response; pre-populate the share URL with the conversation context so bug reports are easy to triage
+- [x] **"Was this response an error?" button** — Added feedback button at bottom of agent responses with casual messaging ("AFL.NAC is still learning...") that opens GitHub issue pre-populated with conversation context
 
-- [ ] **Improve in-chat error messages** — If SQL fails or returns an error, surface a friendly, informative message to the user instead of a generic failure
+- [x] **Improve in-chat error messages** — Errors now categorized (rate limit, usage limit, network, processing) with friendly messages and visual distinction (red styling with warning icon)
 
 - [ ] **Handle users with the same name** — Investigate and fix how duplicate display names are resolved (session, visitor ID, UI display)
 

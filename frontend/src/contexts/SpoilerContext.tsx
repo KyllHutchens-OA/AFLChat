@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 
 interface SpoilerContextType {
   spoilerModeEnabled: boolean;
-  setSpoilerModeEnabled: (enabled: boolean) => void;
+  setSpoilerModeEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   hasSeenModal: boolean;
   setHasSeenModal: (seen: boolean) => void;
 }

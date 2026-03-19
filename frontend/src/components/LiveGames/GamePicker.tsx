@@ -124,8 +124,8 @@ const GamePicker: React.FC<GamePickerProps> = ({ games, selectedGameId, onSelect
         </div>
       )}
 
-      {/* Completed Games - Compact List (hidden in spoiler mode) */}
-      {!hideScores && completedGames.length > 0 && (
+      {/* Completed Games - Compact List (always shown, scores blurred in spoiler mode) */}
+      {completedGames.length > 0 && (
         <div>
           {liveGames.length > 0 && (
             <div className="text-sm font-medium text-apple-gray-500 mb-2 px-1">
