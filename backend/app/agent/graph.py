@@ -28,6 +28,10 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Import config for model selection
+from app.config import get_config
+config_obj = get_config()
+
 # Initialize OpenAI client with timeout for production reliability
 # 60s total timeout, 10s connect timeout
 client = OpenAI(
@@ -1213,6 +1217,23 @@ class AFLAnalyticsAgent:
         # --- PATTERN 1: Single-row result (simple_stat) ---
         if intent == QueryIntent.SIMPLE_STAT and len(data) == 1:
             row = data.iloc[0]
+
+            # Special case: Match result (has winner, home_team, away_team, scores)
+            if 'winner' in data.columns and 'home_team' in data.columns and 'away_team' in data.columns:
+                home_team = row['home_team']
+                away_team = row['away_team']
+                home_score = int(row['home_score']) if 'home_score' in row else 0
+                away_score = int(row['away_score']) if 'away_score' in row else 0
+                winner = row['winner']
+                margin = int(row['margin']) if 'margin' in row else abs(home_score - away_score)
+                venue = row['venue'] if 'venue' in row else ''
+                round_str = row['round'] if 'round' in row else ''
+
+                venue_text = f" at {venue}" if venue else ""
+                round_text = f" (Round {round_str})" if round_str else ""
+
+                return f"{winner} defeated {away_team if winner == home_team else home_team} {max(home_score, away_score)}-{min(home_score, away_score)} by {margin} points{venue_text}{round_text}."
+
             numeric_cols = data.select_dtypes(include=['number']).columns.tolist()
             # Check for name columns in the result (player_name, winner, team, name)
             name_cols = [c for c in data.columns if c.lower() in ['name', 'player', 'player_name', 'team', 'team_name', 'winner']]
@@ -1265,8 +1286,25 @@ class AFLAnalyticsAgent:
                 else:
                     return f"Results{season_str}: {stats_str}."
 
-        # --- PATTERN 2: Top-N list (2-10 rows, has name column + numeric) ---
+        # --- PATTERN 1.5: Multiple match results (2-10 rows with match data) ---
         if intent == QueryIntent.SIMPLE_STAT and 2 <= len(data) <= 10:
+            # Check if this is match results (has winner, teams, scores)
+            if 'winner' in data.columns and 'home_team' in data.columns and 'away_team' in data.columns:
+                lines = []
+                for _, row in data.iterrows():
+                    home_team = row['home_team']
+                    away_team = row['away_team']
+                    home_score = int(row['home_score']) if 'home_score' in row else 0
+                    away_score = int(row['away_score']) if 'away_score' in row else 0
+                    winner = row['winner']
+                    margin = int(row['margin']) if 'margin' in row else abs(home_score - away_score)
+                    venue = row['venue'] if 'venue' in row else ''
+
+                    venue_text = f" at {venue}" if venue else ""
+                    lines.append(f"• {winner} defeated {away_team if winner == home_team else home_team} {max(home_score, away_score)}-{min(home_score, away_score)} by {margin} points{venue_text}")
+
+                return "Games:\n" + "\n".join(lines)
+
             name_cols = [c for c in data.columns if c.lower() in ['name', 'player', 'player_name', 'team', 'winner']]
             numeric_cols = data.select_dtypes(include=['number']).columns.tolist()
             # Filter out ID columns
@@ -1575,9 +1613,9 @@ Statistical Insights:
 
 Provide a concise analysis (3-5 sentences):"""
 
-            # Generate response using GPT-5-nano (Chat Completions API, low reasoning)
+            # Generate response using a more capable model for better NL quality
             response = client.chat.completions.create(
-                model="gpt-5-nano",
+                model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
                 messages=[{"role": "user", "content": prompt}],
                 reasoning_effort="low",
             )

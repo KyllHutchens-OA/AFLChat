@@ -15,7 +15,7 @@ class LayoutOptimizer:
     """Optimizes chart layout based on data characteristics"""
 
     # Default configuration
-    DEFAULT_MARGINS = {"l": 80, "r": 40, "t": 100, "b": 100}
+    DEFAULT_MARGINS = {"l": 80, "r": 40, "t": 100, "b": 140}
     DEFAULT_HEIGHT = 450
     MIN_HEIGHT = 350
     MAX_HEIGHT = 800
@@ -73,13 +73,17 @@ class LayoutOptimizer:
         # X-axis labels
         if x_col in data.columns:
             max_x_label_length = data[x_col].astype(str).str.len().max()
+            num_unique_labels = data[x_col].nunique()
 
             # Increase bottom margin if labels are long or will be rotated
             if max_x_label_length > 10:
                 # Labels will be rotated, need more bottom space
-                margins["b"] = 100 + 40  # Extra 40px for rotation
+                margins["b"] = 140 + 40  # Extra 40px for rotation
             elif max_x_label_length > 6:
-                margins["b"] = 100 + 20  # Moderate increase
+                margins["b"] = 140 + 20  # Moderate increase
+            elif num_unique_labels > 20:
+                # Many labels (even if short) - add extra space for legend
+                margins["b"] = 160  # Extra space when many x-axis points
 
         # Y-axis labels (based on max value digits)
         if y_col in data.columns:
@@ -151,12 +155,15 @@ class LayoutOptimizer:
             config["tickangle"] = -45
             config["tickfont"] = {"size": 10}
 
-        # Thin ticks if too many data points
-        if num_points > 25:
-            # Show approximately 15-20 ticks
-            config["nticks"] = 20
-        elif num_points > 15:
+        # Thin ticks if too many data points to prevent overcrowding
+        if num_points > 30:
+            # Show approximately 12-15 ticks for very dense data
+            config["nticks"] = 12
+        elif num_points > 20:
+            # Show approximately 15 ticks
             config["nticks"] = 15
+        elif num_points > 15:
+            config["nticks"] = min(num_points, 18)
 
         return config
 

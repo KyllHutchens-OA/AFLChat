@@ -239,7 +239,7 @@ Game Flow: {momentum}
 Write a casual, engaging 2-3 sentence summary. Mention a standout performer if the data is available. Don't just list stats - tell the story of the game."""
 
             response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": "You are an AFL commentator who writes brief, casual match summaries."},
                     {"role": "user", "content": prompt}

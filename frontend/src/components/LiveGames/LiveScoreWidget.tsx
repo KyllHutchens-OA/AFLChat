@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 
 interface LiveGame {
   id: number;
@@ -13,6 +14,7 @@ interface LiveGame {
 }
 
 const LiveScoreWidget = () => {
+  const { hideScores } = useSpoilerMode();
   const [liveGame, setLiveGame] = useState<LiveGame | null>(null);
   const [isVisible, setIsVisible] = useState(true);
 
@@ -42,7 +44,8 @@ const LiveScoreWidget = () => {
     return () => clearInterval(interval);
   }, []);
 
-  if (!liveGame || !isVisible) {
+  // Hide widget when spoiler mode is on
+  if (!liveGame || !isVisible || hideScores) {
     return null;
   }
 

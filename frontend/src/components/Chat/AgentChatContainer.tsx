@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAgentWebSocket } from '../../hooks/useAgentWebSocket';
 import ChartRenderer from '../Visualization/ChartRenderer';
+import FeedbackButton from './FeedbackButton';
 
 const MESSAGE_THRESHOLD = 20;
 
@@ -18,7 +19,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { messages, isConnected, isThinking, thinkingStep, isLoadingHistory, sendMessage, startNewChat } =
+  const { messages, isConnected, isThinking, thinkingStep, isLoadingHistory, currentConversationId, sendMessage, startNewChat } =
     useAgentWebSocket({ conversationId, onConversationCreated });
 
   const showNewChatPrompt = messages.length >= MESSAGE_THRESHOLD && !dismissedNewChatPrompt;
@@ -66,23 +67,24 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   };
 
   return (
+  <>
     <div
-      className="flex flex-col h-[calc(100vh-12rem)] bg-white rounded-lg shadow-md border border-gray-200"
+      className="flex flex-col h-[calc(100vh-14rem)] glass rounded-apple-xl shadow-apple-lg"
       style={{ marginBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : undefined }}
     >
       {/* Connection Status & New Chat Button */}
-      <div className="px-4 py-2 border-b border-gray-200 bg-gray-50">
+      <div className="px-4 py-2 glass sticky top-0 z-10 border-b border-apple-gray-200/50 rounded-t-apple-xl">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-            <span className="text-sm text-gray-600">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-apple-green animate-pulse' : 'bg-apple-red'}`} />
+            <span className="text-sm text-apple-gray-700">
               {isConnected ? 'Connected' : 'Disconnected'}
             </span>
           </div>
           {messages.length > 0 && (
             <button
               onClick={startNewChat}
-              className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-200 transition-colors"
+              className="btn-apple-secondary text-sm flex items-center gap-1"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -96,17 +98,17 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {isLoadingHistory && (
-          <div className="text-center text-gray-500 mt-8">
+          <div className="text-center text-apple-gray-500 mt-8">
             <div className="flex items-center justify-center gap-2">
-              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              <div className="w-4 h-4 border-2 border-apple-blue-500 border-t-transparent rounded-full animate-spin"></div>
               <span>Loading conversation history...</span>
             </div>
           </div>
         )}
 
         {!isLoadingHistory && messages.length === 0 && (
-          <div className="text-center text-gray-500 mt-8">
-            <h2 className="text-xl font-semibold mb-2">Ask me about AFL statistics!</h2>
+          <div className="text-center text-apple-gray-500 mt-8 animate-fade-in-up">
+            <h2 className="text-xl font-semibold mb-2 text-apple-gray-900">Ask me about AFL statistics!</h2>
             <p className="text-sm">Try questions like:</p>
             <ul className="text-sm mt-2 space-y-1">
               <li>"Who won the 2025 grand final?"</li>
@@ -117,19 +119,31 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
         )}
 
         {messages.map((message) => (
-          <div key={message.id} className="mb-4">
+          <div key={message.id} className="mb-4 animate-scale-in">
             {/* Message bubble */}
             <div
               className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-3xl rounded-lg px-4 py-3 ${
+                className={`max-w-3xl rounded-[18px] px-4 py-3 ${
                   message.type === 'user'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-100 text-gray-900'
+                    ? 'bg-apple-blue-500 text-white shadow-apple'
+                    : message.isError
+                    ? 'bg-apple-red/10 border border-apple-red/30 text-apple-gray-900'
+                    : 'bg-apple-gray-100 text-apple-gray-900'
                 }`}
               >
+                {/* Error icon for error messages */}
+                {message.isError && (
+                  <div className="flex items-center gap-2 mb-2 text-apple-red">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span className="text-sm font-medium">Something went wrong</span>
+                  </div>
+                )}
                 <div className="whitespace-pre-wrap">{message.text}</div>
+
               </div>
             </div>
 
@@ -145,14 +159,14 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
         {/* Thinking Indicator */}
         {isThinking && (
           <div className="flex justify-start">
-            <div className="max-w-3xl rounded-lg px-4 py-3 bg-gray-100 text-gray-900">
+            <div className="max-w-3xl glass rounded-apple px-4 py-3">
               <div className="flex items-center gap-2">
                 <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  <div className="w-2 h-2 bg-apple-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 bg-apple-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 bg-apple-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                 </div>
-                <span className="text-sm">{thinkingStep}</span>
+                <span className="text-sm text-apple-gray-700">{thinkingStep}</span>
               </div>
             </div>
           </div>
@@ -163,17 +177,17 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
 
       {/* New Chat Suggestion Banner */}
       {showNewChatPrompt && (
-        <div className="px-4 py-3 bg-amber-50 border-t border-amber-200 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-amber-800">
+        <div className="px-4 py-3 glass border-t-2 border-apple-orange bg-apple-orange/10 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-apple-orange">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span className="text-sm">This conversation is getting long. Consider starting a new chat for better responses.</span>
+            <span className="text-sm font-medium">This conversation is getting long. Consider starting a new chat for better responses.</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setDismissedNewChatPrompt(true)}
-              className="text-sm text-amber-600 hover:text-amber-800 px-2 py-1"
+              className="text-sm text-apple-gray-700 hover:text-apple-gray-900 px-2 py-1 transition-colors"
             >
               Dismiss
             </button>
@@ -182,7 +196,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
                 startNewChat();
                 setDismissedNewChatPrompt(false);
               }}
-              className="text-sm bg-amber-600 text-white px-3 py-1 rounded hover:bg-amber-700 transition-colors"
+              className="btn-apple-primary text-sm"
             >
               New Chat
             </button>
@@ -191,7 +205,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
       )}
 
       {/* Input Area */}
-      <form onSubmit={handleSubmit} className="border-t border-gray-200 p-3 sm:p-4">
+      <form onSubmit={handleSubmit} className="border-t border-apple-gray-200 p-3 sm:p-4 bg-white/50 rounded-b-apple-xl">
         <div className="flex gap-2">
           <input
             ref={inputRef}
@@ -201,18 +215,27 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
             onFocus={handleInputFocus}
             placeholder="Ask about AFL statistics..."
             disabled={!isConnected || isThinking}
-            className="flex-1 px-3 py-2 sm:px-4 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+            className="input-apple flex-1 text-sm sm:text-base disabled:bg-apple-gray-100 disabled:cursor-not-allowed"
           />
           <button
             type="submit"
             disabled={!isConnected || isThinking || !input.trim()}
-            className="px-4 py-2 sm:px-6 text-sm sm:text-base bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+            className="btn-apple-primary text-sm sm:text-base disabled:bg-apple-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
           >
             {isThinking ? '...' : 'Send'}
           </button>
         </div>
       </form>
     </div>
+
+    {/* Feedback section - outside main container */}
+    {messages.length > 0 && (
+      <FeedbackButton
+        conversationId={currentConversationId}
+        messageText={messages.filter(m => m.type === 'agent' && !m.isError).slice(-1)[0]?.text || ''}
+      />
+    )}
+  </>
   );
 };
 

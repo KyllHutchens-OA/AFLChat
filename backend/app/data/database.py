@@ -34,7 +34,8 @@ engine = create_engine(
 )
 
 # Create session factory
-session_factory = sessionmaker(bind=engine)
+# expire_on_commit=False keeps objects usable after commit (needed for live game updates)
+session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 Session = scoped_session(session_factory)
 
 # Base class for models

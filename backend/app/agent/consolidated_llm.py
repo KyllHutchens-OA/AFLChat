@@ -23,6 +23,10 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Import config for model selection
+from app.config import get_config
+config = get_config()
+
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
     timeout=httpx.Timeout(60.0, connect=10.0)
@@ -48,7 +52,20 @@ You are an AFL analytics expert. In ONE step:
 2. Generate a valid PostgreSQL SELECT query.
 
 ## Intent Classification
-- "simple_stat": Single number/fact
+⚠️ CRITICAL: NEVER classify match/game queries as off_topic!
+
+Questions about matches ARE AFL queries:
+- "who played last night" → simple_stat ✓
+- "who won yesterday" → simple_stat ✓
+- "what was the score last night" → simple_stat ✓
+- "games yesterday" → simple_stat ✓
+
+off_topic is ONLY for non-AFL topics:
+- "what's the weather" → off_topic ✗
+- "how to cook pasta" → off_topic ✗
+- "tell me a joke" → off_topic ✗
+
+- "simple_stat": Single number/fact, including match results (e.g., "How many goals did X kick?", "Who won last night?", "Who played yesterday?", "What was the score last night?")
 - "player_comparison": Comparing multiple players
 - "team_analysis": One team's performance in a single season/period
 - "trend_analysis": Change over TIME (keywords: "over time", "across time", "year by year", "historical", "trend", "evolution", "since")
@@ -58,12 +75,19 @@ You are an AFL analytics expert. In ONE step:
 - "tipping_advice": Tipping recommendations (e.g., "Who should I tip?", "Predictions for this round")
 - "off_topic": Query is NOT about AFL football (e.g. recipes, weather, general knowledge). Return this intent with sql="" for any non-AFL question.
 
+CRITICAL: "Who played last night/yesterday" is a simple_stat AFL query, NOT off_topic!
+
 **IMPORTANT**: For news, injury, betting, or tipping queries, set sql="" (empty string) as these queries do NOT require database SQL queries.
 
 ## Entity Extraction Rules
 - **Teams**: AFL club names (use canonical names: Adelaide, Brisbane Lions, Carlton, Collingwood, Essendon, Fremantle, Geelong, Gold Coast, Greater Western Sydney, Hawthorn, Melbourne, North Melbourne, Port Adelaide, Richmond, St Kilda, Sydney, West Coast, Western Bulldogs)
 - **Players**: Surnames or full names (single-word surnames are ALWAYS players, never teams)
-- **Seasons**: Years e.g. "2022", "last year" → infer current
+- **Seasons**: Years e.g. "2022", "last year" → infer current (2026)
+- **Temporal References**: Convert to actual dates
+  - "today" → 2026-03-14
+  - "yesterday", "last night" → 2026-03-13
+  - "this week" → last 7 days from 2026-03-14
+  - "last round", "this round" → most recent round number
 - **Metrics**: goals, disposals, marks, tackles, wins, losses, score, etc.
 
 ## SQL Generation Rules
@@ -76,6 +100,12 @@ Use EXACT team names: Adelaide (NOT "Adelaide Crows"), Geelong (NOT "Geelong Cat
 ### matches: id, season (INTEGER), round (VARCHAR), match_date (TIMESTAMP), home_team_id, away_team_id, home_score, away_score, venue, attendance
 - round values: regular rounds "0","1".."24"; finals: "Qualifying Final","Elimination Final","Semi Final","Preliminary Final","Grand Final"
 - ALWAYS include finals in round-by-round season queries
+- Contains historical data (1990-2025)
+
+### live_games: id, season, round, match_date (TIMESTAMP), home_team_id, away_team_id, home_score, away_score, home_goals, home_behinds, away_goals, away_behinds, venue, status, current_quarter
+- Contains live/recent games (2026+) with real-time scores
+- CRITICAL: For queries about recent games (last night, yesterday, today, this week) in 2026, query live_games NOT matches
+- Use same JOIN pattern as matches: JOIN teams t_home ON lg.home_team_id = t_home.id
 
 ### players: id, name, team_id (CURRENT team only — WARNING: wrong for traded players), position, height, weight, debut_year
 
@@ -90,12 +120,50 @@ CRITICAL RULES:
 6. For temporal/trend queries: return ONE ROW PER SEASON, GROUP BY season
 7. For single-season performance: return ONE ROW PER MATCH (round-by-round)
 8. NEVER use CROSS JOIN
+9. CRITICAL: For "who won" or "who played" queries, SELECT must include:
+   - Both team names (home_team, away_team)
+   - Both scores (home_score, away_score)
+   - Winner calculation (CASE statement)
+   - Margin (ABS difference)
+   - Match context (venue, match_date, round)
+   Do NOT return only partial data like just margin or just one team!
 
 Common patterns:
 - Team season record: JOIN teams t, filter (home_team_id=t.id OR away_team_id=t.id), CASE for wins/losses
 - Player stats: JOIN player_stats ps, players p, matches m ON ps.match_id=m.id
 - Grand Final: WHERE m.round = 'Grand Final' AND m.season = <year>
 - Player name matching: ALWAYS use p.name ILIKE '%Surname%' (with leading %) because names are stored as "First Last"
+- Temporal queries: Use match_date for date filtering
+  - "last night", "yesterday" (2026-03-13): Query live_games table with WHERE DATE(lg.match_date) = '2026-03-13'
+  - "today" (2026-03-14): Query live_games with WHERE DATE(lg.match_date) = '2026-03-14'
+  - Recent games (last 7 days): Query live_games with WHERE lg.match_date >= '2026-03-07'
+  - Latest game: ORDER BY lg.match_date DESC, lg.id DESC LIMIT 1 from live_games
+  - IMPORTANT: Recent queries (2026) use live_games, historical queries (≤2025) use matches
+- Match winner queries ("who won"): ALWAYS include teams, scores, and calculated winner.
+  For 2026 dates (recent games), use live_games table:
+  SELECT
+    t_home.name as home_team,
+    t_away.name as away_team,
+    lg.home_score,
+    lg.away_score,
+    CASE
+      WHEN lg.home_score > lg.away_score THEN t_home.name
+      WHEN lg.away_score > lg.home_score THEN t_away.name
+      ELSE 'Draw'
+    END as winner,
+    ABS(lg.home_score - lg.away_score) as margin,
+    lg.round,
+    lg.venue
+  FROM live_games lg
+  JOIN teams t_home ON lg.home_team_id = t_home.id
+  JOIN teams t_away ON lg.away_team_id = t_away.id
+  WHERE DATE(lg.match_date) = '2026-03-13'
+
+  For historical dates (pre-2026), use matches table (replace lg with m, live_games with matches)
+
+- "Who played" queries: Same pattern - use live_games for 2026+, matches for historical
+  Example for "Who played last night?":
+  SELECT t_home.name as home_team, t_away.name as away_team, lg.home_score, lg.away_score, CASE WHEN lg.home_score > lg.away_score THEN t_home.name WHEN lg.away_score > lg.home_score THEN t_away.name ELSE 'Draw' END as winner, ABS(lg.home_score - lg.away_score) as margin, lg.round, lg.venue FROM live_games lg JOIN teams t_home ON lg.home_team_id = t_home.id JOIN teams t_away ON lg.away_team_id = t_away.id WHERE DATE(lg.match_date) = '2026-03-13' ORDER BY lg.id
 
 {conversation_context}
 
@@ -202,7 +270,7 @@ class ConsolidatedQueryUnderstanding:
 
             logger.info("CONSOLIDATED-LLM: Calling OpenAI (single intent+SQL call)...")
             response = client.chat.completions.create(
-                model="gpt-5-nano",
+                model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano"),
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 reasoning_effort="low",

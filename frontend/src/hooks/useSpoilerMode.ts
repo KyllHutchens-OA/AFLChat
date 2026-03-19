@@ -6,8 +6,8 @@ export const useSpoilerMode = () => {
   return {
     // When true, hide scores/stats
     hideScores: spoilerModeEnabled,
-    // Toggle function
-    toggleSpoilerMode: () => setSpoilerModeEnabled(!spoilerModeEnabled),
+    // Toggle function - use functional update to avoid stale closure issues
+    toggleSpoilerMode: () => setSpoilerModeEnabled(prev => !prev),
     // Direct setter
     setSpoilerMode: setSpoilerModeEnabled,
   };

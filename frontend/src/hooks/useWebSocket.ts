@@ -11,6 +11,8 @@ interface Message {
   visualization?: any;
   confidence?: number;
   sources?: string[];
+  isError?: boolean;
+  errorType?: 'rate_limit' | 'usage_limit' | 'processing' | 'network' | 'unknown';
 }
 
 interface UseWebSocketReturn {
@@ -19,6 +21,7 @@ interface UseWebSocketReturn {
   isThinking: boolean;
   thinkingStep: string;
   isLoadingHistory: boolean;
+  currentConversationId: string | null;
   sendMessage: (message: string) => void;
   clearMessages: () => void;
   startNewChat: () => void;
@@ -178,11 +181,35 @@ export const useWebSocket = (): UseWebSocketReturn => {
       setIsThinking(false);
       setThinkingStep('');
 
+      // Categorize error type for better UX
+      const errorMsg = data.message.toLowerCase();
+      let errorType: Message['errorType'] = 'unknown';
+      let friendlyMessage = data.message;
+
+      if (errorMsg.includes('rate limit')) {
+        errorType = 'rate_limit';
+        friendlyMessage = "You're sending messages too quickly. Please wait a moment before trying again.";
+      } else if (errorMsg.includes('usage limit') || errorMsg.includes('daily limit')) {
+        errorType = 'usage_limit';
+        friendlyMessage = "You've reached the daily usage limit. Please try again tomorrow.";
+      } else if (errorMsg.includes('timeout') || errorMsg.includes('connection')) {
+        errorType = 'network';
+        friendlyMessage = "Connection issue - please check your internet and try again.";
+      } else if (errorMsg.includes('no message')) {
+        errorType = 'processing';
+        friendlyMessage = "Please enter a message to send.";
+      } else {
+        errorType = 'processing';
+        friendlyMessage = `Something went wrong processing your request. ${data.message}`;
+      }
+
       const errorMessage: Message = {
         id: Date.now().toString(),
         type: 'agent',
-        text: `Error: ${data.message}`,
+        text: friendlyMessage,
         timestamp: new Date(),
+        isError: true,
+        errorType,
       };
 
       setMessages((prev) => [...prev, errorMessage]);
@@ -243,6 +270,7 @@ export const useWebSocket = (): UseWebSocketReturn => {
     isThinking,
     thinkingStep,
     isLoadingHistory,
+    currentConversationId: conversationIdRef.current,
     sendMessage,
     clearMessages,
     startNewChat,

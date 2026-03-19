@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import ChartRenderer from '../Visualization/ChartRenderer';
+import FeedbackButton from './FeedbackButton';
 
 const MESSAGE_THRESHOLD = 20; // Suggest new chat after this many messages
 
@@ -10,7 +11,7 @@ const ChatContainer: React.FC = () => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { messages, isConnected, isThinking, thinkingStep, isLoadingHistory, sendMessage, startNewChat } = useWebSocket();
+  const { messages, isConnected, isThinking, thinkingStep, isLoadingHistory, currentConversationId, sendMessage, startNewChat } = useWebSocket();
 
   const showNewChatPrompt = messages.length >= MESSAGE_THRESHOLD && !dismissedNewChatPrompt;
 
@@ -58,6 +59,7 @@ const ChatContainer: React.FC = () => {
   };
 
   return (
+  <>
     <div
       className="flex flex-col h-[calc(100vh-12rem)] bg-white rounded-lg shadow-md border border-gray-200"
       style={{ marginBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : undefined }}
@@ -118,10 +120,22 @@ const ChatContainer: React.FC = () => {
                 className={`max-w-3xl rounded-lg px-4 py-3 ${
                   message.type === 'user'
                     ? 'bg-blue-500 text-white'
+                    : message.isError
+                    ? 'bg-red-50 border border-red-200 text-gray-900'
                     : 'bg-gray-100 text-gray-900'
                 }`}
               >
+                {/* Error icon for error messages */}
+                {message.isError && (
+                  <div className="flex items-center gap-2 mb-2 text-red-600">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span className="text-sm font-medium">Something went wrong</span>
+                  </div>
+                )}
                 <div className="whitespace-pre-wrap">{message.text}</div>
+
               </div>
             </div>
 
@@ -205,6 +219,15 @@ const ChatContainer: React.FC = () => {
         </div>
       </form>
     </div>
+
+    {/* Feedback section - outside main container */}
+    {messages.length > 0 && (
+      <FeedbackButton
+        conversationId={currentConversationId}
+        messageText={messages.filter(m => m.type === 'agent' && !m.isError).slice(-1)[0]?.text || ''}
+      />
+    )}
+  </>
   );
 };
 

@@ -139,15 +139,16 @@ class LiveGameScheduler:
             data = response.json()
             games = data.get('games', [])
 
-            # Filter for live games (complete > 0 and complete < 100)
-            live_games = [g for g in games if 0 < g.get('complete', 0) < 100]
+            # Filter for active games (0 < complete <= 100)
+            # Include games at 99%+ to ensure they get properly closed out
+            active_games = [g for g in games if 0 < g.get('complete', 0) <= 100]
 
-            if live_games:
-                logger.info(f"Found {len(live_games)} live games, updating...")
-                for game in live_games:
+            if active_games:
+                logger.info(f"Found {len(active_games)} active games, updating...")
+                for game in active_games:
                     LiveGameService.process_game_update(game, socketio=socketio)
             else:
-                logger.debug("No live games found")
+                logger.debug("No active games found")
 
         except Exception as e:
             logger.error(f"Error polling live games: {e}")

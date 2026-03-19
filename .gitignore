@@ -93,3 +93,6 @@ htmlcov/
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# Archived legacy code
+archive/
