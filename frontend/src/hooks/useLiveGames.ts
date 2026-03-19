@@ -33,7 +33,7 @@ interface LiveGame {
 }
 
 // Polling intervals
-const LIVE_POLL_INTERVAL = 30000;    // 30 seconds when live games
+const LIVE_POLL_INTERVAL = 15000;    // 15 seconds when live games
 const IDLE_POLL_INTERVAL = 300000;   // 5 minutes when no live games
 
 export const useLiveGames = () => {

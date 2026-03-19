@@ -4,14 +4,13 @@ import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 
 interface Notification {
   id: string;
-  event_type: 'goal' | 'behind';
+  event_type: string;
   team_name: string;
   team_abbreviation: string;
   home_score: number;
   away_score: number;
   time_str: string;
   timestamp: string;
-  // Player info
   player_name?: string;
   jersey_number?: number;
   player_total_goals?: number;
@@ -26,14 +25,13 @@ const ScoringPopup: React.FC<ScoringPopupProps> = ({ enabled = false }) => {
   const { latestEvent } = useLiveGameEvents(enabled);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  // Listen for new scoring events
-  // Note: This hook must be called unconditionally (before any returns)
   useEffect(() => {
-    // Don't add notifications when spoiler mode is on
     if (hideScores) return;
     if (!latestEvent) return;
 
-    // Create notification
+    // Only show popups for scoring events
+    if (latestEvent.event_type !== 'goal' && latestEvent.event_type !== 'behind') return;
+
     const notification: Notification = {
       id: `${latestEvent.game_id}-${latestEvent.timestamp}`,
       event_type: latestEvent.event_type,
@@ -48,19 +46,16 @@ const ScoringPopup: React.FC<ScoringPopupProps> = ({ enabled = false }) => {
       player_total_goals: latestEvent.player_total_goals,
     };
 
-    // Add to notifications (max 3)
     setNotifications((prev) => {
       const updated = [notification, ...prev];
-      return updated.slice(0, 3); // Keep only latest 3
+      return updated.slice(0, 3);
     });
 
-    // Auto-dismiss after 6 seconds
     setTimeout(() => {
       setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
     }, 6000);
   }, [latestEvent, hideScores]);
 
-  // Don't show notifications when spoiler mode is on or no notifications
   if (hideScores || notifications.length === 0) {
     return null;
   }
@@ -83,12 +78,10 @@ const ScoringPopup: React.FC<ScoringPopupProps> = ({ enabled = false }) => {
             `}
           >
             <div className="flex items-start gap-3">
-              {/* Icon */}
               <div className={`${iconBg} w-10 h-10 rounded-full flex items-center justify-center text-white text-lg font-bold flex-shrink-0`}>
                 {icon}
               </div>
 
-              {/* Content */}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-apple-gray-900 mb-0.5">
                   {isGoal ? 'GOAL!' : 'Behind'} - {notification.team_abbreviation}

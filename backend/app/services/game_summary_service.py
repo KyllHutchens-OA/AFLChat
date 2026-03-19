@@ -225,6 +225,8 @@ class GameSummaryService:
 Use these team nicknames where appropriate: {home_nick}, {away_nick}
 Be casual and engaging but not over the top. Reference the flow of the game if there was a notable comeback or momentum shift.
 
+You MUST mention specific players by name. Reference the top goal kicker by name and goals scored. If someone had a standout game in disposals or fantasy, call them out too. Use last names naturally (e.g., 'Daicos was everywhere with 35 disposals'). Tell the story of the game through the players who shaped it.
+
 Match Details:
 - {home_team} ({home_nick}) vs {away_team} ({away_nick})
 - Final Score: {game.home_score} - {game.away_score}
@@ -236,7 +238,7 @@ Game Flow: {momentum}
 
 {performers_str}
 
-Write a casual, engaging 2-3 sentence summary. Mention a standout performer if the data is available. Don't just list stats - tell the story of the game."""
+Write a casual, engaging 2-3 sentence summary. Don't just list stats - tell the story of the game through the players who shaped it."""
 
             response = client.chat.completions.create(
                 model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
@@ -244,8 +246,8 @@ Write a casual, engaging 2-3 sentence summary. Mention a standout performer if t
                     {"role": "system", "content": "You are an AFL commentator who writes brief, casual match summaries."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=200,
+                temperature=1,
+                max_completion_tokens=200,
             )
 
             summary = response.choices[0].message.content.strip()
@@ -254,6 +256,82 @@ Write a casual, engaging 2-3 sentence summary. Mention a standout performer if t
 
         except Exception as e:
             logger.error(f"Failed to generate summary for game {game.id}: {e}")
+            return None
+
+
+    @staticmethod
+    def generate_quarter_summary(
+        quarter: int,
+        home_team: str,
+        away_team: str,
+        home_score: int,
+        away_score: int,
+        quarter_stats: list,
+    ) -> Optional[str]:
+        """
+        Generate a casual 1-2 sentence summary for a completed quarter.
+
+        Args:
+            quarter: Quarter number (1-4)
+            home_team: Home team full name
+            away_team: Away team full name
+            home_score: Score at end of quarter
+            away_score: Score at end of quarter
+            quarter_stats: List of top player stat dicts for the quarter
+        """
+        try:
+            home_nick = GameSummaryService.get_nickname(home_team)
+            away_nick = GameSummaryService.get_nickname(away_team)
+
+            # Format top performers
+            performers = ""
+            if quarter_stats:
+                lines = []
+                # Top by disposals
+                top_disp = sorted(quarter_stats, key=lambda x: x.get("disposals", 0), reverse=True)[:2]
+                for p in top_disp:
+                    lines.append(f"{p['name']} ({p.get('disposals', 0)} disposals)")
+                # Top goalscorers
+                top_goals = [p for p in quarter_stats if p.get("goals", 0) > 0]
+                top_goals.sort(key=lambda x: x["goals"], reverse=True)
+                for p in top_goals[:2]:
+                    lines.append(f"{p['name']} ({p['goals']} goals)")
+                performers = "; ".join(lines)
+
+            margin = home_score - away_score
+            if margin > 0:
+                leader = home_nick
+            elif margin < 0:
+                leader = away_nick
+            else:
+                leader = "tied"
+
+            prompt = f"""Write a casual 1-2 sentence summary of Q{quarter} of an AFL match.
+Use team nicknames: {home_nick}, {away_nick}.
+You MUST mention specific players by name. Reference top performers naturally.
+
+Score at end of Q{quarter}: {home_team} {home_score} - {away_team} {away_score} ({"tied" if margin == 0 else f"{leader} by {abs(margin)} pts"})
+Top performers so far: {performers if performers else "Data not available"}
+
+Example: "The Pies took control in Q2 with Daicos racking up 12 disposals. De Goey kicked two goals to blow the margin out to 25 points."
+Keep it brief and engaging."""
+
+            response = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
+                messages=[
+                    {"role": "system", "content": "You are an AFL commentator writing brief quarter summaries."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=1,
+                max_completion_tokens=2000,
+            )
+
+            summary = response.choices[0].message.content.strip()
+            logger.info(f"Generated Q{quarter} summary: {summary[:60]}...")
+            return summary
+
+        except Exception as e:
+            logger.error(f"Failed to generate quarter summary: {e}")
             return None
 
 

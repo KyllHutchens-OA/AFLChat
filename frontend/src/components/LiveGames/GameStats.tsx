@@ -1,12 +1,38 @@
 import React from 'react';
 import { useGameStats } from '../../hooks/useGameStats';
 
+// Shorten API-Sports team names (e.g. "Hawthorn Hawks" -> "HAW")
+const shortenTeam = (team: string): string => {
+  const map: Record<string, string> = {
+    'Adelaide Crows': 'ADE',
+    'Brisbane Lions': 'BRL',
+    'Carlton Blues': 'CAR',
+    'Collingwood Magpies': 'COL',
+    'Essendon Bombers': 'ESS',
+    'Fremantle Dockers': 'FRE',
+    'Geelong Cats': 'GEE',
+    'Gold Coast Suns': 'GCS',
+    'GWS Giants': 'GWS',
+    'Hawthorn Hawks': 'HAW',
+    'Melbourne Demons': 'MEL',
+    'North Melbourne Kangaroos': 'NME',
+    'Port Adelaide Power': 'PTA',
+    'Richmond Tigers': 'RIC',
+    'St Kilda Saints': 'STK',
+    'Sydney Swans': 'SYD',
+    'West Coast Eagles': 'WCE',
+    'Western Bulldogs': 'WBD',
+  };
+  return map[team] || team.slice(0, 3).toUpperCase();
+};
+
 interface GameStatsProps {
   gameId: number;
+  gameStatus?: string;
 }
 
-const GameStats: React.FC<GameStatsProps> = ({ gameId }) => {
-  const { stats, loading, error } = useGameStats(gameId);
+const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
+  const { stats, loading, error } = useGameStats(gameId, gameStatus);
 
   if (loading) {
     return null; // Don't show skeleton to avoid layout shift
@@ -44,9 +70,12 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId }) => {
                   key={`goal-${idx}`}
                   className="flex items-center justify-between text-sm"
                 >
-                  <span className="text-apple-gray-700 truncate flex-1 mr-2">
-                    {player.name}
-                  </span>
+                  <div className="truncate flex-1 mr-2">
+                    <span className="text-apple-gray-700">{player.name}</span>
+                    {player.team && (
+                      <span className="text-apple-gray-400 text-xs ml-1">{shortenTeam(player.team)}</span>
+                    )}
+                  </div>
                   <span className="font-semibold text-apple-gray-900 tabular-nums">
                     {player.goals}
                   </span>
@@ -68,9 +97,12 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId }) => {
                   key={`disp-${idx}`}
                   className="flex items-center justify-between text-sm"
                 >
-                  <span className="text-apple-gray-700 truncate flex-1 mr-2">
-                    {player.name}
-                  </span>
+                  <div className="truncate flex-1 mr-2">
+                    <span className="text-apple-gray-700">{player.name}</span>
+                    {player.team && (
+                      <span className="text-apple-gray-400 text-xs ml-1">{shortenTeam(player.team)}</span>
+                    )}
+                  </div>
                   <span className="font-semibold text-apple-gray-900 tabular-nums">
                     {player.disposals}
                   </span>
@@ -92,9 +124,12 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId }) => {
                   key={`fantasy-${idx}`}
                   className="flex items-center justify-between text-sm"
                 >
-                  <span className="text-apple-gray-700 truncate flex-1 mr-2">
-                    {player.name}
-                  </span>
+                  <div className="truncate flex-1 mr-2">
+                    <span className="text-apple-gray-700">{player.name}</span>
+                    {player.team && (
+                      <span className="text-apple-gray-400 text-xs ml-1">{shortenTeam(player.team)}</span>
+                    )}
+                  </div>
                   <span className="font-semibold text-apple-gray-900 tabular-nums">
                     {player.points}
                   </span>

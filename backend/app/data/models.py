@@ -418,6 +418,9 @@ class LiveGame(Base):
     # AI-generated summary (created when game completes)
     ai_summary = Column(Text, nullable=True)
 
+    # Quarter summaries JSONB: {"1": "summary...", "2": "summary..."}
+    quarter_summaries = Column(JSONB, nullable=True, default=dict)
+
     # Relationships
     home_team = relationship("Team", foreign_keys=[home_team_id])
     away_team = relationship("Team", foreign_keys=[away_team_id])
@@ -425,6 +428,9 @@ class LiveGame(Base):
     match = relationship("Match", foreign_keys=[match_id])
     events = relationship(
         "LiveGameEvent", back_populates="game", cascade="all, delete-orphan"
+    )
+    quarter_snapshots = relationship(
+        "QuarterSnapshot", back_populates="game", cascade="all, delete-orphan"
     )
 
     def __repr__(self):
@@ -460,6 +466,9 @@ class LiveGameEvent(Base):
     quarter = Column(Integer)
     time_str = Column(String(50))
 
+    # Description for milestone events (e.g., "3rd goal", "30 disposals")
+    description = Column(String(200), nullable=True)
+
     # Metadata
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
@@ -469,6 +478,34 @@ class LiveGameEvent(Base):
 
     def __repr__(self):
         return f"<LiveGameEvent {self.event_type} Game:{self.game_id} Q{self.quarter}>"
+
+
+class QuarterSnapshot(Base):
+    """Stores player stats snapshots at quarter breaks."""
+
+    __tablename__ = "quarter_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    game_id = Column(
+        Integer,
+        ForeignKey("live_games.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    quarter = Column(Integer, nullable=False)
+    player_stats = Column(JSONB, nullable=True)  # Array of player stat objects
+    quarter_summary = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("game_id", "quarter"),
+    )
+
+    # Relationships
+    game = relationship("LiveGame", back_populates="quarter_snapshots")
+
+    def __repr__(self):
+        return f"<QuarterSnapshot Game:{self.game_id} Q{self.quarter}>"
 
 
 class APISportsPlayer(Base):

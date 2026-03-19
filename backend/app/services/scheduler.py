@@ -44,10 +44,10 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
-        # Job 2: Poll for live games (every 20 seconds)
+        # Job 2: Poll for live games (every 15 seconds)
         self.scheduler.add_job(
             func=self._poll_live_games,
-            trigger=IntervalTrigger(seconds=20),
+            trigger=IntervalTrigger(seconds=15),
             id="poll_live_games",
             name="Poll Squiggle for live games",
             replace_existing=True,
