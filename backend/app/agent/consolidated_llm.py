@@ -51,42 +51,52 @@ You are an AFL analytics expert. In ONE step:
 1. Parse the user's question (intent, entities).
 2. Generate a valid PostgreSQL SELECT query.
 
+## CRITICAL: Follow-up Question Handling
+⚠️ If conversation context is provided below, the user may be asking a FOLLOW-UP question.
+- Resolve pronouns: "he" → player from context, "they" → team from context, "that" → event/stat from context
+- Follow-up examples that are NOT off_topic:
+  - After discussing Tony Lockett: "What year did he achieve that?" → simple_stat about Tony Lockett
+  - After discussing Richmond: "Who was their best player?" → simple_stat about Richmond
+  - After discussing 2024 Grand Final: "Who came second?" → simple_stat about 2024 Grand Final
+  - After discussing a player: "What about his career average?" → simple_stat about same player
+  - After discussing 2025 wins: "What about just regular season?" → same query but for 2025 regular season only
+  - After discussing 2023 stats: "Exclude finals" → same query but for 2023 excluding finals
+- ALWAYS use conversation context to identify the subject of follow-up questions
+- CRITICAL: If user asks to modify a previous query (e.g., "just regular season", "exclude finals"), KEEP the season from context!
+
 ## Intent Classification
-⚠️ CRITICAL: NEVER classify match/game queries as off_topic!
+⚠️ NEVER classify AFL follow-up questions as off_topic!
 
-Questions about matches ARE AFL queries:
-- "who played last night" → simple_stat ✓
-- "who won yesterday" → simple_stat ✓
-- "what was the score last night" → simple_stat ✓
-- "games yesterday" → simple_stat ✓
-
-off_topic is ONLY for non-AFL topics:
-- "what's the weather" → off_topic ✗
-- "how to cook pasta" → off_topic ✗
-- "tell me a joke" → off_topic ✗
-
-- "simple_stat": Single number/fact, including match results (e.g., "How many goals did X kick?", "Who won last night?", "Who played yesterday?", "What was the score last night?")
+- "simple_stat": Single number/fact, including match results, follow-up questions about players/teams
 - "player_comparison": Comparing multiple players
 - "team_analysis": One team's performance in a single season/period
 - "trend_analysis": Change over TIME (keywords: "over time", "across time", "year by year", "historical", "trend", "evolution", "since")
-- "afl_news": Latest AFL news or articles (e.g., "What's the latest AFL news?", "Show me recent news")
-- "injury_news": Injury reports or player availability (e.g., "Any injuries for Collingwood?", "Who's out this week?")
-- "betting_odds": Betting odds or lines (e.g., "What are the odds for next round?", "Show me betting odds")
-- "tipping_advice": Tipping recommendations (e.g., "Who should I tip?", "Predictions for this round")
-- "off_topic": Query is NOT about AFL football (e.g. recipes, weather, general knowledge). Return this intent with sql="" for any non-AFL question.
+- "afl_news": Latest AFL news or articles
+- "injury_news": Injury reports or player availability
+- "betting_odds": Betting odds or lines
+- "tipping_advice": AFL tipping/predictions
+- "off_topic": ONLY for truly non-AFL questions (recipes, weather, other sports). NEVER for follow-ups about AFL topics!
 
-CRITICAL: "Who played last night/yesterday" is a simple_stat AFL query, NOT off_topic!
+Examples of off_topic (truly unrelated to AFL):
+- "what's the weather" → off_topic
+- "how to cook pasta" → off_topic
+- "tell me about cricket" → off_topic
 
 **IMPORTANT**: For news, injury, betting, or tipping queries, set sql="" (empty string) as these queries do NOT require database SQL queries.
 
 ## Entity Extraction Rules
+- **CRITICAL**: For follow-up questions, extract entities from CONVERSATION CONTEXT:
+  - "he", "his" → player from previous exchange
+  - "they", "their" → team from previous exchange
+  - "that year", "same season" → season from previous exchange
+  - "that game", "the final" → match from previous exchange
 - **Teams**: AFL club names (use canonical names: Adelaide, Brisbane Lions, Carlton, Collingwood, Essendon, Fremantle, Geelong, Gold Coast, Greater Western Sydney, Hawthorn, Melbourne, North Melbourne, Port Adelaide, Richmond, St Kilda, Sydney, West Coast, Western Bulldogs)
 - **Players**: Surnames or full names (single-word surnames are ALWAYS players, never teams)
 - **Seasons**: Years e.g. "2022", "last year" → infer current (2026)
-- **Temporal References**: Convert to actual dates
-  - "today" → 2026-03-14
-  - "yesterday", "last night" → 2026-03-13
-  - "this week" → last 7 days from 2026-03-14
+- **Temporal References**: Convert to actual dates (current date: use server time)
+  - "today" → current date
+  - "yesterday", "last night" → current date - 1 day
+  - "this week" → last 7 days from current date
   - "last round", "this round" → most recent round number
 - **Metrics**: goals, disposals, marks, tackles, wins, losses, score, etc.
 
@@ -164,6 +174,19 @@ Common patterns:
 - "Who played" queries: Same pattern - use live_games for 2026+, matches for historical
   Example for "Who played last night?":
   SELECT t_home.name as home_team, t_away.name as away_team, lg.home_score, lg.away_score, CASE WHEN lg.home_score > lg.away_score THEN t_home.name WHEN lg.away_score > lg.home_score THEN t_away.name ELSE 'Draw' END as winner, ABS(lg.home_score - lg.away_score) as margin, lg.round, lg.venue FROM live_games lg JOIN teams t_home ON lg.home_team_id = t_home.id JOIN teams t_away ON lg.away_team_id = t_away.id WHERE DATE(lg.match_date) = '2026-03-13' ORDER BY lg.id
+- HOME/AWAY game queries (CRITICAL - don't confuse these!):
+  - "home wins" = wins when team was HOME team: WHERE m.home_team_id = t.id AND m.home_score > m.away_score
+  - "away wins" = wins when team was AWAY team: WHERE m.away_team_id = t.id AND m.away_score > m.home_score
+  - "home games" = games where team was home: WHERE m.home_team_id = t.id
+  - "away games" = games where team was away: WHERE m.away_team_id = t.id
+  - "home record" = wins/losses/draws in HOME games only (filter to home_team_id = t.id first!)
+  - Do NOT count away wins as home wins! Filter by venue (home_team_id) BEFORE counting wins.
+  Example for "Collingwood home record in 2023":
+  SELECT SUM(CASE WHEN m.home_score > m.away_score THEN 1 ELSE 0 END) AS home_wins,
+         SUM(CASE WHEN m.home_score < m.away_score THEN 1 ELSE 0 END) AS home_losses,
+         COUNT(*) AS home_games
+  FROM matches m JOIN teams t ON t.name = 'Collingwood'
+  WHERE m.season = 2023 AND m.home_team_id = t.id
 
 {conversation_context}
 
@@ -197,35 +220,45 @@ User question: {user_query}"""
 
 
 def _build_conversation_context(conversation_history: Optional[List[Dict]]) -> str:
-    """Build a compact conversation context section for the prompt."""
+    """Build conversation context that enables follow-up question handling."""
     if not conversation_history or len(conversation_history) < 2:
         return ""
 
     recent = conversation_history[-6:]  # Last 3 exchanges
-    lines = ["## Previous Conversation Context", "Resolve pronouns/references using this context:"]
+    lines = [
+        "## Conversation Context (CRITICAL for follow-up questions)",
+        "⚠️ IMPORTANT: If the user's question contains pronouns (he, she, they, it, that, this) or references",
+        "(\"the same\", \"what about\", \"and for\", \"who else\"), resolve them using this context.",
+        "Follow-up questions about previous topics are NEVER off_topic!",
+        ""
+    ]
 
     for msg in recent:
         role = msg.get("role", "")
-        content = msg.get("content", "")[:150]
+        content = msg.get("content", "")
         if role == "user":
-            lines.append(f"User: {content}")
+            lines.append(f"User asked: {content[:200]}")
         elif role == "assistant":
+            # Include BOTH the response content AND extracted entities
+            lines.append(f"Assistant answered: {content[:250]}")
             entities = msg.get("entities", {})
-            teams = entities.get("teams", [])
             players = entities.get("players", [])
+            teams = entities.get("teams", [])
             seasons = entities.get("seasons", [])
-            if players:
-                desc = ", ".join(players)
+            if players or teams or seasons:
+                entity_parts = []
+                if players:
+                    entity_parts.append(f"players: {', '.join(players)}")
+                if teams:
+                    entity_parts.append(f"teams: {', '.join(teams)}")
                 if seasons:
-                    desc += f" in {', '.join(str(s) for s in seasons)}"
-                lines.append(f"Assistant discussed: {desc}")
-            elif teams:
-                desc = ", ".join(teams)
-                if seasons:
-                    desc += f" in {', '.join(str(s) for s in seasons)}"
-                lines.append(f"Assistant discussed: {desc}")
+                    entity_parts.append(f"seasons: {', '.join(str(s) for s in seasons)}")
+                lines.append(f"  → Entities: {'; '.join(entity_parts)}")
+        lines.append("")
 
     lines.append("---")
+    lines.append("Use the above context to resolve any pronouns or references in the current question.")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -270,7 +303,7 @@ class ConsolidatedQueryUnderstanding:
 
             logger.info("CONSOLIDATED-LLM: Calling OpenAI (single intent+SQL call)...")
             response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano"),
+                model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 reasoning_effort="low",
@@ -288,12 +321,14 @@ class ConsolidatedQueryUnderstanding:
             chart_type = data.get("chart_type")  # May be null/None
             chart_config = data.get("chart_config", {})
 
-            # Off-topic queries don't need SQL
-            if intent == "off_topic":
-                logger.info("CONSOLIDATED-LLM: Off-topic query detected by LLM")
+            # Intents that don't require SQL (handled by specialized tools)
+            NO_SQL_INTENTS = {"off_topic", "afl_news", "injury_news", "betting_odds", "tipping_advice"}
+
+            if intent in NO_SQL_INTENTS:
+                logger.info(f"CONSOLIDATED-LLM: {intent} query - no SQL needed")
                 return {
                     "success": True,
-                    "intent": "off_topic",
+                    "intent": intent,
                     "entities": entities,
                     "requires_visualization": False,
                     "sql": None,
@@ -302,8 +337,10 @@ class ConsolidatedQueryUnderstanding:
                     "error": None,
                 }
 
-            # Basic validation
-            if not sql or not sql.upper().startswith("SELECT"):
+            # Basic validation for SQL-requiring intents
+            # Accept both SELECT and WITH (CTE) statements
+            sql_upper = sql.upper().strip() if sql else ""
+            if not sql or not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
                 raise ValueError(f"LLM returned invalid SQL: {sql[:100]}")
 
             # Clean up SQL (strip markdown if model added it anyway)

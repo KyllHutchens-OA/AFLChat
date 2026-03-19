@@ -31,6 +31,9 @@ class SQLValidator:
         "players",
         "player_stats",
         "team_stats",
+        "betting_odds",  # Betting odds from The Odds API
+        "squiggle_predictions",  # Match predictions from Squiggle
+        "news_articles",  # AFL news from RSS feeds
     }
 
     # Forbidden keywords
@@ -88,7 +91,11 @@ class SQLValidator:
 
     @classmethod
     def _is_select_statement(cls, statement) -> bool:
-        """Check if statement is a SELECT query."""
+        """Check if statement is a SELECT query (including CTEs with WITH clause)."""
+        sql_upper = str(statement).upper().strip()
+        # Accept WITH...SELECT (CTEs) as valid SELECT statements
+        if sql_upper.startswith("WITH") and "SELECT" in sql_upper:
+            return True
         for token in statement.tokens:
             if token.ttype is DML and token.value.upper() == "SELECT":
                 return True

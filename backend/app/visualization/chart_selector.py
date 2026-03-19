@@ -146,10 +146,21 @@ class ChartSelector:
 
         # Rule 2: 2-5 rows, no temporal -> bar chart (existing, extended to 20)
         if 2 <= len(data) <= 20 and not temporal_cols and non_numeric and numeric_cols:
+            # Prefer metric matching user request
+            requested_metrics = [m.lower().replace(' ', '_') for m in (entities or {}).get("metrics", [])]
+            y_col = None
+            if requested_metrics:
+                for candidate in numeric_cols:
+                    if candidate.lower() in requested_metrics or any(m in candidate.lower() for m in requested_metrics):
+                        y_col = candidate
+                        break
+            if not y_col:
+                y_col = numeric_cols[0]
+
             return {
                 "chart_type": "bar",
                 "x_col": non_numeric[0],
-                "y_col": numeric_cols[0],
+                "y_col": y_col,
                 "group_col": None,
                 "reasoning": "Category comparison - bar chart",
                 "confidence": "high"
@@ -306,10 +317,21 @@ class ChartSelector:
 
         # Rule 8: General fallback - categorical data -> bar
         if 2 <= len(data) <= 30 and non_numeric and numeric_cols:
+            # Prefer metric matching user request
+            requested_metrics = [m.lower().replace(' ', '_') for m in (entities or {}).get("metrics", [])]
+            y_col = None
+            if requested_metrics:
+                for candidate in numeric_cols:
+                    if candidate.lower() in requested_metrics or any(m in candidate.lower() for m in requested_metrics):
+                        y_col = candidate
+                        break
+            if not y_col:
+                y_col = numeric_cols[0]
+
             return {
                 "chart_type": "bar",
                 "x_col": non_numeric[0],
-                "y_col": numeric_cols[0],
+                "y_col": y_col,
                 "group_col": None,
                 "reasoning": "Category data - bar chart",
                 "confidence": "medium"
@@ -395,7 +417,7 @@ Important:
 
             # Call fast model for chart decision
             response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano"),
+                model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 reasoning_effort="low",

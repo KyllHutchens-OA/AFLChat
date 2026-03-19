@@ -44,7 +44,8 @@ _AFL_KEYWORDS = re.compile(
     r"stat|stats|statistics|average|total|record|"
     r"top\s?\d+|best|worst|most|least|highest|lowest|compare|comparison|"
     r"trend|over time|year by year|historical|performance|"
-    r"home|away|attendance|venue|stadium)\b",
+    r"home|away|attendance|venue|stadium|"
+    r"news|latest|current|happening|update|updates)\b",
     re.IGNORECASE
 )
 
@@ -71,24 +72,30 @@ def _is_off_topic(query: str) -> bool:
     # to get a friendly redirect from the LLM
     words = q_lower.split()
     if len(words) <= 2:
+        logger.debug(f"OFF-TOPIC CHECK: Short query ({len(words)} words) - allowing through: {q_lower[:50]}")
         return False
 
     # Check for AFL keywords
-    if _AFL_KEYWORDS.search(q_lower):
+    kw_match = _AFL_KEYWORDS.search(q_lower)
+    if kw_match:
+        logger.debug(f"OFF-TOPIC CHECK: Found AFL keyword '{kw_match.group()}' in: {q_lower[:50]}")
         return False
 
     # Check for team names / nicknames in query
     for team_var in _ALL_TEAM_VARIATIONS:
         if team_var in q_lower:
+            logger.debug(f"OFF-TOPIC CHECK: Found team '{team_var}' in: {q_lower[:50]}")
             return False
 
     # Check for player-like patterns (capitalized words that could be surnames)
     # Don't filter these — they might be player name queries
     # e.g. "Cripps 2024" has no AFL keyword but is valid
     if re.search(r'\b(19|20)\d{2}\b', q_lower):
+        logger.debug(f"OFF-TOPIC CHECK: Found year pattern in: {q_lower[:50]}")
         return False
 
     # No AFL signals found — likely off-topic
+    logger.info(f"OFF-TOPIC CHECK: No AFL signals found in query: {q_lower[:80]}")
     return True
 
 
@@ -700,7 +707,16 @@ class FastPathRouter:
         from app.utils.cache import get_cached_result, set_cached_result
 
         # Off-topic detection — reject clearly non-AFL queries immediately
+        # BUT: If there's conversation history, the query might be a follow-up
+        # that doesn't contain AFL keywords (e.g., "Who came second?" after asking about Grand Final)
+        # In that case, fall through to the full pipeline which has conversation context
         if _is_off_topic(user_query):
+            if conversation_history and len(conversation_history) >= 2:
+                # There's conversation history - this might be a contextual follow-up
+                # Fall through to the full pipeline which can use conversation context
+                logger.info(f"FAST-PATH: Query looks off-topic but has conversation history, falling through: {user_query[:80]}")
+                return None
+
             logger.info(f"FAST-PATH: Off-topic query rejected: {user_query[:80]}")
             return {
                 "user_query": user_query,
