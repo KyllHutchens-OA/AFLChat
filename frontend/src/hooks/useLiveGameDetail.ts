@@ -19,6 +19,10 @@ interface GameEvent {
   // Player info
   player_name?: string;
   player_api_sports_id?: number;
+  // Milestone fields
+  description?: string;
+  is_milestone?: boolean;
+  milestone_type?: string;
 }
 
 interface QuarterScores {
@@ -61,6 +65,7 @@ interface LiveGameDetail {
   events: GameEvent[];
   ai_summary?: string | null;
   quarter_scores?: QuarterScores;
+  quarter_summaries?: Record<string, string>;
 }
 
 export const useLiveGameDetail = (gameId: number) => {
@@ -96,8 +101,8 @@ export const useLiveGameDetail = (gameId: number) => {
 
     fetchGame();
 
-    // Start polling - will be cleared if game is completed
-    pollInterval = setInterval(fetchGame, 30000);
+    // Poll every 15 seconds - will be cleared if game is completed
+    pollInterval = setInterval(fetchGame, 15000);
 
     return () => {
       if (pollInterval) clearInterval(pollInterval);
@@ -149,7 +154,7 @@ export const useLiveGameDetail = (gameId: number) => {
       }
     });
 
-    // Listen for new scoring events (goals/behinds)
+    // Listen for new scoring events (goals/behinds/milestones)
     newSocket.on('live_game_event', (data) => {
       if (data.game_id === gameId) {
         // Add new event to the events list
@@ -171,6 +176,9 @@ export const useLiveGameDetail = (gameId: number) => {
             time_str: data.time_str,
             timestamp: data.timestamp,
             player_name: data.player_name,
+            description: data.description,
+            is_milestone: data.is_milestone,
+            milestone_type: data.milestone_type,
           };
 
           return {
@@ -179,6 +187,18 @@ export const useLiveGameDetail = (gameId: number) => {
             away_score: data.away_score,
             events: [newEvent, ...prev.events],
           };
+        });
+      }
+    });
+
+    // Listen for quarter summaries
+    newSocket.on('quarter_summary', (data) => {
+      if (data.game_id === gameId) {
+        setGame((prev) => {
+          if (!prev) return prev;
+          const summaries = { ...(prev.quarter_summaries || {}) };
+          summaries[String(data.quarter)] = data.summary;
+          return { ...prev, quarter_summaries: summaries };
         });
       }
     });

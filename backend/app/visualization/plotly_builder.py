@@ -129,6 +129,7 @@ class ChartHelper:
             "score": "Score",
             "total_goals": "Goals",
             "total_disposals": "Disposals",
+            "fantasy_points": "Fantasy Points",
         }
 
         # Find the metric from data columns

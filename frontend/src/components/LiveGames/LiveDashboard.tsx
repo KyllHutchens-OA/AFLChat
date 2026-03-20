@@ -2,8 +2,8 @@ import React from 'react';
 import { useLiveGameDetail } from '../../hooks/useLiveGameDetail';
 import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 import ProgressBar from './ProgressBar';
-import EventTimeline from './EventTimeline';
 import GameStats from './GameStats';
+import QuarterSummaries from './QuarterSummaries';
 
 interface LiveDashboardProps {
   gameId: number;
@@ -37,6 +37,8 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
   if (!game) {
     return null;
   }
+
+  const hasQuarterSummaries = game.quarter_summaries && Object.keys(game.quarter_summaries).length > 0;
 
   return (
     <div className="space-y-6">
@@ -92,13 +94,17 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
         {/* Progress Bar */}
         <ProgressBar completePercent={game.complete_percent} />
 
-        {/* Match Details */}
-        <div className="text-center mt-4">
-          <p className="text-xs text-apple-gray-400">
-            Last updated: {new Date(game.last_updated).toLocaleTimeString()}
-          </p>
-        </div>
       </div>
+
+      {/* Top Performers - shown for both live and completed games */}
+      {!hideScores && (
+        <GameStats gameId={game.id} gameStatus={game.status} />
+      )}
+
+      {/* Quarter Summaries - shown when available */}
+      {!hideScores && hasQuarterSummaries && (
+        <QuarterSummaries quarterSummaries={game.quarter_summaries!} />
+      )}
 
       {/* AI Summary for completed games - hidden when spoiler mode is on */}
       {!hideScores && game.status === 'completed' && game.ai_summary && (
@@ -112,24 +118,6 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
         </div>
       )}
 
-      {/* Top Performers for completed games - hidden when spoiler mode is on */}
-      {!hideScores && game.status === 'completed' && (
-        <GameStats gameId={game.id} />
-      )}
-
-      {/* Event Timeline - only show for live games, hidden when spoiler mode is on */}
-      {!hideScores && game.status === 'live' && (
-        <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
-          <h3 className="text-xl font-semibold text-apple-gray-900 mb-4">
-            Recent Events
-          </h3>
-          <EventTimeline
-            events={game.events}
-            homeTeamAbbr={game.home_team.abbreviation}
-            awayTeamAbbr={game.away_team.abbreviation}
-          />
-        </div>
-      )}
     </div>
   );
 };

@@ -14,6 +14,9 @@ from app.data.models import APISportsPlayer, APISportsTeamMapping, Team
 
 logger = logging.getLogger(__name__)
 
+# In-memory player name cache to avoid repeated DB round-trips
+_player_name_cache: Dict[int, Dict] = {}  # api_sports_id -> player dict
+
 # API-Sports configuration
 API_SPORTS_BASE_URL = "https://v1.afl.api-sports.io"
 API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
@@ -175,22 +178,34 @@ class APISportsService:
         """Get a player from cache, fetching and caching if not found.
 
         Returns a dict with player info to avoid session detachment issues.
+        Uses in-memory cache to avoid repeated DB round-trips.
         """
+        global _player_name_cache
+
+        # Check in-memory cache first (avoids DB round-trip)
+        if player_id in _player_name_cache:
+            return _player_name_cache[player_id]
+
         with get_session() as session:
             player = session.query(APISportsPlayer).filter_by(
                 api_sports_id=player_id
             ).first()
 
             if player:
-                return {
+                result = {
                     "id": player.id,
                     "api_sports_id": player.api_sports_id,
                     "name": player.name,
                     "team_id": player.team_id,
                 }
+                _player_name_cache[player_id] = result
+                return result
 
         # Not in cache, fetch and cache (cache_player now returns a dict)
-        return APISportsService.cache_player(player_id)
+        result = APISportsService.cache_player(player_id)
+        if result:
+            _player_name_cache[player_id] = result
+        return result
 
     @staticmethod
     def get_player_name(player_id: int) -> str:

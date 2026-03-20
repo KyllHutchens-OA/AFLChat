@@ -329,10 +329,10 @@ Question: {user_query}"""
             prompt_text += "\n\nGenerate the SQL query:"
 
             # Call fast model using Chat Completions API
-            logger.info(f"QueryBuilder: Calling OpenAI API ({os.getenv('OPENAI_MODEL_FAST', 'gpt-5-nano')})...")
+            logger.info(f"QueryBuilder: Calling OpenAI API ({os.getenv('OPENAI_MODEL_FAST', 'gpt-5-mini')})...")
             try:
                 response = client.chat.completions.create(
-                    model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano"),
+                    model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
                     messages=[{"role": "user", "content": prompt_text}],
                     reasoning_effort="low",
                 )

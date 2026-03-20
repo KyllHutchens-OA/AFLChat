@@ -134,7 +134,7 @@ def handle_chat_message(data):
         UsageTracker.track_usage(
             visitor_id=visitor_id,
             ip_address=ip_address or '',
-            model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano"),
+            model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
             input_tokens=500,   # Per-request estimate (2 OpenAI calls per query)
             output_tokens=200,
             endpoint="afl_chat"
@@ -155,6 +155,13 @@ def handle_chat_message(data):
                 # Test serialization
                 serialized = json.dumps(viz_data, ensure_ascii=True)
                 logger.info(f"Serialized viz length: {len(serialized)} bytes")
+                # Log chart data for debugging
+                if 'data' in viz_spec and viz_spec['data']:
+                    first_trace = viz_spec['data'][0]
+                    logger.info(f"Chart trace x values: {first_trace.get('x', [])[:5]}")
+                    logger.info(f"Chart trace y values: {first_trace.get('y', [])[:5]}")
+                if 'layout' in viz_spec:
+                    logger.info(f"Chart title: {viz_spec['layout'].get('title', {})}")
 
                 session_emit('visualization', viz_data)
                 logger.info("Successfully emitted 'visualization' event")
@@ -226,6 +233,9 @@ def handle_chat_message(data):
         # Store visualization spec if chart was generated (for history restoration)
         if chart_sent and final_state.get("visualization_spec"):
             metadata["visualization"] = make_json_serializable(final_state["visualization_spec"])
+            logger.info(f"Saved visualization to metadata (keys: {metadata['visualization'].keys() if isinstance(metadata['visualization'], dict) else 'N/A'})")
+        else:
+            logger.info(f"No visualization saved: chart_sent={chart_sent}, has_spec={bool(final_state.get('visualization_spec'))}")
 
         # If this was a clarification, include the candidate options for easy retrieval
         if final_state.get("needs_clarification") and final_state.get("entities"):

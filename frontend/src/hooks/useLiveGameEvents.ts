@@ -5,7 +5,7 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
 interface ScoringEvent {
   game_id: number;
-  event_type: 'goal' | 'behind';
+  event_type: string;
   team_id: number;
   team_name: string;
   team_abbreviation: string;
@@ -19,6 +19,10 @@ interface ScoringEvent {
   player_id?: number;
   jersey_number?: number;
   player_total_goals?: number;
+  // Milestone fields
+  is_milestone?: boolean;
+  milestone_type?: string;
+  description?: string;
 }
 
 export const useLiveGameEvents = (enabled: boolean = true) => {

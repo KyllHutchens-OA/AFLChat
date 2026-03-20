@@ -274,6 +274,9 @@ def get_live_game_detail(game_id):
                 'timestamp': event.timestamp.isoformat() + 'Z',  # UTC timestamp
                 'player_name': event.player_name,
                 'player_api_sports_id': event.player_api_sports_id,
+                'description': event.description,
+                'is_milestone': event.event_type.startswith('milestone_') if event.event_type else False,
+                'milestone_type': event.event_type.replace('milestone_', '') if event.event_type and event.event_type.startswith('milestone_') else None,
             })
 
         # Game data
@@ -312,6 +315,8 @@ def get_live_game_detail(game_id):
             'events': events_data,
             # AI summary (only for completed games)
             'ai_summary': game.ai_summary if game.status == 'completed' else None,
+            # Quarter summaries
+            'quarter_summaries': game.quarter_summaries or {},
             # Quarter scores
             'quarter_scores': {
                 'home': [game.home_q1_score, game.home_q2_score, game.home_q3_score, game.home_q4_score],
@@ -418,10 +423,6 @@ def get_game_stats(game_id):
         if not game:
             session.close()
             return jsonify({'error': 'Game not found'}), 404
-
-        if game.status != 'completed':
-            session.close()
-            return jsonify({'error': 'Stats only available for completed games'}), 400
 
         # Get game date for API-Sports query
         game_date = game.match_date.strftime('%Y-%m-%d') if game.match_date else None

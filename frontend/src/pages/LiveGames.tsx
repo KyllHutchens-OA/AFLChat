@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLiveGames } from '../hooks/useLiveGames';
 import { useUpcomingMatches } from '../hooks/useUpcomingMatches';
 import { useSpoilerMode } from '../hooks/useSpoilerMode';
-import GamePicker from '../components/LiveGames/GamePicker';
+import GameSidebar from '../components/LiveGames/GameSidebar';
 import LiveDashboard from '../components/LiveGames/LiveDashboard';
 import ScoringPopup from '../components/LiveGames/ScoringPopup';
 import Countdown from '../components/LiveGames/Countdown';
@@ -213,17 +213,24 @@ const LiveGames = () => {
     <div>
       <PageHeader />
 
-      {/* Main content */}
-      <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 pb-8 space-y-6">
-        {/* Game Picker */}
-        <GamePicker
-          games={games}
-          selectedGameId={selectedGameId}
-          onSelectGame={setSelectedGameId}
-        />
+      {/* Main content - Sidebar + Dashboard layout */}
+      <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 pb-8">
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Sidebar */}
+          <div className="lg:w-72 xl:w-80 flex-shrink-0">
+            <GameSidebar
+              games={games}
+              selectedGameId={selectedGameId}
+              onSelectGame={setSelectedGameId}
+              upcomingMatches={upcomingMatches}
+            />
+          </div>
 
-        {/* Live Dashboard */}
-        {selectedGameId && <LiveDashboard gameId={selectedGameId} />}
+          {/* Main Dashboard */}
+          <div className="flex-1 min-w-0">
+            {selectedGameId && <LiveDashboard gameId={selectedGameId} />}
+          </div>
+        </div>
       </div>
 
       {/* Scoring Popup Notifications - only when live games exist */}

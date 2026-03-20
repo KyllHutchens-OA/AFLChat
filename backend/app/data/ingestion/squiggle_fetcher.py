@@ -35,7 +35,8 @@ class SquiggleFetcher:
         try:
             # Fetch tips from Squiggle
             url = f"{cls.BASE_URL}/?q=tips&year={season}"
-            response = requests.get(url, timeout=10)
+            headers = {"User-Agent": "AFL-Analytics-App/1.0"}
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             
             data = response.json()
@@ -56,9 +57,10 @@ class SquiggleFetcher:
                     if not winner_team:
                         continue
                     
-                    # Calculate probabilities (Squiggle provides confidence)
-                    confidence = tip.get('confidence', 50)
-                    
+                    # Calculate probabilities (Squiggle provides confidence as string)
+                    confidence = float(tip.get('confidence', 50))
+                    margin = float(tip.get('margin', 0))
+
                     # Determine if home or away is predicted winner
                     is_home_winner = winner_team.id == match.home_team_id
                     home_prob = confidence if is_home_winner else (100 - confidence)
@@ -73,7 +75,7 @@ class SquiggleFetcher:
                     if existing:
                         # Update existing prediction
                         existing.predicted_winner_id = winner_team.id
-                        existing.predicted_margin = tip.get('margin', 0)
+                        existing.predicted_margin = margin
                         existing.home_win_probability = home_prob
                         existing.away_win_probability = away_prob
                         existing.prediction_date = datetime.utcnow()
@@ -82,7 +84,7 @@ class SquiggleFetcher:
                         prediction = SquigglePrediction(
                             match_id=match.id,
                             predicted_winner_id=winner_team.id,
-                            predicted_margin=tip.get('margin', 0),
+                            predicted_margin=margin,
                             home_win_probability=home_prob,
                             away_win_probability=away_prob,
                             source_model='Squiggle',

@@ -27,6 +27,7 @@ class Config:
     # OpenAI
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    NEWS_ENRICHMENT_MODEL = os.getenv("NEWS_ENRICHMENT_MODEL", "gpt-5-nano")
 
     # Data Sources
     AFL_TABLES_BASE_URL = os.getenv(

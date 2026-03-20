@@ -351,16 +351,37 @@ class AFLAnalyticsAgent:
 
             if consolidated["success"]:
                 # Off-topic detection — LLM classified as non-AFL query
+                # But check if this is a follow-up to a previous tool-based query
                 if consolidated["intent"] == "off_topic":
-                    logger.info("UNDERSTAND: LLM flagged query as off-topic")
-                    state["needs_clarification"] = True
-                    state["clarification_question"] = (
-                        "I'm an AFL analytics agent — I can only help with Australian Football League "
-                        "statistics and data from 1990-2025. Try asking about players, teams, matches, "
-                        "or stats! For example: \"How many goals did Hawkins kick in 2024?\" or "
-                        "\"Show me Richmond's win-loss record in 2023.\""
-                    )
-                    return state
+                    # Tool-based intents that support follow-up questions
+                    TOOL_INTENTS = {"injury_news", "afl_news", "tipping_advice", "betting_odds"}
+
+                    # Check conversation history for context
+                    previous_tool_intent = None
+                    if conversation_history:
+                        for msg in reversed(conversation_history[-4:]):
+                            if msg.get("role") == "assistant":
+                                prev_intent = msg.get("intent", "")
+                                # Check if previous intent was a tool-based intent
+                                if prev_intent in TOOL_INTENTS:
+                                    previous_tool_intent = prev_intent
+                                    break
+
+                    if previous_tool_intent:
+                        # This looks like a follow-up - use the same intent type
+                        logger.info(f"UNDERSTAND: Detected follow-up to {previous_tool_intent}, overriding off_topic")
+                        consolidated["intent"] = previous_tool_intent
+                        consolidated["sql"] = None
+                    else:
+                        logger.info("UNDERSTAND: LLM flagged query as off-topic")
+                        state["needs_clarification"] = True
+                        state["clarification_question"] = (
+                            "I'm an AFL analytics agent — I can only help with Australian Football League "
+                            "statistics and data from 1990-2025. Try asking about players, teams, matches, "
+                            "or stats! For example: \"How many goals did Hawkins kick in 2024?\" or "
+                            "\"Show me Richmond's win-loss record in 2023.\""
+                        )
+                        return state
 
                 understanding = {
                     "intent": consolidated["intent"],
@@ -372,10 +393,11 @@ class AFLAnalyticsAgent:
                 # Store chart hints for visualize_node (avoids separate chart LLM call)
                 state["llm_chart_type_hint"] = consolidated.get("chart_type")
                 state["llm_chart_config_hint"] = consolidated.get("chart_config", {})
+                sql_preview = consolidated['sql'][:60] if consolidated['sql'] else "(no SQL needed)"
                 logger.info(
                     f"UNDERSTAND: Consolidated call OK — intent={consolidated['intent']}, "
                     f"chart_hint={consolidated.get('chart_type')}, "
-                    f"sql_preview={consolidated['sql'][:60]}..."
+                    f"sql_preview={sql_preview}..."
                 )
             else:
                 # Consolidated call failed — use lightweight heuristic intent instead of another LLM call
@@ -388,7 +410,21 @@ class AFLAnalyticsAgent:
                 import re as _re
 
                 # Heuristic intent classification
-                if any(kw in query_lower for kw in ["over time", "across time", "trend", "historical", "evolution", "year by year", "since"]):
+                # Check tool-based intents first (no SQL needed)
+                if any(kw in query_lower for kw in ["tip", "predict", "who will win", "who's going to win", "who should i"]):
+                    heuristic_intent = "tipping_advice"
+                    heuristic_viz = False
+                elif any(kw in query_lower for kw in ["odds", "betting", "bet on", "favourite", "favorite"]):
+                    heuristic_intent = "betting_odds"
+                    heuristic_viz = False
+                elif any(kw in query_lower for kw in ["injur", "out this week", "ruled out", "hamstring", "knee"]):
+                    heuristic_intent = "injury_news"
+                    heuristic_viz = False
+                elif any(kw in query_lower for kw in ["news", "latest", "headlines", "article"]):
+                    heuristic_intent = "afl_news"
+                    heuristic_viz = False
+                # Database query intents
+                elif any(kw in query_lower for kw in ["over time", "across time", "trend", "historical", "evolution", "year by year", "since"]):
                     heuristic_intent = "trend_analysis"
                     heuristic_viz = True
                 elif any(kw in query_lower for kw in ["compare", " vs ", "versus", "against"]):
@@ -634,13 +670,17 @@ class AFLAnalyticsAgent:
             state["thinking_message"] = "📰 Searching for AFL news..."
             self._emit_progress(state, "execute", "📰 Searching for AFL news...")
 
+            teams = state.get("entities", {}).get("teams", [])
             filters = {
                 'injury_only': intent == QueryIntent.INJURY_NEWS,
-                'teams': state.get("entities", {}).get("teams", []),
+                'teams': teams,
                 'days_back': 7
             }
 
-            result = NewsTool.search_news(state["user_query"], filters, max_results=5)
+            # Don't pass user's raw query as search text - team filters are sufficient
+            # Passing "any Sydney injuries?" would require exact text match which won't work
+            search_query = ""  # Let team and injury filters do the work
+            result = NewsTool.search_news(search_query, filters, max_results=5)
             state["query_results"] = result.get("articles", [])
             state["requires_visualization"] = False
             state["thinking_message"] = f"Found {len(state['query_results'])} news articles"
@@ -1139,31 +1179,57 @@ class AFLAnalyticsAgent:
         has_chart = state.get("visualization_spec") is not None
         analysis_mode = state.get("analysis_mode", "summary")
 
+        teams = entities.get("teams", [])
+        players = entities.get("players", [])
+        seasons = entities.get("seasons", [])
+
+        # Handle empty results for tool-based intents with helpful messages
         if data is None or len(data) == 0:
+            if intent in [QueryIntent.AFL_NEWS, QueryIntent.INJURY_NEWS]:
+                if teams:
+                    team_str = " or ".join(teams)
+                    if intent == QueryIntent.INJURY_NEWS:
+                        return f"I don't have any recent injury news for {team_str}. No major injuries reported in my current news feed."
+                    return f"I don't have any recent news about {team_str} in my current feed."
+                return "I couldn't find any recent news matching your query."
+            if intent == QueryIntent.BETTING_ODDS:
+                return "I couldn't find betting odds for those matches. Odds may not be available yet."
+            if intent == QueryIntent.TIPPING_ADVICE:
+                return "I don't have predictions available for those matches yet."
             return None
 
         # Complex in-depth queries without charts still use LLM
         if analysis_mode == "in_depth" and not has_chart:
             return None
 
-        teams = entities.get("teams", [])
-        players = entities.get("players", [])
-        seasons = entities.get("seasons", [])
-
         # --- NEWS RESPONSE ---
         if intent in [QueryIntent.AFL_NEWS, QueryIntent.INJURY_NEWS]:
             if not data:
                 return "I couldn't find any recent news matching your query."
 
-            lines = []
-            for i, article in enumerate(data[:5], 1):
-                lines.append(
-                    f"{i}. **{article['title']}** ({article['source']})\n"
-                    f"   {article['url']}"
-                )
+            # Injury news — use pre-extracted injury details from ingestion
+            if intent == QueryIntent.INJURY_NEWS:
+                injury_lines = []
+                for a in data[:5]:
+                    if a.get('injury_details'):
+                        for inj in a['injury_details']:
+                            player = inj.get('player', 'Unknown')
+                            inj_type = inj.get('type', 'unknown injury')
+                            severity = inj.get('severity', '')
+                            severity_str = f" ({severity})" if severity else ""
+                            injury_lines.append(f"- {player}: {inj_type}{severity_str}")
+                    elif a.get('summary'):
+                        injury_lines.append(f"- {a['summary']}")
+                if injury_lines:
+                    return "Recent injury news:\n" + "\n".join(injury_lines)
+                return "No specific injuries reported in recent news."
 
-            header = "Recent injury news:" if intent == QueryIntent.INJURY_NEWS else "Latest AFL news:"
-            return header + "\n\n" + "\n\n".join(lines)
+            # General AFL news — use LLM-generated summaries
+            lines = []
+            for a in data[:3]:
+                summary = a.get('summary') or a.get('title', '')
+                lines.append(f"- {summary}")
+            return "Latest AFL news:\n" + "\n".join(lines)
 
         # --- BETTING ODDS RESPONSE ---
         if intent == QueryIntent.BETTING_ODDS:
@@ -1171,19 +1237,25 @@ class AFLAnalyticsAgent:
                 return "I couldn't find betting odds for the specified matches."
 
             lines = []
-            for match in data[:5]:
-                lines.append(f"\n**{match['home_team']} vs {match['away_team']}**")
-                lines.append(f"📅 {match['match_date'][:10]} • {match['round']} • {match['venue']}")
+            for match in data[:7]:
+                home_odds = match.get('home_odds')
+                away_odds = match.get('away_odds')
 
-                odds = match.get('odds', [])
-                if not odds:
-                    lines.append("  No odds available yet")
+                lines.append(f"\n**{match['home_team']} vs {match['away_team']}**")
+                lines.append(f"📅 {match['match_date'][:10]} • Round {match['round']} • {match['venue']}")
+
+                if home_odds and away_odds:
+                    # Determine favourite
+                    if home_odds < away_odds:
+                        fav = match['home_team']
+                        fav_odds = home_odds
+                    else:
+                        fav = match['away_team']
+                        fav_odds = away_odds
+                    lines.append(f"  💰 {match['home_team']} ${home_odds:.2f} | {match['away_team']} ${away_odds:.2f}")
+                    lines.append(f"  ⭐ Favourite: {fav}")
                 else:
-                    for odd in odds[:3]:  # Limit to 3 bookmakers
-                        lines.append(
-                            f"  {odd['bookmaker']}: Home ${odd['home_odds']:.2f}, "
-                            f"Away ${odd['away_odds']:.2f}"
-                        )
+                    lines.append("  Odds not yet available")
 
             return "Current betting odds:\n" + "\n".join(lines)
 
@@ -1209,7 +1281,7 @@ class AFLAnalyticsAgent:
                     f"**{match['home_team']} vs {match['away_team']}**\n"
                     f"  💡 Tip: **{winner}** by {abs(margin):.1f} points\n"
                     f"  📊 Confidence: {confidence_pct:.0f}%\n"
-                    f"  📅 {match['match_date'][:10]} • {match['round']}"
+                    f"  📅 {match['match_date'][:10]} • Round {match['round']}"
                 )
 
             return "Tipping recommendations from Squiggle:\n\n" + "\n\n".join(lines)
@@ -1415,8 +1487,14 @@ class AFLAnalyticsAgent:
             # Check if results are all NULL (query succeeded but no data for that filter)
             data = state["query_results"]
 
-            all_null = data.isnull().all().all() if len(data) > 0 else False
-            logger.info(f"NULL check: len(data)={len(data)}, all_null={all_null}, data=\n{data}")
+            # Handle list results from tools (BettingTool, NewsTool, TippingTool)
+            # vs DataFrame results from database queries
+            if isinstance(data, list):
+                all_null = len(data) == 0
+                logger.info(f"NULL check (list): len(data)={len(data)}, all_null={all_null}")
+            else:
+                all_null = data.isnull().all().all() if len(data) > 0 else False
+                logger.info(f"NULL check (DataFrame): len(data)={len(data)}, all_null={all_null}, data=\n{data}")
 
             if all_null:
                 entities = state.get("entities", {})
