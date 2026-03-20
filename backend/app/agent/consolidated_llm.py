@@ -142,7 +142,10 @@ Common patterns:
 - Team season record: JOIN teams t, filter (home_team_id=t.id OR away_team_id=t.id), CASE for wins/losses
 - Player stats: JOIN player_stats ps, players p, matches m ON ps.match_id=m.id
 - Grand Final: WHERE m.round = 'Grand Final' AND m.season = <year>
-- Player name matching: ALWAYS use p.name ILIKE '%Surname%' (with leading %) because names are stored as "First Last"
+- Player name matching:
+  - Surname only (e.g. "Ashcroft"): p.name ILIKE '%Ashcroft%'
+  - Full name given (e.g. "Will Ashcroft"): p.name ILIKE 'Will%Ashcroft%' — include BOTH parts so you don't return other players with the same surname (e.g. Levi Ashcroft, Marcus Ashcroft)
+  - CRITICAL: When the user names ONE specific player, your WHERE clause MUST return exactly one player. If the full name is given, match first AND last name.
 - Temporal queries: Use match_date for date filtering
   - "last night", "yesterday" (2026-03-13): Query live_games table with WHERE DATE(lg.match_date) = '2026-03-13'
   - "today" (2026-03-14): Query live_games with WHERE DATE(lg.match_date) = '2026-03-14'

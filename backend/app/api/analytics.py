@@ -10,7 +10,7 @@ import json
 import logging
 
 from app.data.database import Session
-from app.data.models import PageView, Conversation, APIUsage
+from app.data.models import PageView, Conversation, APIUsage, UserReport
 from sqlalchemy import func, text
 
 logger = logging.getLogger(__name__)
@@ -263,6 +263,53 @@ def get_conversations():
             'total_conversations': len(conversations),
             'message_counts_by_type': type_counts,
         })
+
+    finally:
+        db.close()
+
+
+@bp.route('/reports')
+def get_reports():
+    """
+    Get user-submitted issue reports, newest first.
+    Includes linked conversation messages for context.
+    Query params:
+        limit: int (default 50, max 200)
+    """
+    limit = min(request.args.get('limit', 50, type=int), 200)
+    db = Session()
+
+    try:
+        reports = (
+            db.query(UserReport)
+            .order_by(UserReport.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        results = []
+        for r in reports:
+            conv_messages = []
+            if r.conversation_id and r.conversation:
+                for msg in (r.conversation.messages or []):
+                    conv_messages.append({
+                        'role': msg.get('role'),
+                        'content': msg.get('content', '')[:2000],
+                        'timestamp': msg.get('timestamp'),
+                    })
+
+            results.append({
+                'id': r.id,
+                'conversation_id': str(r.conversation_id) if r.conversation_id else None,
+                'message_text': r.message_text,
+                'what_happened': r.what_happened,
+                'what_expected': r.what_expected,
+                'page_url': r.page_url,
+                'created_at': r.created_at.isoformat() if r.created_at else None,
+                'conversation_messages': conv_messages,
+            })
+
+        return jsonify({'reports': results, 'total': len(results)})
 
     finally:
         db.close()

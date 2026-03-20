@@ -124,12 +124,19 @@ class ChartSelector:
         # Helper: detect grouping column (non-numeric, non-temporal, with >1 unique value)
         # Excludes team columns — SQL often JOINs home_team/away_team as context, not as chart dimension
         TEAM_COLS = {'home_team', 'away_team', 'team', 'team_name', 'opponent'}
+        NAME_COLS = {'name', 'player', 'player_name'}
+        requested_players = [p for p in (entities or {}).get("players", []) if p]
+
         def _find_group_col():
             candidates = [c for c in non_numeric
                           if c not in ['season', 'year', 'match_date', 'round']
                           and c.lower() not in TEAM_COLS]
             for c in candidates:
                 if 1 < data[c].nunique() <= 20:
+                    # If the user asked for exactly one player, don't split a name column into
+                    # multiple lines — the SQL returned more players than requested.
+                    if c.lower() in NAME_COLS and len(requested_players) == 1:
+                        return None
                     return c
             return None
 

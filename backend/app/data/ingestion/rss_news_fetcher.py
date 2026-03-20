@@ -204,7 +204,7 @@ Return a JSON array with one object per article, in the same order. Only valid J
             response = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
+                reasoning_effort="low",
             )
 
             raw = response.choices[0].message.content.strip()
@@ -228,19 +228,28 @@ Return a JSON array with one object per article, in the same order. Only valid J
             # Sanitise each result
             sanitised = []
             valid_categories = {'match_result', 'match_preview', 'injury', 'trade', 'off_field', 'analysis', 'other'}
-            for r in results:
+            for idx, r in enumerate(results):
+                is_afl = bool(r.get('is_afl', False))
+                title = batch[idx]['title'][:60]
+                if is_afl:
+                    logger.info(f"  ✓ AFL article: {title}")
+                else:
+                    logger.debug(f"  ✗ Non-AFL article: {title}")
                 sanitised.append({
-                    'is_afl': bool(r.get('is_afl', False)),
+                    'is_afl': is_afl,
                     'teams': r.get('teams', []) if isinstance(r.get('teams'), list) else [],
                     'players': r.get('players', []) if isinstance(r.get('players'), list) else [],
                     'category': r.get('category', 'other') if r.get('category') in valid_categories else 'other',
                     'summary': str(r.get('summary', ''))[:500],
                     'injury_details': r.get('injury_details') if r.get('category') == 'injury' else None,
                 })
+
+            afl_count = sum(1 for s in sanitised if s['is_afl'])
+            logger.info(f"LLM enrichment: {afl_count}/{len(sanitised)} articles classified as AFL")
             return sanitised
 
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM enrichment response: {e}")
+            logger.error(f"Failed to parse LLM enrichment response: {e}\nRaw: {raw[:500]}")
             return [cls._fallback_enrichment(e) for e in batch]
         except Exception as e:
             logger.error(f"LLM enrichment call failed: {e}")
@@ -250,10 +259,16 @@ Return a JSON array with one object per article, in the same order. Only valid J
     def _fallback_enrichment(cls, entry: dict) -> dict:
         """
         Fallback enrichment when LLM is unavailable.
-        Assumes AFL relevance (since feeds are AFL-specific) with minimal metadata.
+        Defaults to is_afl=False to avoid ingesting non-AFL junk.
+        Only SMH/TheAge AFL feeds are safe to assume as AFL content.
         """
+        # SMH and TheAge have AFL-specific feeds, so assume AFL
+        # ABC is a general sports feed — reject unless LLM confirms
+        is_afl = entry.get('source') in ('smh', 'theage')
+        if not is_afl:
+            logger.debug(f"Fallback: rejecting non-AFL-feed article: {entry['title'][:60]}")
         return {
-            'is_afl': True,
+            'is_afl': is_afl,
             'teams': [],
             'players': [],
             'category': 'other',

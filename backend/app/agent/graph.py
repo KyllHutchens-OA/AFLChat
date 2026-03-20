@@ -1409,7 +1409,12 @@ class AFLAnalyticsAgent:
             intent_str = str(intent).upper() if intent else ""
 
             if "TREND" in intent_str:
-                return f"Here's {subject}'s trend over time{season_str}. The chart shows the progression across seasons."
+                # Distinguish per-game (round-level) from multi-season trends
+                has_round_col = state.get("query_results") is not None and "round" in state["query_results"].columns
+                season_count = state["query_results"]["season"].nunique() if (state.get("query_results") is not None and "season" in state["query_results"].columns) else 0
+                if has_round_col and season_count <= 1:
+                    return f"Here's {subject}'s game-by-game stats{season_str}."
+                return f"Here's {subject}'s trend over time{season_str}."
             elif "COMPARISON" in intent_str:
                 compared = " and ".join(players[:3]) if players else "the players"
                 return f"Here's a comparison of {compared}{season_str}. See the chart for the full breakdown."

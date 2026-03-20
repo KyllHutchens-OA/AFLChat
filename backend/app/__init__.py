@@ -91,6 +91,10 @@ def create_app(config=None):
     from app.api import analytics
     app.register_blueprint(analytics.bp)
 
+    # Register user reports endpoint
+    from app.api import reports
+    app.register_blueprint(reports.bp)
+
     # Register WebSocket handlers
     from app.api import websocket
 
