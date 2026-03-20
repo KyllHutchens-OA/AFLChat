@@ -14,8 +14,8 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/" element={<AFLChat />} />
-      <Route path="/afl" element={<AFLChat />} />
+      <Route path="/" element={<AFLAgent />} />
+      <Route path="/afl" element={<AFLAgent />} />
       <Route path="/aflagent/:conversationId?" element={<AFLAgent />} />
       <Route path="/live" element={<LiveGames />} />
       <Route path="/about" element={<About />} />

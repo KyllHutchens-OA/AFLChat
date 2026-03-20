@@ -97,7 +97,7 @@ def handle_chat_message(data):
 
         # Create or load conversation
         chat_type = source if source in ('afl', 'aflagent') else 'afl'
-        if not conversation_id:
+        if not conversation_id or not ConversationService.get_conversation(conversation_id):
             conversation_id = ConversationService.create_conversation(chat_type=chat_type)
             session_emit('conversation_started', {'conversation_id': conversation_id})
             logger.info(f"Created new {chat_type} conversation: {conversation_id}")

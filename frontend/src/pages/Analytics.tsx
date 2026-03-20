@@ -60,6 +60,17 @@ interface ConversationsResponse {
   message_counts_by_type: Record<string, number>;
 }
 
+interface ReportData {
+  id: number;
+  conversation_id: string | null;
+  message_text: string | null;
+  what_happened: string;
+  what_expected: string | null;
+  page_url: string | null;
+  created_at: string;
+  conversation_messages: ConversationMessage[];
+}
+
 const RANGE_LABELS: Record<TimeRange, string> = {
   24: 'Today',
   168: '7 days',
@@ -151,10 +162,12 @@ const Analytics = () => {
   const [traffic, setTraffic] = useState<TrafficData | null>(null);
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [convos, setConvos] = useState<ConversationsResponse | null>(null);
-  const [activeTab, setActiveTab] = useState<'traffic' | 'usage' | 'logs'>('traffic');
+  const [activeTab, setActiveTab] = useState<'traffic' | 'usage' | 'logs' | 'reports'>('traffic');
   const [expandedConvo, setExpandedConvo] = useState<string | null>(null);
   const [chatFilter, setChatFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
+  const [reports, setReports] = useState<ReportData[]>([]);
+  const [expandedReport, setExpandedReport] = useState<number | null>(null);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,15 +213,20 @@ const Analytics = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [trafficRes, usageRes, convosRes] = await Promise.all([
+      const [trafficRes, usageRes, convosRes, reportsRes] = await Promise.all([
         fetch(`${API_BASE}/api/analytics/traffic?hours=${hours}`),
         fetch(`${API_BASE}/api/analytics/api-usage?hours=${hours}`),
         fetch(`${API_BASE}/api/analytics/conversations?hours=${hours}`),
+        fetch(`${API_BASE}/api/analytics/reports`),
       ]);
 
       if (trafficRes.ok) setTraffic(await trafficRes.json());
       if (usageRes.ok) setUsage(await usageRes.json());
       if (convosRes.ok) setConvos(await convosRes.json());
+      if (reportsRes.ok) {
+        const data = await reportsRes.json();
+        setReports(data.reports || []);
+      }
     } catch (e) {
       console.error('Failed to fetch analytics:', e);
     }
@@ -251,7 +269,7 @@ const Analytics = () => {
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-6 border-b border-apple-gray-200">
-        {(['traffic', 'usage', 'logs'] as const).map((tab) => (
+        {(['traffic', 'usage', 'logs', 'reports'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -261,7 +279,19 @@ const Analytics = () => {
                 : 'border-transparent text-apple-gray-500 hover:text-apple-gray-700'
             }`}
           >
-            {tab === 'traffic' ? 'Traffic' : tab === 'usage' ? 'API Usage' : 'Conversation Logs'}
+            {tab === 'traffic' ? 'Traffic'
+              : tab === 'usage' ? 'API Usage'
+              : tab === 'logs' ? 'Conversation Logs'
+              : (
+                <span className="flex items-center gap-1.5">
+                  Reports
+                  {reports.length > 0 && (
+                    <span className="inline-flex items-center justify-center w-4 h-4 text-xs rounded-full bg-red-100 text-red-600 font-semibold">
+                      {reports.length}
+                    </span>
+                  )}
+                </span>
+              )}
           </button>
         ))}
       </div>
@@ -380,6 +410,105 @@ const Analytics = () => {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Reports Tab */}
+          {activeTab === 'reports' && (
+            <div className="space-y-4">
+              <div className="text-xs text-apple-gray-400">{reports.length} report{reports.length !== 1 ? 's' : ''}</div>
+
+              {reports.length === 0 && (
+                <div className="text-center py-12 text-apple-gray-400 text-sm">No reports yet</div>
+              )}
+
+              <div className="space-y-2">
+                {reports.map((report) => (
+                  <div
+                    key={report.id}
+                    className="bg-white/60 backdrop-blur rounded-xl border border-apple-gray-200/50 overflow-hidden"
+                  >
+                    <button
+                      onClick={() => setExpandedReport(expandedReport === report.id ? null : report.id)}
+                      className="w-full flex items-start justify-between px-4 py-3 text-left hover:bg-apple-gray-50/50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0 pr-4">
+                        <p className="text-sm text-apple-gray-800 truncate">{report.what_happened}</p>
+                        {report.message_text && (
+                          <p className="text-xs text-apple-gray-400 truncate mt-0.5 italic">
+                            Re: "{report.message_text.slice(0, 80)}{report.message_text.length > 80 ? '…' : ''}"
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-xs text-apple-gray-400">
+                          {report.created_at ? formatTimestamp(report.created_at) : ''}
+                        </span>
+                        <svg
+                          className={`w-4 h-4 text-apple-gray-400 transition-transform ${expandedReport === report.id ? 'rotate-180' : ''}`}
+                          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </button>
+
+                    {expandedReport === report.id && (
+                      <div className="border-t border-apple-gray-200/50 px-4 py-4 space-y-4">
+                        {/* Report fields */}
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-xs font-medium text-apple-gray-500 uppercase mb-1">What went wrong</p>
+                            <p className="text-sm text-apple-gray-800 whitespace-pre-wrap">{report.what_happened}</p>
+                          </div>
+                          {report.what_expected && (
+                            <div>
+                              <p className="text-xs font-medium text-apple-gray-500 uppercase mb-1">What was expected</p>
+                              <p className="text-sm text-apple-gray-800 whitespace-pre-wrap">{report.what_expected}</p>
+                            </div>
+                          )}
+                          {report.message_text && (
+                            <div>
+                              <p className="text-xs font-medium text-apple-gray-500 uppercase mb-1">AI message</p>
+                              <p className="text-sm text-apple-gray-600 bg-apple-gray-50 rounded-lg px-3 py-2 whitespace-pre-wrap">{report.message_text}</p>
+                            </div>
+                          )}
+                          {report.conversation_id && (
+                            <p className="text-xs text-apple-gray-400 font-mono">conv: {report.conversation_id}</p>
+                          )}
+                        </div>
+
+                        {/* Conversation log */}
+                        {report.conversation_messages.length > 0 && (
+                          <div>
+                            <p className="text-xs font-medium text-apple-gray-500 uppercase mb-2">Conversation log</p>
+                            <div className="space-y-2 max-h-80 overflow-y-auto">
+                              {report.conversation_messages.map((msg, i) => (
+                                <div
+                                  key={i}
+                                  className={`text-sm px-3 py-2 rounded-lg ${
+                                    msg.role === 'user'
+                                      ? 'bg-apple-blue-50 text-apple-gray-800'
+                                      : 'bg-apple-gray-50 text-apple-gray-700'
+                                  }`}
+                                >
+                                  <div className="flex justify-between items-center mb-1">
+                                    <span className="text-xs font-medium text-apple-gray-500 uppercase">{msg.role}</span>
+                                    <span className="text-xs text-apple-gray-400">
+                                      {msg.timestamp ? formatTimestamp(msg.timestamp) : ''}
+                                    </span>
+                                  </div>
+                                  <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

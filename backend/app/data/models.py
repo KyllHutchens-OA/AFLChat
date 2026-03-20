@@ -637,6 +637,26 @@ class SquigglePrediction(Base):
         return f"<SquigglePrediction Match:{self.match_id} Winner:{self.predicted_winner_id}>"
 
 
+class UserReport(Base):
+    """User-submitted issue reports from the chat interface."""
+
+    __tablename__ = "user_reports"
+
+    id = Column(Integer, primary_key=True)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
+    message_text = Column(Text)  # The AI message that triggered the report (truncated)
+    what_happened = Column(Text)  # User's description of the problem
+    what_expected = Column(Text)  # What the user expected instead
+    page_url = Column(String(500))
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Relationship
+    conversation = relationship("Conversation")
+
+    def __repr__(self):
+        return f"<UserReport {self.id} conv:{self.conversation_id}>"
+
+
 class APIRequestLog(Base):
     """Log API requests for cost monitoring and rate limiting."""
 
