@@ -89,6 +89,12 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
               ? 'Final'
               : 'Scheduled'}
           </p>
+          {game.status === 'live' && game.last_updated && (() => {
+            const ageMs = Date.now() - new Date(game.last_updated + 'Z').getTime();
+            return ageMs > 3 * 60 * 1000 ? (
+              <p className="text-xs text-amber-500 mt-1">Data may be delayed</p>
+            ) : null;
+          })()}
         </div>
 
         {/* Progress Bar */}

@@ -421,6 +421,10 @@ class LiveGame(Base):
     # Quarter summaries JSONB: {"1": "summary...", "2": "summary..."}
     quarter_summaries = Column(JSONB, nullable=True, default=dict)
 
+    # Cached player stats (updated by background scheduler)
+    stats_cache = Column(JSONB, nullable=True)
+    stats_cache_updated_at = Column(DateTime, nullable=True)
+
     # Relationships
     home_team = relationship("Team", foreign_keys=[home_team_id])
     away_team = relationship("Team", foreign_keys=[away_team_id])

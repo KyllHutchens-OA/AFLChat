@@ -61,7 +61,9 @@ class ChartHelper:
         intent: str,
         entities: Dict[str, Any],
         metrics: List[str],
-        data_cols: List[str]
+        data_cols: List[str],
+        y_col: str = None,
+        x_col: str = None
     ) -> str:
         """
         Generate a descriptive chart title based on query intent and entities.
@@ -130,15 +132,22 @@ class ChartHelper:
             "total_goals": "Goals",
             "total_disposals": "Disposals",
             "fantasy_points": "Fantasy Points",
+            "avg_fantasy": "Avg Fantasy Points",
+            "total_fantasy": "Total Fantasy Points",
         }
 
-        # Find the metric from data columns
+        # Find the metric — prefer the actual y_col being plotted
         metric = None
-        for col in data_cols:
-            col_lower = col.lower()
-            if col_lower in metric_map:
-                metric = metric_map[col_lower]
-                break
+        if y_col and y_col.lower() in metric_map:
+            metric = metric_map[y_col.lower()]
+
+        # Fall back to scanning data columns
+        if not metric:
+            for col in data_cols:
+                col_lower = col.lower()
+                if col_lower in metric_map:
+                    metric = metric_map[col_lower]
+                    break
 
         # Also check the metrics list passed in
         if not metric:
@@ -148,8 +157,11 @@ class ChartHelper:
                     metric = metric_map[m_lower]
                     break
 
-        # Check if this is a "by round" query (has round column)
-        by_round = "round" in [c.lower() for c in data_cols]
+        # Only say "by Round" if the x-axis is actually round
+        if x_col:
+            by_round = x_col.lower() == "round"
+        else:
+            by_round = "round" in [c.lower() for c in data_cols]
 
         # Build dynamic title
         parts = []
@@ -452,16 +464,22 @@ class PlotlyBuilder:
         annotations = params.get("annotations", [])
         layout_config = params.get("layout_config", {})
 
-        # If x_col is 'round', try to convert to numeric for proper sorting
-        # Handle both numeric rounds (0, 1, 2...) and finals ("Qualifying Final", etc.)
-        if x_col == 'round' and 'match_date' in data.columns:
-            # Use match_date for sorting, but keep round for display
-            data = data.sort_values('match_date').reset_index(drop=True)
-            # Create a numeric index for X-axis to maintain order
+        # If x_col is 'round', use sequential index for proper positioning.
+        # Data is already sorted by visualize_node's _round_sort_key (numerics then finals).
+        _FINALS_ABBREV = {
+            "Qualifying Final": "QF", "Elimination Final": "EF",
+            "Semi Final": "SF", "Preliminary Final": "PF", "Grand Final": "GF",
+        }
+        if x_col == 'round':
+            # Data order is already correct from visualize_node — don't re-sort by match_date
+            data = data.reset_index(drop=True)
             data['_plot_order'] = range(len(data))
             x_col_for_plot = '_plot_order'
-            # Store round labels for custom tick labels
-            round_labels = data['round'].tolist()
+            # Abbreviate finals for cleaner x-axis labels
+            round_labels = []
+            for r in data['round'].tolist():
+                r_str = str(r).strip()
+                round_labels.append(_FINALS_ABBREV.get(r_str, r_str))
         else:
             x_col_for_plot = x_col
             round_labels = None

@@ -13,7 +13,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 SSE_URL = "https://api.squiggle.com.au/sse/events"
-USER_AGENT = "AFL-Analytics-App/1.0 (educational project)"
+USER_AGENT = "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"
 
 
 class SquiggleSSEListener:

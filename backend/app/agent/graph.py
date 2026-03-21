@@ -374,12 +374,17 @@ class AFLAnalyticsAgent:
                         consolidated["sql"] = None
                     else:
                         logger.info("UNDERSTAND: LLM flagged query as off-topic")
+                        from app.data.database import get_data_recency
+                        recency = get_data_recency()
+                        earliest = recency["earliest_season"]
+                        hist_season = recency["historical_latest_season"]
                         state["needs_clarification"] = True
                         state["clarification_question"] = (
-                            "I'm an AFL analytics agent — I can only help with Australian Football League "
-                            "statistics and data from 1990-2025. Try asking about players, teams, matches, "
-                            "or stats! For example: \"How many goals did Hawkins kick in 2024?\" or "
-                            "\"Show me Richmond's win-loss record in 2023.\""
+                            f"That doesn't seem to be an AFL question. I can help with Australian Football League "
+                            f"statistics and data from {earliest} to {hist_season}, including match results, player stats, "
+                            f"team performance, betting odds, and tipping predictions.\n\n"
+                            f"Try something like: \"How many goals did Hawkins kick in 2024?\" or "
+                            f"\"What are the odds for this week's games?\""
                         )
                         return state
 
@@ -970,6 +975,29 @@ class AFLAnalyticsAgent:
                 if group_col:
                     params["group_col"] = group_col
 
+            # AUTO-AGGREGATE: If charting by season but data has multiple rows per season
+            # (e.g., per-game stats for a career trend), aggregate to season averages.
+            # This prevents spaghetti charts with 300+ individual game data points.
+            if (chart_type == "line" and x_col == "season" and isinstance(y_col, str)
+                    and x_col in data.columns and y_col in data.columns):
+                rows_per_season = len(data) / max(data["season"].nunique(), 1)
+                if rows_per_season > 2:
+                    agg_cols = {y_col: "mean"}
+                    # Also aggregate other numeric columns for tooltip context
+                    for nc in data.select_dtypes(include=["number"]).columns:
+                        if nc != "season" and nc != y_col and "id" not in nc.lower():
+                            agg_cols[nc] = "mean"
+                    group_keys = ["season"]
+                    if group_col and group_col in data.columns:
+                        group_keys.append(group_col)
+                    data = data.groupby(group_keys, as_index=False).agg(agg_cols)
+                    # Round averages for readability
+                    for c in agg_cols:
+                        if c in data.columns:
+                            data[c] = data[c].round(1)
+                    state["query_results"] = data
+                    logger.info(f"VISUALIZE: Aggregated per-game data to season averages ({len(data)} rows)")
+
             # PHASE 1: PREPROCESS DATA - Analyze data characteristics
             # Only preprocess for standard chart types (not comparison charts)
             if chart_type != "comparison" and x_col and y_col:
@@ -1024,12 +1052,14 @@ class AFLAnalyticsAgent:
                 elif recommendations.get("prefer_bar_chart") and chart_type == "line" and x_is_temporal:
                     logger.info(f"Keeping line chart despite count metric ({y_col}) — x-axis is temporal ({x_col})")
 
-            # Generate smart title
+            # Generate smart title (pass x/y_col so the title uses the actual plotted axes)
             params["title"] = ChartHelper.generate_chart_title(
                 intent=str(intent),
                 entities=entities,
                 metrics=entities.get("metrics", []),
-                data_cols=data.columns.tolist()
+                data_cols=data.columns.tolist(),
+                y_col=y_col if isinstance(y_col, str) else None,
+                x_col=x_col if isinstance(x_col, str) else None
             )
 
             # Generate chart
@@ -1358,24 +1388,40 @@ class AFLAnalyticsAgent:
                 else:
                     return f"Results{season_str}: {stats_str}."
 
-        # --- PATTERN 1.5: Multiple match results (2-10 rows with match data) ---
-        if intent == QueryIntent.SIMPLE_STAT and 2 <= len(data) <= 10:
-            # Check if this is match results (has winner, teams, scores)
+        # --- PATTERN 1.5: Multiple rows (2-20 rows) — format as markdown tables ---
+        if 2 <= len(data) <= 20:
+            # Match results with winner/scores → markdown table
             if 'winner' in data.columns and 'home_team' in data.columns and 'away_team' in data.columns:
-                lines = []
+                lines = ["| Winner | Score | Loser | Margin | Venue |", "|--------|-------|-------|--------|-------|"]
                 for _, row in data.iterrows():
                     home_team = row['home_team']
                     away_team = row['away_team']
                     home_score = int(row['home_score']) if 'home_score' in row else 0
                     away_score = int(row['away_score']) if 'away_score' in row else 0
                     winner = row['winner']
+                    loser = away_team if winner == home_team else home_team
                     margin = int(row['margin']) if 'margin' in row else abs(home_score - away_score)
                     venue = row['venue'] if 'venue' in row else ''
+                    lines.append(f"| {winner} | {max(home_score, away_score)}-{min(home_score, away_score)} | {loser} | {margin} | {venue} |")
 
-                    venue_text = f" at {venue}" if venue else ""
-                    lines.append(f"• {winner} defeated {away_team if winner == home_team else home_team} {max(home_score, away_score)}-{min(home_score, away_score)} by {margin} points{venue_text}")
+                return "\n".join(lines)
 
-                return "Games:\n" + "\n".join(lines)
+            # Fixture/upcoming games (has teams but no scores AND no other stat columns)
+            if 'home_team' in data.columns and 'away_team' in data.columns:
+                has_scores = 'home_score' in data.columns and data['home_score'].notna().any() and (data['home_score'] != 0).any()
+                # Only use fixture format if there are no meaningful stat columns
+                stat_numeric = [c for c in data.select_dtypes(include=['number']).columns
+                                if 'id' not in c.lower() and c not in ('season', 'year')]
+                if not has_scores and not stat_numeric:
+                    header_cols = ["Match", "Date", "Venue", "Round"]
+                    lines = ["| " + " | ".join(header_cols) + " |", "| " + " | ".join(["---"] * len(header_cols)) + " |"]
+                    for _, row in data.iterrows():
+                        match_str = f"{row['home_team']} vs {row['away_team']}"
+                        date_str = str(row.get('match_date', ''))[:10] if 'match_date' in row.index else ''
+                        venue_str = str(row.get('venue', '')) if 'venue' in row.index else ''
+                        round_str = str(row.get('round', '')) if 'round' in row.index else ''
+                        lines.append(f"| {match_str} | {date_str} | {venue_str} | {round_str} |")
+                    return "\n".join(lines)
 
             name_cols = [c for c in data.columns if c.lower() in ['name', 'player', 'player_name', 'team', 'winner']]
             numeric_cols = data.select_dtypes(include=['number']).columns.tolist()
@@ -1384,23 +1430,73 @@ class AFLAnalyticsAgent:
 
             if name_cols and numeric_cols:
                 name_col = name_cols[0]
-                metric_col = numeric_cols[0]
                 season_str = f" in {seasons[0]}" if seasons else ""
-                metric_label = metric_col.replace("_", " ")
 
                 # Detect team column for context
                 team_col = next((c for c in data.columns if c.lower() == 'team' and c != name_col), None)
 
-                lines = []
-                for i, (_, row) in enumerate(data.iterrows()):
-                    val = row[metric_col]
-                    if isinstance(val, float) and val == int(val):
-                        val = int(val)
-                    team_str = f" ({row[team_col]})" if team_col else ""
-                    lines.append(f"{i+1}. {row[name_col]}{team_str} — {val} {metric_label}")
+                # Build markdown table with all numeric columns
+                display_cols = [name_col]
+                if team_col:
+                    display_cols.append(team_col)
+                display_cols.extend(numeric_cols)
 
-                header = f"Top {metric_label}{season_str}:"
-                return header + "\n" + "\n".join(lines)
+                headers = [c.replace("_", " ").title() for c in display_cols]
+                lines = ["| # | " + " | ".join(headers) + " |", "| --- | " + " | ".join(["---"] * len(headers)) + " |"]
+
+                for i, (_, row) in enumerate(data.iterrows()):
+                    vals = []
+                    for c in display_cols:
+                        v = row[c]
+                        if isinstance(v, float) and v == int(v):
+                            vals.append(str(int(v)))
+                        elif isinstance(v, float):
+                            vals.append(f"{v:.1f}")
+                        else:
+                            vals.append(str(v))
+                    lines.append(f"| {i+1} | " + " | ".join(vals) + " |")
+
+                metric_label = numeric_cols[0].replace("_", " ")
+                header = f"Top {metric_label}{season_str}:\n\n"
+                return header + "\n".join(lines)
+
+            # Fallback: any multi-row DataFrame with 3+ columns → auto markdown table
+            if len(data.columns) >= 3:
+                cols = [c for c in data.columns if 'id' not in c.lower()]
+                # Drop columns that are entirely empty/null/blank
+                cols = [c for c in cols if not (data[c].isna().all() or (data[c].astype(str).str.strip() == '').all())]
+                # Merge home_team + away_team into a single "Match" column if both exist
+                has_match_merge = 'home_team' in cols and 'away_team' in cols
+                if has_match_merge:
+                    cols = [c for c in cols if c not in ('home_team', 'away_team')]
+                    cols.insert(0, '_match')
+                # Truncate long timestamps to date only
+                date_cols = [c for c in cols if 'date' in c.lower()]
+                if cols:
+                    headers = []
+                    for c in cols:
+                        if c == '_match':
+                            headers.append("Match")
+                        else:
+                            headers.append(c.replace("_", " ").title())
+                    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+                    for _, row in data.iterrows():
+                        vals = []
+                        for c in cols:
+                            if c == '_match':
+                                vals.append(f"{row['home_team']} vs {row['away_team']}")
+                            elif c in date_cols:
+                                vals.append(str(row[c])[:10])
+                            else:
+                                v = row[c]
+                                if isinstance(v, float) and v == int(v):
+                                    vals.append(str(int(v)))
+                                elif isinstance(v, float):
+                                    vals.append(f"{v:.1f}")
+                                else:
+                                    vals.append(str(v))
+                        lines.append("| " + " | ".join(vals) + " |")
+                    return "\n".join(lines)
 
         # --- PATTERN 3: Chart accompaniment (very brief text) ---
         if has_chart:
@@ -1510,10 +1606,15 @@ class AFLAnalyticsAgent:
                     player_name = players[0] if players else "this player"
                     season = seasons[0] if seasons else "this season"
 
+                    from app.data.database import get_data_recency
+                    recency = get_data_recency()
+                    earliest = recency["earliest_season"]
+                    hist_season = recency["historical_latest_season"]
+                    hist_round = recency["historical_latest_round"]
                     state["natural_language_summary"] = (
                         f"I couldn't find any data for {player_name} in {season}. "
-                        f"Player statistics are available for most seasons from 1990-2023 (excluding 1994, 2017, 2024) "
-                        f"and partial 2025 data. Try asking about a different season or player."
+                        f"I have match and player data from {earliest} through Round {hist_round} of {hist_season}. "
+                        f"Try a different season or player."
                     )
                 else:
                     state["natural_language_summary"] = (
@@ -1529,7 +1630,9 @@ class AFLAnalyticsAgent:
             if template_response is not None:
                 state["natural_language_summary"] = template_response
                 state["confidence"] = 0.9
-                state["sources"] = ["AFL Tables (1990-2025)"]
+                from app.data.database import get_data_recency
+                _r = get_data_recency()
+                state["sources"] = [f"AFL Tables ({_r['earliest_season']}-{_r['historical_latest_season']})"]
                 state["thinking_message"] = "Response complete"
                 self._emit_progress(state, "respond", "Response complete")
                 logger.info("RESPOND: Used template response (no LLM call)")
@@ -1538,10 +1641,14 @@ class AFLAnalyticsAgent:
             # Format statistics for GPT consumption
             stats_summary = self._format_stats_for_gpt(state.get("statistical_analysis", {}))
 
-            # Format context insights if available
+            # Determine response style based on analysis mode (needed for context filter)
+            analysis_mode = state.get("analysis_mode", "summary")
+            intent = state.get("intent")
+
+            # Format context insights — only for in-depth team/trend analysis
             context_insights = state.get("context_insights", {})
             context_text = ""
-            if context_insights:
+            if context_insights and analysis_mode == "in_depth" and intent in [QueryIntent.TREND_ANALYSIS, QueryIntent.TEAM_ANALYSIS]:
                 context_text = "\n\nContextual Insights:"
 
                 # Form analysis
@@ -1591,10 +1698,6 @@ class AFLAnalyticsAgent:
 
                 conversation_context_text += "\nYour response should build on this conversation naturally.\n---\n"
 
-            # Determine response style based on analysis mode
-            analysis_mode = state.get("analysis_mode", "summary")
-            intent = state.get("intent")
-
             # Format query results - show more data for round-by-round or breakdown queries
             # These queries need full data to generate accurate summaries
             query_lower = state['user_query'].lower()
@@ -1612,20 +1715,21 @@ class AFLAnalyticsAgent:
                 results_text = results_df.head(30).to_string() + f"\n... ({len(results_df)} total rows)"
 
             # Capability constraints to prevent hallucinations
-            capability_constraints = """
-SYSTEM CAPABILITIES (be honest about what you can and cannot do):
-✓ CAN DO: Query AFL statistics from the database (1990-2025), show match results, player stats, team performance
-✓ CAN DO: Generate visualizations and charts displayed in the chat interface
+            from app.data.database import get_data_recency
+            recency = get_data_recency()
+            _earliest = recency["earliest_season"]
+            _hist_season = recency["historical_latest_season"]
+            capability_constraints = f"""
+SYSTEM CAPABILITIES:
+✓ CAN DO: Query AFL statistics ({_earliest}-{_hist_season}), match results, player stats, team performance
+✓ CAN DO: Generate visualizations and charts
 ✓ CAN DO: Compare players, teams, and seasons
-✓ CAN DO: Answer questions about historical AFL data
+✓ CAN DO: Provide betting odds and tipping predictions
+✓ CAN DO: Show live/recent game scores and results
 
-✗ CANNOT DO: Export data to CSV, Excel, or any file format
+✗ CANNOT DO: Export data to CSV, Excel, or files
 ✗ CANNOT DO: Download or email reports
-✗ CANNOT DO: Access live/real-time data or external websites
-✗ CANNOT DO: Make predictions about future games
-✗ CANNOT DO: Access data outside of AFL statistics (no other sports, no betting odds)
-
-NEVER claim you can do something not listed above. If asked about unsupported features, politely explain what IS possible instead.
+✗ CANNOT DO: Access non-AFL sports data
 """
 
             # Build prompt based on mode
@@ -1633,15 +1737,13 @@ NEVER claim you can do something not listed above. If asked about unsupported fe
                 # SUMMARY MODE: Direct, concise answers
                 prompt = f"""You are an AFL analytics expert. Answer the user's question directly and concisely.
 
-{capability_constraints}
-
-CRITICAL RULES for simple stat queries:
+CRITICAL RULES:
 - Answer in 1-2 sentences MAX
 - State the number/fact directly
 - DO NOT mention what additional analysis you could do
 - DO NOT mention limitations or missing data unless the query CANNOT be answered
 - DO NOT offer follow-up analysis unprompted
-- Just answer the question asked, nothing more
+- When presenting multiple rows of data, format as a markdown table
 
 {conversation_context_text}User asked: {state['user_query']}
 
@@ -1658,13 +1760,10 @@ Provide a direct, concise answer (1-2 sentences):"""
                     # CHART MODE: Very brief text, let the chart do the talking
                     prompt = f"""You are an AFL analytics expert. A chart is being displayed to the user.
 
-{capability_constraints}
-
 CRITICAL: Keep your response VERY SHORT (2-3 sentences max).
 - Briefly state what the chart shows
 - Mention 1-2 key insights or standout data points
 - Do NOT describe every data point - the chart shows that
-- Do NOT write paragraphs of analysis
 
 {conversation_context_text}User query: {state['user_query']}
 
@@ -1681,10 +1780,10 @@ Guidelines:
 - Keep response to 3-5 sentences MAX
 - Lead with the key finding or answer
 - Include 2-3 specific numbers that matter most
-- Mention one interesting insight or pattern
+- Only include information directly relevant to what was asked
 - Use Australian football terminology correctly
 - Never mention SQL, databases, or technical details
-- Be conversational but concise
+- When presenting multiple rows of data, format as a markdown table
 
 {conversation_context_text}Current user query: {state['user_query']}
 
@@ -1705,7 +1804,7 @@ Provide a concise analysis (3-5 sentences):"""
 
             state["natural_language_summary"] = (response.choices[0].message.content or "").strip()
             state["confidence"] = 0.9
-            state["sources"] = ["AFL Tables (1990-2025)"]
+            state["sources"] = [f"AFL Tables ({_earliest}-{_hist_season})"]
             state["thinking_message"] = "Response complete"
             self._emit_progress(state, "respond", "Response complete")
 

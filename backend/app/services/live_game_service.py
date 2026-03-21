@@ -171,6 +171,11 @@ class LiveGameService:
     @staticmethod
     def _update_game_state(live_game: LiveGame, game_data: Dict):
         """Update live game state from Squiggle data."""
+        # Debug: log score changes for live games
+        new_score = game_data.get("hscore", 0)
+        if live_game.status == 'live' and live_game.home_score != new_score:
+            logger.info(f"Updating game {live_game.id} (sqid={game_data.get('id')}): score {live_game.home_score}-{live_game.away_score} -> {new_score}-{game_data.get('ascore', 0)}, complete {live_game.complete_percent} -> {game_data.get('complete', 0)}")
+
         # Scores
         live_game.home_score = game_data.get("hscore", 0)
         live_game.away_score = game_data.get("ascore", 0)
