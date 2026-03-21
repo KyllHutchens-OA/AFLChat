@@ -139,19 +139,30 @@ class LiveGameScheduler:
         """Poll Squiggle API for live games and update database."""
         try:
             import requests
+            import time
             from app.services.live_game_service import LiveGameService
             from app import socketio
 
-            # Fetch games from Squiggle API
+            # Fetch games from Squiggle API (retry once on failure)
             current_year = datetime.now().year
-            response = requests.get(
-                f"https://api.squiggle.com.au/?q=games;year={current_year}",
-                headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
-                timeout=10
-            )
+            response = None
+            for attempt in range(2):
+                try:
+                    response = requests.get(
+                        f"https://api.squiggle.com.au/?q=games;year={current_year}",
+                        headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
+                        timeout=10
+                    )
+                    if response.status_code == 200:
+                        break
+                    logger.warning(f"Squiggle returned {response.status_code} (attempt {attempt + 1}/2)")
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"Squiggle request failed (attempt {attempt + 1}/2): {e}")
+                if attempt == 0:
+                    time.sleep(2)
 
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch games from Squiggle: {response.status_code}")
+            if not response or response.status_code != 200:
+                logger.error(f"Failed to fetch games from Squiggle after 2 attempts")
                 return
 
             data = response.json()

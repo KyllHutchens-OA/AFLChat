@@ -110,6 +110,9 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
           <span className={`text-xs font-medium ${isLive ? 'text-apple-red' : 'text-apple-gray-400'}`}>
             {isLive ? (game.time_str || 'Live') : 'Final'}
           </span>
+          {isLive && game.last_updated && (Date.now() - new Date(game.last_updated + 'Z').getTime() > 3 * 60 * 1000) && (
+            <span className="text-[10px] text-amber-500 ml-auto">Delayed</span>
+          )}
         </div>
       </button>
     );
