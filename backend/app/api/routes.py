@@ -346,7 +346,7 @@ def get_upcoming_matches():
         current_year = datetime.now().year
         response = requests.get(
             f"https://api.squiggle.com.au/?q=games;year={current_year}",
-            headers={"User-Agent": "AFL-Analytics-App/1.0"},
+            headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
             timeout=10
         )
 
@@ -406,36 +406,48 @@ def get_upcoming_matches():
 
     except Exception as e:
         logger.error(f"Error fetching upcoming matches: {e}")
-        return jsonify({'error': 'Failed to fetch upcoming matches'}), 500
+        return jsonify({'matches': [], 'error': 'Squiggle API unavailable'}), 200
 
 
 @bp.route('/live-games/<int:game_id>/stats', methods=['GET'])
 @limiter.exempt
 def get_game_stats(game_id):
-    """Get top player stats for a completed game."""
+    """Get top player stats for a game, served from cache."""
     try:
         from app.data.models import LiveGame
-        from app.services.api_sports_service import APISportsService
+        from sqlalchemy.orm import joinedload
 
         session = Session()
-        game = session.query(LiveGame).filter_by(id=game_id).first()
+        game = session.query(LiveGame).options(
+            joinedload(LiveGame.home_team),
+            joinedload(LiveGame.away_team)
+        ).filter_by(id=game_id).first()
 
         if not game:
             session.close()
             return jsonify({'error': 'Game not found'}), 404
 
-        # Get game date for API-Sports query
-        game_date = game.match_date.strftime('%Y-%m-%d') if game.match_date else None
-
-        # Find game in API-Sports by teams
-        api_game = APISportsService.get_game_by_teams(
-            game.home_team.abbreviation,
-            game.away_team.abbreviation,
-            game_date
-        )
-
-        if not api_game:
+        # Serve from cache if available
+        if game.stats_cache:
+            result = game.stats_cache
             session.close()
+            return jsonify(result), 200
+
+        # Cache miss — fetch live and cache the result
+        from app.services.api_sports_service import APISportsService
+        from sqlalchemy.orm.attributes import flag_modified
+
+        stats = APISportsService.fetch_game_stats(game)
+
+        if stats:
+            game.stats_cache = stats
+            game.stats_cache_updated_at = datetime.utcnow()
+            flag_modified(game, 'stats_cache')
+            session.commit()
+
+        session.close()
+
+        if not stats:
             return jsonify({
                 'top_goal_kickers': [],
                 'top_disposals': [],
@@ -443,95 +455,7 @@ def get_game_stats(game_id):
                 'message': 'Player stats not available for this game'
             }), 200
 
-        # Get player stats - note: game ID is nested under 'game'
-        api_game_id = api_game.get('game', {}).get('id') or api_game.get('id')
-        stats_data = APISportsService.get_game_player_stats(api_game_id)
-
-        if not stats_data:
-            session.close()
-            return jsonify({
-                'top_goal_kickers': [],
-                'top_disposals': [],
-                'top_fantasy': [],
-                'message': 'Player stats not available'
-            }), 200
-
-        # Get team names from the api_game response
-        home_team_name = api_game.get('teams', {}).get('home', {}).get('name', 'Home')
-        away_team_name = api_game.get('teams', {}).get('away', {}).get('name', 'Away')
-
-        # Process player stats
-        all_players = []
-        for idx, team_data in enumerate(stats_data.get('teams', [])):
-            # Team name from api_game since stats_data doesn't include it
-            team_name = home_team_name if idx == 0 else away_team_name
-
-            for player in team_data.get('players', []):
-                player_info = player.get('player', {})
-                player_id = player_info.get('id')
-
-                # Get player name from cached players
-                player_name = 'Unknown'
-                if player_id:
-                    cached_player = APISportsService.get_cached_player(player_id)
-                    if cached_player:
-                        player_name = cached_player.get('name', 'Unknown')
-
-                # Stats are directly on the player object, not nested
-                goals = player.get('goals', {}).get('total', 0) or 0
-                behinds = player.get('behinds', 0) or 0
-                kicks = player.get('kicks', 0) or 0
-                handballs = player.get('handballs', 0) or 0
-                marks = player.get('marks', 0) or 0
-                tackles = player.get('tackles', 0) or 0
-                hitouts = player.get('hitouts', 0) or 0
-                free_kicks = player.get('free_kicks', {})
-                free_for = free_kicks.get('for', 0) or 0
-                free_against = free_kicks.get('against', 0) or 0
-
-                # Disposals for display (kicks + handballs)
-                disposals = kicks + handballs
-
-                # AFL Fantasy scoring formula (official):
-                # Kick: 3, Handball: 2, Mark: 3, Tackle: 4, Goal: 6,
-                # Behind: 1, Hitout: 1, Free For: 1, Free Against: -3
-                fantasy = (
-                    (kicks * 3) +
-                    (handballs * 2) +
-                    (marks * 3) +
-                    (tackles * 4) +
-                    (goals * 6) +
-                    (behinds * 1) +
-                    (hitouts * 1) +
-                    (free_for * 1) +
-                    (free_against * -3)
-                )
-
-                all_players.append({
-                    'name': player_name,
-                    'team': team_name,
-                    'goals': goals,
-                    'disposals': disposals,
-                    'fantasy': fantasy,
-                })
-
-        # Sort and get top 3 for each category
-        top_goals = sorted(all_players, key=lambda x: x['goals'], reverse=True)[:3]
-        top_disposals = sorted(all_players, key=lambda x: x['disposals'], reverse=True)[:3]
-        top_fantasy = sorted(all_players, key=lambda x: x['fantasy'], reverse=True)[:3]
-
-        # Filter out zero values
-        top_goals = [p for p in top_goals if p['goals'] > 0]
-        top_disposals = [p for p in top_disposals if p['disposals'] > 0]
-        top_fantasy = [p for p in top_fantasy if p['fantasy'] > 0]
-
-        session.close()
-
-        return jsonify({
-            'top_goal_kickers': [{'name': p['name'], 'team': p['team'], 'goals': p['goals']} for p in top_goals],
-            'top_disposals': [{'name': p['name'], 'team': p['team'], 'disposals': p['disposals']} for p in top_disposals],
-            'top_fantasy': [{'name': p['name'], 'team': p['team'], 'points': p['fantasy']} for p in top_fantasy],
-        }), 200
+        return jsonify(stats), 200
 
     except Exception as e:
         logger.error(f"Error fetching game stats: {e}")

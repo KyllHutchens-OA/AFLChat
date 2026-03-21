@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAgentWebSocket } from '../../hooks/useAgentWebSocket';
 import ChartRenderer from '../Visualization/ChartRenderer';
 import FeedbackButton from './FeedbackButton';
@@ -142,7 +144,13 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
                     <span className="text-sm font-medium">Something went wrong</span>
                   </div>
                 )}
-                <div className="whitespace-pre-wrap">{message.text}</div>
+                {message.type === 'agent' ? (
+                  <div className="chat-markdown">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="whitespace-pre-wrap">{message.text}</div>
+                )}
 
               </div>
             </div>

@@ -153,14 +153,23 @@ class APISportsService:
                     if team:
                         team_id = team.id
 
-            player = APISportsPlayer(
-                api_sports_id=player_id,
-                name=name,
-                team_api_sports_id=team_api_id,
-                team_id=team_id,
-            )
-            session.add(player)
-            session.flush()
+            try:
+                player = APISportsPlayer(
+                    api_sports_id=player_id,
+                    name=name,
+                    team_api_sports_id=team_api_id,
+                    team_id=team_id,
+                )
+                session.add(player)
+                session.flush()
+            except Exception:
+                # Concurrent request already inserted this player — re-fetch
+                session.rollback()
+                player = session.query(APISportsPlayer).filter_by(
+                    api_sports_id=player_id
+                ).first()
+                if not player:
+                    return None
 
             result = {
                 "id": player.id,
@@ -357,3 +366,73 @@ class APISportsService:
         """Get API-Sports team ID from our team abbreviation."""
         abbr_to_api_id = {v: k for k, v in API_SPORTS_TEAM_MAP.items()}
         return abbr_to_api_id.get(team_abbr)
+
+    @staticmethod
+    def fetch_game_stats(game) -> Optional[Dict]:
+        """Fetch and process player stats for a LiveGame ORM object.
+
+        Args:
+            game: LiveGame ORM object with home_team and away_team relationships loaded.
+
+        Returns:
+            Dict with top_goal_kickers, top_disposals, top_fantasy lists, or None if unavailable.
+        """
+        try:
+            game_date = game.match_date.strftime('%Y-%m-%d') if game.match_date else None
+
+            api_game = APISportsService.get_game_by_teams(
+                game.home_team.abbreviation,
+                game.away_team.abbreviation,
+                game_date,
+            )
+
+            if not api_game:
+                return None
+
+            api_game_id = api_game.get('game', {}).get('id') or api_game.get('id')
+            stats_data = APISportsService.get_game_player_stats(api_game_id)
+
+            if not stats_data:
+                return None
+
+            home_team_name = api_game.get('teams', {}).get('home', {}).get('name', 'Home')
+            away_team_name = api_game.get('teams', {}).get('away', {}).get('name', 'Away')
+
+            all_players = []
+            for idx, team_data in enumerate(stats_data.get('teams', [])):
+                team_name = home_team_name if idx == 0 else away_team_name
+                for player in team_data.get('players', []):
+                    player_info = player.get('player', {})
+                    player_id = player_info.get('id')
+                    player_name = 'Unknown'
+                    if player_id:
+                        cached_player = APISportsService.get_cached_player(player_id)
+                        if cached_player:
+                            player_name = cached_player.get('name', 'Unknown')
+                    goals = player.get('goals', {}).get('total', 0) or 0
+                    behinds = player.get('behinds', 0) or 0
+                    kicks = player.get('kicks', 0) or 0
+                    handballs = player.get('handballs', 0) or 0
+                    marks = player.get('marks', 0) or 0
+                    tackles = player.get('tackles', 0) or 0
+                    hitouts = player.get('hitouts', 0) or 0
+                    free_kicks = player.get('free_kicks', {})
+                    free_for = free_kicks.get('for', 0) or 0
+                    free_against = free_kicks.get('against', 0) or 0
+                    disposals = kicks + handballs
+                    fantasy = (kicks * 3) + (handballs * 2) + (marks * 3) + (tackles * 4) + (goals * 6) + (behinds * 1) + (hitouts * 1) + (free_for * 1) + (free_against * -3)
+                    all_players.append({'name': player_name, 'team': team_name, 'goals': goals, 'disposals': disposals, 'fantasy': fantasy})
+
+            top_goals = [p for p in sorted(all_players, key=lambda x: x['goals'], reverse=True)[:3] if p['goals'] > 0]
+            top_disposals = [p for p in sorted(all_players, key=lambda x: x['disposals'], reverse=True)[:3] if p['disposals'] > 0]
+            top_fantasy = [p for p in sorted(all_players, key=lambda x: x['fantasy'], reverse=True)[:3] if p['fantasy'] > 0]
+
+            return {
+                'top_goal_kickers': [{'name': p['name'], 'team': p['team'], 'goals': p['goals']} for p in top_goals],
+                'top_disposals': [{'name': p['name'], 'team': p['team'], 'disposals': p['disposals']} for p in top_disposals],
+                'top_fantasy': [{'name': p['name'], 'team': p['team'], 'points': p['fantasy']} for p in top_fantasy],
+            }
+
+        except Exception as e:
+            logger.error(f"Error in fetch_game_stats for game {getattr(game, 'id', '?')}: {e}")
+            return None

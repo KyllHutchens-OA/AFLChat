@@ -97,7 +97,7 @@ Examples of off_topic (truly unrelated to AFL):
   - "today" → current date
   - "yesterday", "last night" → current date - 1 day
   - "this week" → last 7 days from current date
-  - "last round", "this round" → most recent round number
+  - "last round", "this round" → {current_round_hint}
 - **Metrics**: goals, disposals, marks, tackles, wins, losses, score, etc.
 
 ## SQL Generation Rules
@@ -110,7 +110,7 @@ Use EXACT team names: Adelaide (NOT "Adelaide Crows"), Geelong (NOT "Geelong Cat
 ### matches: id, season (INTEGER), round (VARCHAR), match_date (TIMESTAMP), home_team_id, away_team_id, home_score, away_score, venue, attendance
 - round values: regular rounds "0","1".."24"; finals: "Qualifying Final","Elimination Final","Semi Final","Preliminary Final","Grand Final"
 - ALWAYS include finals in round-by-round season queries
-- Contains historical data (1990-2025)
+- Contains historical data ({data_range})
 
 ### live_games: id, season, round, match_date (TIMESTAMP), home_team_id, away_team_id, home_score, away_score, home_goals, home_behinds, away_goals, away_behinds, venue, status, current_quarter
 - Contains live/recent games (2026+) with real-time scores
@@ -120,6 +120,7 @@ Use EXACT team names: Adelaide (NOT "Adelaide Crows"), Geelong (NOT "Geelong Cat
 ### players: id, name, team_id (CURRENT team only — WARNING: wrong for traded players), position, height, weight, debut_year
 
 ### player_stats: match_id, player_id, team_id (team player played FOR — correct for trades!), disposals, kicks, handballs, marks, tackles, goals, behinds, hitouts, clearances, inside_50s, rebound_50s, contested_possessions, uncontested_possessions, contested_marks, marks_inside_50, one_percenters, bounces, goal_assist, clangers, free_kicks_for, free_kicks_against, fantasy_points, brownlow_votes, time_on_ground_pct
+- IMPORTANT: fantasy_points is PRE-COMPUTED in the database using official AFL Fantasy scoring. For fantasy queries, SELECT fantasy_points directly — do NOT ask the user which scoring system to use.
 
 CRITICAL RULES:
 1. Only SELECT statements (no INSERT/UPDATE/DELETE/DROP)
@@ -299,9 +300,27 @@ class ConsolidatedQueryUnderstanding:
                 logger.info("CONSOLIDATED-LLM: Cache HIT — skipping API call")
                 return _llm_cache[key]
 
+            # Inject dynamic data recency
+            from app.data.database import get_data_recency
+            recency = get_data_recency()
+            earliest = recency["earliest_season"]
+            hist_season = recency["historical_latest_season"]
+            hist_round = recency["historical_latest_round"]
+            live_season = recency.get("live_latest_season")
+            live_round = recency.get("live_latest_round")
+
+            if live_season and live_round:
+                current_round_hint = f"Round {live_round} of {live_season}"
+            else:
+                current_round_hint = f"Round {hist_round} of {hist_season}"
+
+            data_range = f"{earliest}-{hist_season}"
+
             prompt = _INTENT_AND_SQL_PROMPT.format(
                 user_query=user_query,
                 conversation_context=conv_ctx,
+                current_round_hint=current_round_hint,
+                data_range=data_range,
             )
 
             logger.info("CONSOLIDATED-LLM: Calling OpenAI (single intent+SQL call)...")

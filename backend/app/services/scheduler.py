@@ -98,6 +98,15 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
+        # Job 7: Pre-fetch player stats for live and recently completed games (every 2 minutes)
+        self.scheduler.add_job(
+            func=self._prefetch_stats,
+            trigger=IntervalTrigger(minutes=2),
+            id="prefetch_stats",
+            name="Pre-fetch player stats for live and recent games",
+            replace_existing=True,
+        )
+
         # Job 6: Ingest current season match results (daily at 11 PM AEST)
         # Runs after evening games finish — inserts new matches and updates
         # any previously-scheduled games that have since completed.
@@ -137,7 +146,7 @@ class LiveGameScheduler:
             current_year = datetime.now().year
             response = requests.get(
                 f"https://api.squiggle.com.au/?q=games;year={current_year}",
-                headers={"User-Agent": "AFL-Analytics-App/1.0"},
+                headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
                 timeout=10
             )
 
@@ -244,6 +253,137 @@ class LiveGameScheduler:
             logger.info(f"Match results job complete: {current_year} season synced from Squiggle")
         except Exception as e:
             logger.error(f"Match results job failed: {e}")
+
+    def _prefetch_stats(self):
+        """Pre-fetch and cache player stats for live and recently completed games.
+
+        Optimized: batches API-Sports game lookups by date to minimize HTTP requests.
+        """
+        try:
+            from app.services.api_sports_service import APISportsService
+            from app.data.models import LiveGame
+            from sqlalchemy.orm.attributes import flag_modified
+            from sqlalchemy.orm import joinedload
+            from collections import defaultdict
+
+            with get_session() as session:
+                games = session.query(LiveGame).options(
+                    joinedload(LiveGame.home_team),
+                    joinedload(LiveGame.away_team)
+                ).filter(
+                    (LiveGame.status == 'live') |
+                    ((LiveGame.status == 'completed') & (LiveGame.stats_cache == None))
+                ).all()
+
+                if not games:
+                    return
+
+                now = datetime.utcnow()
+
+                # Filter out live games refreshed recently
+                games_to_fetch = []
+                for game in games:
+                    if game.status == 'live' and game.stats_cache_updated_at:
+                        if (now - game.stats_cache_updated_at).total_seconds() < 120:
+                            continue
+                    games_to_fetch.append(game)
+
+                if not games_to_fetch:
+                    return
+
+                # Group games by date and batch-fetch from API-Sports
+                games_by_date = defaultdict(list)
+                for game in games_to_fetch:
+                    if game.match_date:
+                        date_str = game.match_date.strftime('%Y-%m-%d')
+                        games_by_date[date_str].append(game)
+
+                # Build reverse lookup: abbreviation -> API-Sports ID
+                from app.services.api_sports_service import API_SPORTS_TEAM_MAP
+                abbr_to_api_id = {v: k for k, v in API_SPORTS_TEAM_MAP.items()}
+
+                refreshed = 0
+                for date_str, date_games in games_by_date.items():
+                    try:
+                        # One API call per date (not per game)
+                        api_games = APISportsService.get_live_games(date=date_str)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch API-Sports games for {date_str}: {e}")
+                        continue
+
+                    # Index API-Sports games by (home_id, away_id) for fast lookup
+                    api_game_index = {}
+                    for ag in api_games:
+                        teams = ag.get('teams', {})
+                        key = (teams.get('home', {}).get('id'), teams.get('away', {}).get('id'))
+                        api_game_index[key] = ag
+
+                    for game in date_games:
+                        try:
+                            home_api_id = abbr_to_api_id.get(game.home_team.abbreviation)
+                            away_api_id = abbr_to_api_id.get(game.away_team.abbreviation)
+                            api_game = api_game_index.get((home_api_id, away_api_id))
+
+                            if not api_game:
+                                continue
+
+                            api_game_id = api_game.get('game', {}).get('id') or api_game.get('id')
+                            stats_data = APISportsService.get_game_player_stats(api_game_id)
+                            if not stats_data:
+                                continue
+
+                            # Process stats inline (avoid re-fetching game)
+                            home_team_name = api_game.get('teams', {}).get('home', {}).get('name', 'Home')
+                            away_team_name = api_game.get('teams', {}).get('away', {}).get('name', 'Away')
+
+                            all_players = []
+                            for idx, team_data in enumerate(stats_data.get('teams', [])):
+                                team_name = home_team_name if idx == 0 else away_team_name
+                                for player in team_data.get('players', []):
+                                    player_info = player.get('player', {})
+                                    player_id = player_info.get('id')
+                                    player_name = 'Unknown'
+                                    if player_id:
+                                        cached = APISportsService.get_cached_player(player_id)
+                                        if cached:
+                                            player_name = cached.get('name', 'Unknown')
+                                    goals = player.get('goals', {}).get('total', 0) or 0
+                                    behinds = player.get('behinds', 0) or 0
+                                    kicks = player.get('kicks', 0) or 0
+                                    handballs = player.get('handballs', 0) or 0
+                                    marks = player.get('marks', 0) or 0
+                                    tackles = player.get('tackles', 0) or 0
+                                    hitouts = player.get('hitouts', 0) or 0
+                                    free_kicks = player.get('free_kicks', {})
+                                    free_for = free_kicks.get('for', 0) or 0
+                                    free_against = free_kicks.get('against', 0) or 0
+                                    disposals = kicks + handballs
+                                    fantasy = (kicks * 3) + (handballs * 2) + (marks * 3) + (tackles * 4) + (goals * 6) + (behinds * 1) + (hitouts * 1) + (free_for * 1) + (free_against * -3)
+                                    all_players.append({'name': player_name, 'team': team_name, 'goals': goals, 'disposals': disposals, 'fantasy': fantasy})
+
+                            top_goals = [p for p in sorted(all_players, key=lambda x: x['goals'], reverse=True)[:3] if p['goals'] > 0]
+                            top_disposals = [p for p in sorted(all_players, key=lambda x: x['disposals'], reverse=True)[:3] if p['disposals'] > 0]
+                            top_fantasy = [p for p in sorted(all_players, key=lambda x: x['fantasy'], reverse=True)[:3] if p['fantasy'] > 0]
+
+                            stats = {
+                                'top_goal_kickers': [{'name': p['name'], 'team': p['team'], 'goals': p['goals']} for p in top_goals],
+                                'top_disposals': [{'name': p['name'], 'team': p['team'], 'disposals': p['disposals']} for p in top_disposals],
+                                'top_fantasy': [{'name': p['name'], 'team': p['team'], 'points': p['fantasy']} for p in top_fantasy],
+                            }
+
+                            game.stats_cache = stats
+                            game.stats_cache_updated_at = now
+                            flag_modified(game, 'stats_cache')
+                            refreshed += 1
+
+                        except Exception as e:
+                            logger.warning(f"Failed to prefetch stats for game {game.id}: {e}")
+
+                if refreshed:
+                    logger.info(f"Pre-fetched stats for {refreshed} game(s)")
+
+        except Exception as e:
+            logger.error(f"Error in prefetch_stats job: {e}")
 
 
 # Global singleton

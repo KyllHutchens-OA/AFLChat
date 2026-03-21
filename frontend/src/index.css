@@ -71,3 +71,44 @@
     -moz-osx-font-smoothing: grayscale;
   }
 }
+
+/* Markdown rendering in chat messages */
+.chat-markdown p {
+  margin: 0.25em 0;
+}
+.chat-markdown p:first-child {
+  margin-top: 0;
+}
+.chat-markdown p:last-child {
+  margin-bottom: 0;
+}
+.chat-markdown strong {
+  font-weight: 600;
+}
+.chat-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 0.875rem;
+}
+.chat-markdown th {
+  background: #F5F5F7; /* apple-gray-50 */
+  font-weight: 600;
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 2px solid #D1D1D6; /* apple-gray-300 */
+}
+.chat-markdown td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #E5E5EA; /* apple-gray-200 */
+}
+.chat-markdown tr:last-child td {
+  border-bottom: none;
+}
+.chat-markdown ul, .chat-markdown ol {
+  margin: 0.25em 0;
+  padding-left: 1.25em;
+}
+.chat-markdown li {
+  margin: 0.15em 0;
+}

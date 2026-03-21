@@ -1,12 +1,16 @@
 """
 Database connection and session management.
 """
+import time
+import logging
 from contextlib import contextmanager
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from app.config import get_config
 import os
+
+logger = logging.getLogger(__name__)
 
 config = get_config()
 
@@ -90,3 +94,65 @@ def close_db():
     Close database connections.
     """
     Session.remove()
+
+
+# ── Data Recency Cache ────────────────────────────────────────────────────────
+_data_recency_cache = {"data": None, "timestamp": 0}
+_DATA_RECENCY_TTL = 300  # 5 minutes
+
+
+def get_data_recency():
+    """
+    Query the DB for current data availability info.
+    Returns dict with earliest_season, historical latest, live latest.
+    Cached for 5 minutes.
+    """
+    now = time.time()
+    if _data_recency_cache["data"] and (now - _data_recency_cache["timestamp"]) < _DATA_RECENCY_TTL:
+        return _data_recency_cache["data"]
+
+    result = {
+        "earliest_season": 1990,
+        "historical_latest_season": 2025,
+        "historical_latest_round": "unknown",
+        "live_latest_season": None,
+        "live_latest_round": None,
+        "live_latest_date": None,
+    }
+
+    try:
+        session = Session()
+        try:
+            # Latest historical match
+            row = session.execute(text(
+                "SELECT season, round FROM matches WHERE match_date = (SELECT MAX(match_date) FROM matches) LIMIT 1"
+            )).fetchone()
+            if row:
+                result["historical_latest_season"] = row[0]
+                result["historical_latest_round"] = row[1]
+
+            # Earliest season
+            row = session.execute(text("SELECT MIN(season) FROM matches")).fetchone()
+            if row and row[0]:
+                result["earliest_season"] = row[0]
+
+            # Latest live game
+            row = session.execute(text(
+                "SELECT season, round, match_date FROM live_games "
+                "WHERE status IN ('complete', 'post_match') "
+                "ORDER BY match_date DESC LIMIT 1"
+            )).fetchone()
+            if row:
+                result["live_latest_season"] = row[0]
+                result["live_latest_round"] = row[1]
+                result["live_latest_date"] = str(row[2])[:10] if row[2] else None
+
+        finally:
+            session.close()
+
+    except Exception as e:
+        logger.warning(f"get_data_recency failed, using defaults: {e}")
+
+    _data_recency_cache["data"] = result
+    _data_recency_cache["timestamp"] = now
+    return result

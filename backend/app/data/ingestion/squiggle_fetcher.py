@@ -35,7 +35,7 @@ class SquiggleFetcher:
         try:
             # Fetch tips from Squiggle
             url = f"{cls.BASE_URL}/?q=tips&year={season}"
-            headers = {"User-Agent": "AFL-Analytics-App/1.0"}
+            headers = {"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"}
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             

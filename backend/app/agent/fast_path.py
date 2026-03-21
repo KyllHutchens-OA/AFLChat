@@ -56,12 +56,19 @@ for _variations in _ER.TEAM_NICKNAMES.values():
     for _v in _variations:
         _ALL_TEAM_VARIATIONS.add(_v.lower())
 
-_OFF_TOPIC_RESPONSE = (
-    "I'm an AFL analytics agent — I can only help with Australian Football League "
-    "statistics and data from 1990-2025. Try asking about players, teams, matches, "
-    "or stats! For example: \"How many goals did Hawkins kick in 2024?\" or "
-    "\"Show me Richmond's win-loss record in 2023.\""
-)
+def _get_off_topic_response():
+    """Generate dynamic off-topic response with current data range."""
+    from app.data.database import get_data_recency
+    recency = get_data_recency()
+    earliest = recency["earliest_season"]
+    hist_season = recency["historical_latest_season"]
+    return (
+        f"That doesn't seem to be an AFL question. I can help with Australian Football League "
+        f"statistics and data from {earliest} to {hist_season}, including match results, player stats, "
+        f"team performance, betting odds, and tipping predictions.\n\n"
+        f"Try something like: \"How many goals did Hawkins kick in 2024?\" or "
+        f"\"What are the odds for this week's games?\""
+    )
 
 
 def _is_off_topic(query: str) -> bool:
@@ -739,7 +746,7 @@ class FastPathRouter:
                 "statistical_analysis": {},
                 "execution_error": None,
                 "visualization_spec": None,
-                "natural_language_summary": _OFF_TOPIC_RESPONSE,
+                "natural_language_summary": _get_off_topic_response(),
                 "confidence": 1.0,
                 "sources": [],
                 "current_step": WorkflowStep.RESPOND,
@@ -872,7 +879,7 @@ class FastPathRouter:
                     "visualization_spec": None,
                     "natural_language_summary": response_text,
                     "confidence": 0.95,
-                    "sources": ["AFL Tables (1990-2025)"],
+                    "sources": ["AFL Tables"],
                     "current_step": WorkflowStep.RESPOND,
                     "thinking_message": "Done",
                     "errors": [],
