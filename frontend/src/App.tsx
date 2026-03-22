@@ -2,7 +2,6 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { SpoilerProvider } from './contexts/SpoilerContext';
 import Layout from './components/Layout/Layout';
 import SpoilerModal from './components/Modal/SpoilerModal';
-import AFLChat from './pages/AFLChat';
 import AFLAgent from './pages/AFLAgent';
 import LiveGames from './pages/LiveGames';
 import About from './pages/About';

@@ -118,6 +118,15 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
+        # Job 8: Generate match previews for upcoming games (daily at 7 AM AEST)
+        self.scheduler.add_job(
+            func=self._generate_match_previews,
+            trigger=CronTrigger(hour=7, minute=0, timezone='Australia/Melbourne'),
+            id="generate_match_previews",
+            name="Generate upcoming match previews",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         self.is_running = True
 
@@ -264,6 +273,33 @@ class LiveGameScheduler:
             logger.info(f"Match results job complete: {current_year} season synced from Squiggle")
         except Exception as e:
             logger.error(f"Match results job failed: {e}")
+
+    def _generate_match_previews(self):
+        """Generate AI previews for upcoming matches using weather, news, and odds."""
+        try:
+            import requests
+            from app.services.match_preview_service import generate_previews_for_upcoming
+
+            current_year = datetime.now().year
+            response = requests.get(
+                f"https://api.squiggle.com.au/?q=games;year={current_year}",
+                headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
+                timeout=10,
+            )
+            if response.status_code != 200:
+                logger.warning(f"Squiggle returned {response.status_code} for match previews")
+                return
+
+            games = response.json().get("games", [])
+            upcoming = [g for g in games if g.get("complete", 0) == 0]
+            upcoming.sort(key=lambda g: g.get("date", ""))
+
+            count = generate_previews_for_upcoming(upcoming, days_ahead=5)
+            if count:
+                logger.info(f"Match previews job: generated {count} new preview(s)")
+
+        except Exception as e:
+            logger.error(f"Match previews job failed: {e}")
 
     def _prefetch_stats(self):
         """Pre-fetch and cache player stats for live and recently completed games.

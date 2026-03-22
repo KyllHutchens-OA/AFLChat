@@ -109,7 +109,7 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
 
       {/* Quarter Summaries - shown when available */}
       {!hideScores && hasQuarterSummaries && (
-        <QuarterSummaries quarterSummaries={game.quarter_summaries!} />
+        <QuarterSummaries quarterSummaries={game.quarter_summaries!} quarterScores={game.quarter_scores} />
       )}
 
       {/* AI Summary for completed games - hidden when spoiler mode is on */}
@@ -121,6 +121,22 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
           <p className="text-apple-gray-700 leading-relaxed">
             {game.ai_summary}
           </p>
+        </div>
+      )}
+
+      {/* Post-game stats analysis - hidden when spoiler mode is on */}
+      {!hideScores && game.status === 'completed' && game.post_game_analysis && (
+        <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
+          <h3 className="text-xl font-semibold text-apple-gray-900 mb-3">
+            Match Stats Analysis
+          </h3>
+          <div className="space-y-3">
+            {game.post_game_analysis.split('\n\n').map((paragraph, i) => (
+              <p key={i} className="text-apple-gray-700 leading-relaxed">
+                {paragraph}
+              </p>
+            ))}
+          </div>
         </div>
       )}
 

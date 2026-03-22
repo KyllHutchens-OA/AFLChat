@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
 type TimeRange = 24 | 168 | 720;
 

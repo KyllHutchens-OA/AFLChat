@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple, Set
 from sqlalchemy.orm import Session
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from app.data.database import get_session
 from app.data.models import LiveGame, LiveGameEvent, Team, Match, QuarterSnapshot
 
@@ -100,6 +102,16 @@ class LiveGameService:
 
             # If game completed, migrate to Match table and generate AI summary
             if live_game.status == "completed" and not live_game.match_id:
+                # Generate Q4 summary if missing (quarter transition only catches Q1-Q3)
+                q4_missing = not live_game.quarter_summaries or "4" not in (live_game.quarter_summaries or {})
+                if q4_missing:
+                    live_game.home_q4_score = live_game.home_score
+                    live_game.away_q4_score = live_game.away_score
+                    LiveGameService._snapshot_quarter_stats(
+                        session, live_game, 4,
+                        home_team_abbr, away_team_abbr, socketio
+                    )
+
                 LiveGameService._migrate_to_match(session, live_game)
 
                 # Generate AI summary if not already done
@@ -107,6 +119,40 @@ class LiveGameService:
                     LiveGameService._generate_ai_summary(session, live_game)
 
                 session.commit()
+
+                # Launch post-game stats analysis in background (delayed)
+                if not live_game.post_game_analysis:
+                    game_id = live_game.id
+                    home_name = live_game.home_team.name
+                    away_name = live_game.away_team.name
+
+                    def _run_post_game_analysis():
+                        try:
+                            # Wait for Footywire to publish stats
+                            time.sleep(120)
+                            from app.services.game_summary_service import game_summary_service
+                            analysis = game_summary_service.generate_post_game_analysis(
+                                home_team=home_name,
+                                away_team=away_name,
+                            )
+                            if analysis:
+                                from app.data.database import get_session as get_db_session
+                                with get_db_session() as s:
+                                    lg = s.query(LiveGame).filter_by(id=game_id).first()
+                                    if lg:
+                                        lg.post_game_analysis = analysis
+                                if socketio:
+                                    socketio.emit(
+                                        "post_game_analysis",
+                                        {"game_id": game_id, "analysis": analysis},
+                                        namespace="/",
+                                    )
+                                    logger.info(f"Emitted post_game_analysis for game {game_id}")
+                        except Exception as e:
+                            logger.error(f"Error generating post-game analysis for game {game_id}: {e}")
+
+                    thread = threading.Thread(target=_run_post_game_analysis, daemon=True)
+                    thread.start()
 
     @staticmethod
     def _get_or_create_game(session: Session, game_data: Dict) -> Optional[LiveGame]:
@@ -872,9 +918,10 @@ class LiveGameService:
 
                             lg = s.query(LiveGame).filter_by(id=game_id).first()
                             if lg:
-                                summaries = lg.quarter_summaries or {}
+                                summaries = dict(lg.quarter_summaries or {})
                                 summaries[str(quarter)] = summary
                                 lg.quarter_summaries = summaries
+                                flag_modified(lg, 'quarter_summaries')
 
                         # Emit WebSocket event
                         if socketio:
