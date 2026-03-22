@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+
 interface UpcomingMatch {
   id: number;
   round: string | number;
@@ -26,7 +28,7 @@ export const useUpcomingMatches = (): UseUpcomingMatchesResult => {
   useEffect(() => {
     const fetchUpcoming = async () => {
       try {
-        const response = await fetch('/api/upcoming-matches');
+        const response = await fetch(`${BACKEND_URL}/api/upcoming-matches`);
 
         if (!response.ok) {
           throw new Error('Failed to fetch upcoming matches');

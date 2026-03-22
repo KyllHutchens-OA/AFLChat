@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
 interface FeedbackButtonProps {
   conversationId: string | null;
