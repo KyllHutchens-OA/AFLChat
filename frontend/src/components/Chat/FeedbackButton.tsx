@@ -79,7 +79,7 @@ const FeedbackButton: React.FC<FeedbackButtonProps> = ({ conversationId, message
         <div className="flex items-center justify-between px-5 py-4 border-b border-apple-gray-100">
           <div>
             <h2 className="text-base font-semibold text-apple-gray-900">Report an issue</h2>
-            <p className="text-xs text-apple-gray-400 mt-0.5">Help us improve AFL.NAC</p>
+            <p className="text-xs text-apple-gray-400 mt-0.5">Help us improve Footy.NAC</p>
           </div>
           <button
             onClick={handleClose}
@@ -170,7 +170,7 @@ const FeedbackButton: React.FC<FeedbackButtonProps> = ({ conversationId, message
     <>
       <div className="mt-3 text-center">
         <p className="text-xs text-apple-gray-500 mb-1">
-          AFL.NAC is still learning. If this response seems off, wrong, or just plain weird, let us know and we'll work to fix it!
+          Footy.NAC is still learning. If this response seems off, wrong, or just plain weird, let us know and we'll work to fix it!
         </p>
         <button
           onClick={() => setOpen(true)}

@@ -31,7 +31,7 @@ const NavBar = () => {
           {/* Logo/Brand */}
           <Link to="/" className="flex items-center gap-2">
             <span className="text-xl font-semibold text-apple-gray-900">
-              AFL-NAC
+              Footy-NAC
             </span>
             <span className="hidden sm:inline text-sm text-apple-gray-500">
               Not Another Commentator
