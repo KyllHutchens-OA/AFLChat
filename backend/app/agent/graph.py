@@ -1226,6 +1226,11 @@ class AFLAnalyticsAgent:
                 return "I couldn't find betting odds for those matches. Odds may not be available yet."
             if intent == QueryIntent.TIPPING_ADVICE:
                 return "I don't have predictions available for those matches yet."
+            # Check if user asked about remaining/upcoming games
+            query_lower = state.get("user_query", "").lower()
+            remaining_keywords = ["left", "remaining", "upcoming", "scheduled", "still to play", "yet to play"]
+            if any(kw in query_lower for kw in remaining_keywords):
+                return "All games this round have been completed — no remaining games to play."
             return None
 
         # Complex in-depth queries without charts still use LLM

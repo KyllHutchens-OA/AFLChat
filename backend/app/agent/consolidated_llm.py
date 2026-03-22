@@ -114,7 +114,11 @@ Use EXACT team names: Adelaide (NOT "Adelaide Crows"), Geelong (NOT "Geelong Cat
 
 ### live_games: id, season, round, match_date (TIMESTAMP), home_team_id, away_team_id, home_score, away_score, home_goals, home_behinds, away_goals, away_behinds, venue, status, current_quarter
 - Contains live/recent games (2026+) with real-time scores
-- CRITICAL: For queries about recent games (last night, yesterday, today, this week) in 2026, query live_games NOT matches
+- status values: 'scheduled' (not started), 'playing' (in progress), 'completed', 'post_match'
+- CRITICAL: For queries about recent games (last night, yesterday, today, this week, this round, current round) in 2026, query live_games NOT matches
+- "this round" / "current round" → WHERE lg.round = '{current_round_hint_round}' AND lg.season = {current_round_hint_season}
+- "games left" / "remaining" / "upcoming" / "scheduled" → add WHERE lg.status NOT IN ('completed', 'post_match')
+- "results so far" / "scores" → add WHERE lg.status IN ('completed', 'post_match')
 - Use same JOIN pattern as matches: JOIN teams t_home ON lg.home_team_id = t_home.id
 
 ### players: id, name, team_id (CURRENT team only — WARNING: wrong for traded players), position, height, weight, debut_year
@@ -176,6 +180,16 @@ Common patterns:
   For historical dates (pre-2026), use matches table (replace lg with m, live_games with matches)
 
 - "Who played" queries: Same pattern - use live_games for 2026+, matches for historical
+- Current round results ("results this round", "scores so far"):
+  SELECT t_home.name as home_team, t_away.name as away_team, lg.home_score, lg.away_score,
+    CASE WHEN lg.home_score > lg.away_score THEN t_home.name WHEN lg.away_score > lg.home_score THEN t_away.name ELSE 'Draw' END as winner,
+    ABS(lg.home_score - lg.away_score) as margin, lg.venue
+  FROM live_games lg JOIN teams t_home ON lg.home_team_id = t_home.id JOIN teams t_away ON lg.away_team_id = t_away.id
+  WHERE lg.round = '{current_round_hint_round}' AND lg.season = {current_round_hint_season} AND lg.status IN ('completed', 'post_match')
+- Games remaining ("what games are left", "upcoming games"):
+  SELECT t_home.name as home_team, t_away.name as away_team, lg.match_date, lg.venue, lg.round
+  FROM live_games lg JOIN teams t_home ON lg.home_team_id = t_home.id JOIN teams t_away ON lg.away_team_id = t_away.id
+  WHERE lg.round = '{current_round_hint_round}' AND lg.season = {current_round_hint_season} AND lg.status NOT IN ('completed', 'post_match')
   Example for "Who played last night?":
   SELECT t_home.name as home_team, t_away.name as away_team, lg.home_score, lg.away_score, CASE WHEN lg.home_score > lg.away_score THEN t_home.name WHEN lg.away_score > lg.home_score THEN t_away.name ELSE 'Draw' END as winner, ABS(lg.home_score - lg.away_score) as margin, lg.round, lg.venue FROM live_games lg JOIN teams t_home ON lg.home_team_id = t_home.id JOIN teams t_away ON lg.away_team_id = t_away.id WHERE DATE(lg.match_date) = '2026-03-13' ORDER BY lg.id
 - HOME/AWAY game queries (CRITICAL - don't confuse these!):
@@ -311,8 +325,12 @@ class ConsolidatedQueryUnderstanding:
 
             if live_season and live_round:
                 current_round_hint = f"Round {live_round} of {live_season}"
+                current_round_hint_round = str(live_round)
+                current_round_hint_season = str(live_season)
             else:
                 current_round_hint = f"Round {hist_round} of {hist_season}"
+                current_round_hint_round = str(hist_round)
+                current_round_hint_season = str(hist_season)
 
             data_range = f"{earliest}-{hist_season}"
 
@@ -320,6 +338,8 @@ class ConsolidatedQueryUnderstanding:
                 user_query=user_query,
                 conversation_context=conv_ctx,
                 current_round_hint=current_round_hint,
+                current_round_hint_round=current_round_hint_round,
+                current_round_hint_season=current_round_hint_season,
                 data_range=data_range,
             )
 
