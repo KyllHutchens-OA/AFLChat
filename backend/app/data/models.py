@@ -421,6 +421,9 @@ class LiveGame(Base):
     # Quarter summaries JSONB: {"1": "summary...", "2": "summary..."}
     quarter_summaries = Column(JSONB, nullable=True, default=dict)
 
+    # Post-game stats analysis (generated via web search after game completes)
+    post_game_analysis = Column(Text, nullable=True)
+
     # Cached player stats (updated by background scheduler)
     stats_cache = Column(JSONB, nullable=True)
     stats_cache_updated_at = Column(DateTime, nullable=True)

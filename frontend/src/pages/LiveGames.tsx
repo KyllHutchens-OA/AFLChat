@@ -13,6 +13,20 @@ const LiveGames = () => {
   // Subscribe to spoiler mode to ensure re-renders when it changes
   useSpoilerMode();
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
+  const [selectedUpcomingId, setSelectedUpcomingId] = useState<number | null>(null);
+
+  // When selecting an upcoming match, deselect live/completed and vice versa
+  const handleSelectGame = (gameId: number) => {
+    setSelectedGameId(gameId);
+    setSelectedUpcomingId(null);
+  };
+
+  const handleSelectUpcoming = (matchId: number) => {
+    setSelectedUpcomingId(matchId);
+    setSelectedGameId(null);
+  };
+
+  const selectedUpcoming = upcomingMatches.find(m => m.id === selectedUpcomingId) || null;
 
   // Count of live games for badge
   const liveCount = games.filter(g => g.status === 'live').length;
@@ -36,13 +50,13 @@ const LiveGames = () => {
 
   // Auto-select first live game, or first available game
   useEffect(() => {
-    if (games.length > 0 && selectedGameId === null) {
+    if (games.length > 0 && selectedGameId === null && selectedUpcomingId === null) {
       // Prioritize live games
       const liveGame = games.find(g => g.status === 'live');
       const gameToSelect = liveGame || games[0];
       setSelectedGameId(gameToSelect.id);
     }
-  }, [games, selectedGameId]);
+  }, [games, selectedGameId, selectedUpcomingId]);
 
   // Auto-switch to next live game when current game completes (only if live games exist)
   useEffect(() => {
@@ -140,6 +154,12 @@ const LiveGames = () => {
                 </p>
               </div>
 
+              {nextMatch.preview && (
+                <p className="text-sm text-apple-gray-600 italic text-center mt-2 px-4 leading-relaxed">
+                  {nextMatch.preview}
+                </p>
+              )}
+
               <div className="border-t border-apple-gray-200 pt-6">
                 <Countdown targetDate={nextMatch.date} />
               </div>
@@ -174,31 +194,38 @@ const LiveGames = () => {
                 {upcomingMatches.slice(1, 6).map((match) => (
                   <div
                     key={match.id}
-                    className="flex items-center justify-between p-4 bg-apple-gray-50 rounded-apple hover:bg-apple-gray-100 transition-colors"
+                    className="p-4 bg-apple-gray-50 rounded-apple hover:bg-apple-gray-100 transition-colors"
                   >
-                    <div className="flex-1">
-                      <div className="font-medium text-apple-gray-900">
-                        {match.home_team} vs {match.away_team}
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="font-medium text-apple-gray-900">
+                          {match.home_team} vs {match.away_team}
+                        </div>
+                        <div className="text-sm text-apple-gray-500 mt-1">
+                          Round {match.round} • {match.venue}
+                        </div>
                       </div>
-                      <div className="text-sm text-apple-gray-500 mt-1">
-                        Round {match.round} • {match.venue}
+                      <div className="text-right ml-4">
+                        <div className="text-sm font-medium text-apple-gray-700">
+                          {new Date(match.date).toLocaleDateString('en-AU', {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </div>
+                        <div className="text-sm text-apple-gray-500">
+                          {new Date(match.date).toLocaleTimeString('en-AU', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })} AEDT
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right ml-4">
-                      <div className="text-sm font-medium text-apple-gray-700">
-                        {new Date(match.date).toLocaleDateString('en-AU', {
-                          weekday: 'short',
-                          month: 'short',
-                          day: 'numeric',
-                        })}
-                      </div>
-                      <div className="text-sm text-apple-gray-500">
-                        {new Date(match.date).toLocaleTimeString('en-AU', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })} AEDT
-                      </div>
-                    </div>
+                    {match.preview && (
+                      <p className="text-sm text-apple-gray-600 italic mt-2 leading-relaxed">
+                        {match.preview}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -221,14 +248,68 @@ const LiveGames = () => {
             <GameSidebar
               games={games}
               selectedGameId={selectedGameId}
-              onSelectGame={setSelectedGameId}
+              onSelectGame={handleSelectGame}
               upcomingMatches={upcomingMatches}
+              selectedUpcomingId={selectedUpcomingId}
+              onSelectUpcoming={handleSelectUpcoming}
             />
           </div>
 
           {/* Main Dashboard */}
           <div className="flex-1 min-w-0">
             {selectedGameId && <LiveDashboard gameId={selectedGameId} />}
+            {selectedUpcoming && (
+              <div className="space-y-6">
+                {/* Match header */}
+                <div className="glass rounded-apple-xl p-8 shadow-apple-lg">
+                  <div className="text-center mb-6">
+                    <p className="text-sm font-medium text-apple-gray-500 uppercase tracking-wide">
+                      Round {selectedUpcoming.round} • {selectedUpcoming.venue}
+                    </p>
+                  </div>
+                  <div className="text-center mb-6">
+                    <p className="text-2xl font-semibold text-apple-gray-900">
+                      {selectedUpcoming.home_team} vs {selectedUpcoming.away_team}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-medium text-apple-gray-700">
+                      {new Date(selectedUpcoming.date).toLocaleString('en-AU', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </p>
+                    <Countdown targetDate={selectedUpcoming.date} />
+                  </div>
+                </div>
+
+                {/* Preview */}
+                {selectedUpcoming.preview ? (
+                  <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
+                    <h3 className="text-xl font-semibold text-apple-gray-900 mb-3">
+                      Match Preview
+                    </h3>
+                    <p className="text-apple-gray-700 leading-relaxed">
+                      {selectedUpcoming.preview}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="glass rounded-apple-xl p-6 shadow-apple-lg text-center">
+                    <p className="text-apple-gray-500">
+                      Match preview will be available closer to game time
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+            {!selectedGameId && !selectedUpcoming && (
+              <div className="card-apple p-8 text-center">
+                <p className="text-apple-gray-500">Select a game to view details</p>
+              </div>
+            )}
           </div>
         </div>
       </div>

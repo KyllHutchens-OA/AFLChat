@@ -38,6 +38,7 @@ interface UpcomingMatch {
   away_team: string;
   venue: string;
   date: string;
+  preview?: string | null;
 }
 
 interface GameSidebarProps {
@@ -45,9 +46,11 @@ interface GameSidebarProps {
   selectedGameId: number | null;
   onSelectGame: (gameId: number) => void;
   upcomingMatches?: UpcomingMatch[];
+  selectedUpcomingId?: number | null;
+  onSelectUpcoming?: (matchId: number) => void;
 }
 
-const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSelectGame, upcomingMatches = [] }) => {
+const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSelectGame, upcomingMatches = [], selectedUpcomingId, onSelectUpcoming }) => {
   const { hideScores } = useSpoilerMode();
   const liveGames = games.filter(g => g.status === 'live');
   const completedGames = games.filter(g => g.status === 'completed');
@@ -132,10 +135,19 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
         <div className="space-y-2">
           {filteredUpcoming.map(match => {
             const { day, time } = formatMatchTime(match.date);
+            const isSelected = selectedUpcomingId === match.id;
             return (
-              <div
+              <button
                 key={match.id}
-                className="w-full text-left rounded-apple p-3 bg-apple-gray-50 border-l-4 border-l-apple-gray-200 opacity-70"
+                onClick={() => onSelectUpcoming?.(match.id)}
+                className={`
+                  w-full text-left rounded-apple p-3 border-l-4 transition-all duration-200 ease-apple
+                  ${isSelected
+                    ? 'bg-apple-blue-50 border-l-apple-blue-500 shadow-apple opacity-100'
+                    : 'bg-apple-gray-50 border-l-apple-gray-200 opacity-70 hover:opacity-100 hover:bg-apple-gray-100'
+                  }
+                  active:scale-[0.98]
+                `}
               >
                 {/* Home team */}
                 <div className="flex items-center justify-between mb-1">
@@ -149,11 +161,18 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
                     {match.away_team}
                   </span>
                 </div>
-                {/* Time */}
-                <div className="text-xs text-apple-gray-400">
-                  {day} • {time}
+                {/* Time + preview badge */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-apple-gray-400">
+                    {day} • {time}
+                  </span>
+                  {match.preview && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-apple-blue-50 text-[10px] font-semibold text-apple-blue-600 leading-none">
+                      Preview
+                    </span>
+                  )}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -219,19 +238,37 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
             {/* Then upcoming */}
             {filteredUpcoming.map(match => {
               const { day, time } = formatMatchTime(match.date);
+              const isSelected = selectedUpcomingId === match.id;
               return (
                 <div key={match.id} className="w-36 flex-shrink-0">
-                  <div className="rounded-apple p-3 bg-apple-gray-50 border-l-4 border-l-apple-gray-200 opacity-70 h-full">
+                  <button
+                    onClick={() => onSelectUpcoming?.(match.id)}
+                    className={`
+                      w-full text-left rounded-apple p-3 border-l-4 h-full transition-all duration-200 ease-apple
+                      ${isSelected
+                        ? 'bg-apple-blue-50 border-l-apple-blue-500 shadow-apple opacity-100'
+                        : 'bg-apple-gray-50 border-l-apple-gray-200 opacity-70'
+                      }
+                      active:scale-[0.98]
+                    `}
+                  >
                     <div className="text-sm font-semibold text-apple-gray-700 truncate mb-1">
                       {match.home_team}
                     </div>
                     <div className="text-sm font-semibold text-apple-gray-700 truncate mb-1.5">
                       {match.away_team}
                     </div>
-                    <div className="text-xs text-apple-gray-400">
-                      {day} • {time}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-apple-gray-400">
+                        {day} • {time}
+                      </span>
+                      {match.preview && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-apple-blue-50 text-[10px] font-semibold text-apple-blue-600 leading-none">
+                          Preview
+                        </span>
+                      )}
                     </div>
-                  </div>
+                  </button>
                 </div>
               );
             })}

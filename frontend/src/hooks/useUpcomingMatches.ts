@@ -11,6 +11,7 @@ interface UpcomingMatch {
   date: string;
   complete: number;
   is_final: boolean;
+  preview?: string | null;
 }
 
 interface UseUpcomingMatchesResult {

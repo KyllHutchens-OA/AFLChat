@@ -315,6 +315,8 @@ def get_live_game_detail(game_id):
             'events': events_data,
             # AI summary (only for completed games)
             'ai_summary': game.ai_summary if game.status == 'completed' else None,
+            # Post-game stats analysis (only for completed games)
+            'post_game_analysis': game.post_game_analysis if game.status == 'completed' else None,
             # Quarter summaries
             'quarter_summaries': game.quarter_summaries or {},
             # Quarter scores
@@ -401,6 +403,33 @@ def get_upcoming_matches():
 
         # Limit to next 10 games
         upcoming = upcoming[:10]
+
+        # Attach cached previews, seed cache in background if empty
+        from app.services.match_preview_service import get_cached_preview, generate_previews_for_upcoming, _preview_cache
+        any_miss = False
+        for match in upcoming:
+            preview = get_cached_preview(match['id'])
+            match['preview'] = preview
+            if not preview:
+                any_miss = True
+
+        # If any upcoming games within 5 days lack previews, generate in background
+        if any_miss:
+            import threading
+            from app.services.match_preview_service import _is_within_days
+            games_to_generate = [
+                {'id': m['id'], 'hteam': m['home_team'], 'ateam': m['away_team'],
+                 'venue': m['venue'], 'date': m['date'], 'round': m['round']}
+                for m in upcoming
+                if not get_cached_preview(m['id']) and _is_within_days(m['date'], 5)
+            ]
+            if games_to_generate:
+                def _bg_generate():
+                    try:
+                        generate_previews_for_upcoming(games_to_generate, days_ahead=5)
+                    except Exception as e:
+                        logger.debug(f"Background preview generation: {e}")
+                threading.Thread(target=_bg_generate, daemon=True).start()
 
         return jsonify({'matches': upcoming}), 200
 

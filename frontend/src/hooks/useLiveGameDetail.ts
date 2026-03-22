@@ -64,6 +64,7 @@ interface LiveGameDetail {
   last_updated: string;
   events: GameEvent[];
   ai_summary?: string | null;
+  post_game_analysis?: string | null;
   quarter_scores?: QuarterScores;
   quarter_summaries?: Record<string, string>;
 }
@@ -77,6 +78,7 @@ export const useLiveGameDetail = (gameId: number) => {
   // Fetch game data (initial and periodic refresh for non-completed games)
   useEffect(() => {
     let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let delayedRefetchTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const fetchGame = async () => {
       try {
@@ -91,6 +93,12 @@ export const useLiveGameDetail = (gameId: number) => {
         if (data.status === 'completed' && pollInterval) {
           clearInterval(pollInterval);
           pollInterval = null;
+
+          // Schedule a delayed re-fetch to pick up post-game analysis
+          // (generated ~2 min after completion in a background thread)
+          if (!data.post_game_analysis && !delayedRefetchTimeout) {
+            delayedRefetchTimeout = setTimeout(fetchGame, 3 * 60 * 1000);
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -106,6 +114,7 @@ export const useLiveGameDetail = (gameId: number) => {
 
     return () => {
       if (pollInterval) clearInterval(pollInterval);
+      if (delayedRefetchTimeout) clearTimeout(delayedRefetchTimeout);
     };
   }, [gameId]);
 
@@ -199,6 +208,16 @@ export const useLiveGameDetail = (gameId: number) => {
           const summaries = { ...(prev.quarter_summaries || {}) };
           summaries[String(data.quarter)] = data.summary;
           return { ...prev, quarter_summaries: summaries };
+        });
+      }
+    });
+
+    // Listen for post-game stats analysis
+    newSocket.on('post_game_analysis', (data) => {
+      if (data.game_id === gameId) {
+        setGame((prev) => {
+          if (!prev) return prev;
+          return { ...prev, post_game_analysis: data.analysis };
         });
       }
     });

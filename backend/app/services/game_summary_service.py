@@ -335,5 +335,63 @@ Keep it brief and engaging."""
             return None
 
 
+    @staticmethod
+    def generate_post_game_analysis(home_team: str, away_team: str) -> Optional[str]:
+        """
+        Generate a post-game stats analysis using web search to find Footywire stats.
+
+        Args:
+            home_team: Home team full name
+            away_team: Away team full name
+
+        Returns:
+            Two-paragraph analysis string, or None if generation fails
+        """
+        try:
+            home_nick = GameSummaryService.get_nickname(home_team)
+            away_nick = GameSummaryService.get_nickname(away_team)
+
+            prompt = (
+                f"Find the Footywire match stats for the recent AFL game between "
+                f"{home_team} ({home_nick}) and {away_team} ({away_nick}). "
+                f"Write exactly 2 paragraphs:\n\n"
+                f"Paragraph 1: Team stats analysis — compare disposals, contested possessions, "
+                f"inside 50s, clearances, and tackle counts between the two teams. "
+                f"Identify which team dominated the key stat categories and how that translated to the result.\n\n"
+                f"Paragraph 2: Individual highlights — name the top 3-4 performers from the game "
+                f"with specific stats (e.g. '32 disposals', '3 goals'). Use last names naturally. "
+                f"Highlight any standout individual performances.\n\n"
+                f"Be casual and engaging. Use team nicknames ({home_nick}, {away_nick}). "
+                f"Do NOT include any headings or labels — just two plain paragraphs."
+            )
+
+            response = client.responses.create(
+                model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
+                tools=[{"type": "web_search_preview", "search_context_size": "medium"}],
+                input=prompt,
+                max_output_tokens=500,
+                temperature=0.7,
+            )
+
+            # Extract text from response output blocks
+            analysis_parts = []
+            for block in response.output:
+                if hasattr(block, 'text'):
+                    analysis_parts.append(block.text)
+
+            analysis = "\n\n".join(analysis_parts).strip()
+
+            if analysis:
+                logger.info(f"Generated post-game analysis for {home_nick} vs {away_nick}: {analysis[:60]}...")
+                return analysis
+
+            logger.warning(f"Empty post-game analysis for {home_nick} vs {away_nick}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to generate post-game analysis for {home_team} vs {away_team}: {e}")
+            return None
+
+
 # Singleton instance
 game_summary_service = GameSummaryService()
