@@ -27,8 +27,7 @@ const SpoilerModal = () => {
             Spoiler Preferences
           </h2>
           <p className="text-apple-gray-300">
-            Would you like to hide live scores and results?
-            You can change this anytime using the eye icon in the navigation.
+            This app shows live and previously played game scores, would you like to hide spoilers?
           </p>
         </div>
 
@@ -36,15 +35,15 @@ const SpoilerModal = () => {
         <div className="space-y-3">
           <button
             onClick={() => handleChoice(true)}
-            className="w-full py-3 px-6 bg-apple-blue-500 text-white rounded-apple font-medium
-                       hover:bg-apple-blue-600 active:scale-[0.98] transition-all duration-200"
+            className="w-full py-3 px-6 bg-white/10 text-white border border-white/20 rounded-apple font-medium
+                       hover:bg-white/20 active:scale-[0.98] transition-all duration-200"
           >
             Hide Scores (No Spoilers)
           </button>
           <button
             onClick={() => handleChoice(false)}
-            className="w-full py-3 px-6 bg-white/10 text-white border border-white/20 rounded-apple font-medium
-                       hover:bg-white/20 active:scale-[0.98] transition-all duration-200"
+            className="w-full py-3 px-6 bg-apple-blue-500 text-white rounded-apple font-medium
+                       hover:bg-apple-blue-600 active:scale-[0.98] transition-all duration-200"
           >
             Show Scores (See Everything)
           </button>
