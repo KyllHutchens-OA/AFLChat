@@ -44,7 +44,7 @@ _AFL_KEYWORDS = re.compile(
     r"stat|stats|statistics|average|total|record|"
     r"top\s?\d+|best|worst|most|least|highest|lowest|compare|comparison|"
     r"trend|over time|year by year|historical|performance|"
-    r"home|away|attendance|venue|stadium|"
+    r"bye|byes|home|away|attendance|venue|stadium|"
     r"news|latest|current|happening|update|updates)\b",
     re.IGNORECASE
 )
@@ -294,6 +294,38 @@ class FastPathRouter:
         ORDER BY m.match_date
     """
 
+    # Bye round queries — find rounds where a team has no match
+    _TEAM_BYE_ROUNDS_SQL = """
+        SELECT DISTINCT m2.round
+        FROM matches m2
+        WHERE m2.season = {year}
+          AND m2.round ~ '^[0-9]+$'
+          AND m2.round NOT IN (
+              SELECT m.round FROM matches m
+              JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id)
+              WHERE m.season = {year} AND t.name = '{team}'
+          )
+        ORDER BY CAST(m2.round AS INTEGER)
+    """
+
+    _ROUND_BYES_SQL = """
+        SELECT t.name AS team
+        FROM teams t
+        WHERE t.id NOT IN (
+            SELECT m.home_team_id FROM matches m
+            WHERE m.season = {year} AND m.round = '{round}'
+            UNION
+            SELECT m.away_team_id FROM matches m
+            WHERE m.season = {year} AND m.round = '{round}'
+        )
+        AND t.id IN (
+            SELECT m.home_team_id FROM matches m WHERE m.season = {year}
+            UNION
+            SELECT m.away_team_id FROM matches m WHERE m.season = {year}
+        )
+        ORDER BY t.name
+    """
+
     _HIGHEST_SCORE_SQL = """
         SELECT ht.name AS home_team, at.name AS away_team,
                m.home_score, m.away_score,
@@ -402,6 +434,24 @@ class FastPathRouter:
             f"{disposals} disposals (avg {avg_disp:.1f}/game), "
             f"{goals} goals, {marks} marks, {tackles} tackles."
         )
+
+    @staticmethod
+    def _fmt_team_bye_rounds(df, year: int, team: str = "", **_) -> str:
+        if df is None or len(df) == 0:
+            return f"{team} did not have any bye rounds in {year}."
+        rounds = [str(row["round"]) for _, row in df.iterrows()]
+        if len(rounds) == 1:
+            return f"{team} had a bye in Round {rounds[0]} in {year}."
+        return f"{team} had byes in Rounds {', '.join(rounds)} in {year}."
+
+    @staticmethod
+    def _fmt_round_byes(df, year: int, round: str = "", **_) -> str:
+        if df is None or len(df) == 0:
+            return f"No teams had a bye in Round {round} of {year}."
+        teams = [str(row["team"]) for _, row in df.iterrows()]
+        if len(teams) == 1:
+            return f"{teams[0]} had the bye in Round {round} of {year}."
+        return f"Teams with a bye in Round {round} of {year}: {', '.join(teams)}."
 
     @staticmethod
     def _fmt_team_ladder(df, year: int, team: str = "", **_) -> str:
@@ -605,6 +655,38 @@ class FastPathRouter:
                 requires_season=True,
             ),
 
+            # Team bye rounds — "when is Geelong's bye in 2025" / "did Carlton have a bye in 2024"
+            QueryPattern(
+                name="team_bye_rounds",
+                regex=re.compile(
+                    r"(?:when\s+(?:is|was|are)|did\s+.+?\s+have|does\s+.+?\s+have|"
+                    r".+?(?:'s|s)\s+bye)"
+                    r".*?\bbye\b"
+                    r".*?(\d{4})"
+                    r"|(\d{4}).*?\bbye\b",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._TEAM_BYE_ROUNDS_SQL,
+                response_formatter=cls._fmt_team_bye_rounds,
+                requires_team=True,
+                requires_season=True,
+            ),
+
+            # Round byes — "which teams have a bye in round 13 2025"
+            QueryPattern(
+                name="round_byes",
+                regex=re.compile(
+                    r"(?:which|what)\s+teams?\s+(?:have|had|has|get|got)\s+(?:a\s+|the\s+)?bye"
+                    r".*?(?:round|r)\s*(\d{1,2})"
+                    r".*?(\d{4})",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._ROUND_BYES_SQL,
+                response_formatter=cls._fmt_round_byes,
+                requires_team=False,
+                requires_season=True,
+            ),
+
             # Highest score — "highest score in 2024" / "biggest win in 2023"
             QueryPattern(
                 name="highest_score",
@@ -793,6 +875,15 @@ class FastPathRouter:
                     logger.debug(f"FAST-PATH: Pattern '{pattern.name}' requires team but none found")
                     continue  # Try next pattern
 
+            # Extract round number for round_byes pattern
+            round_num = None
+            if pattern.name == "round_byes":
+                # Group 1 is round number, group 2 is year
+                round_num = match.group(1)
+                if not round_num:
+                    logger.debug(f"FAST-PATH: round_byes requires round but none found")
+                    continue
+
             # Extract player if needed (for player_season_stats pattern)
             player = None
             if pattern.name == "player_season_stats":
@@ -816,7 +907,8 @@ class FastPathRouter:
             # Build and execute SQL
             try:
                 sql = pattern.sql_template.format(
-                    year=year, team=team or "", player=player or ""
+                    year=year, team=team or "", player=player or "",
+                    round=round_num or ""
                 )
                 sql = " ".join(sql.split())  # Normalise whitespace
 
@@ -834,11 +926,16 @@ class FastPathRouter:
                         set_cached_result(sql, df)
 
                 if df is None or len(df) == 0:
-                    logger.info(f"FAST-PATH: Empty result for '{pattern.name}', falling through")
-                    return None
+                    # Bye queries can legitimately return 0 rows (no byes)
+                    if pattern.name in ("team_bye_rounds", "round_byes"):
+                        import pandas as pd
+                        df = pd.DataFrame()
+                    else:
+                        logger.info(f"FAST-PATH: Empty result for '{pattern.name}', falling through")
+                        return None
 
                 # Format response
-                fmt_kwargs = {"year": year, "team": team, "player": player}
+                fmt_kwargs = {"year": year, "team": team, "player": player, "round": round_num}
                 response_text = pattern.response_formatter(df, **fmt_kwargs)
 
                 if response_text is None:

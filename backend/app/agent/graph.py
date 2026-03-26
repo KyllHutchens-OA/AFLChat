@@ -494,7 +494,7 @@ class AFLAnalyticsAgent:
                 logger.error(f"UNDERSTAND: OpenAI status_code: {e.status_code}")
             if hasattr(e, 'response'):
                 logger.error(f"UNDERSTAND: OpenAI response: {e.response}")
-            state["errors"].append(f"Understanding error: {str(e)}")
+            state["errors"].append(f"Understanding error: {type(e).__name__}")
 
         return state
 
@@ -649,7 +649,7 @@ class AFLAnalyticsAgent:
 
         except Exception as e:
             logger.error(f"Error in PLAN node: {e}")
-            state["errors"].append(f"Planning error: {str(e)}")
+            state["errors"].append(f"Planning error: {type(e).__name__}")
 
         return state
 
@@ -757,7 +757,7 @@ class AFLAnalyticsAgent:
                 logger.error(f"EXECUTE: {error_msg}")
                 state["execution_error"] = error_msg
                 state["errors"].append(error_msg)
-                state["thinking_message"] = f"❌ Error: {error_msg}"
+                state["thinking_message"] = "Couldn't process that query, retrying..."
                 return state
 
             state["sql_query"] = sql_result["sql"]
@@ -794,7 +794,7 @@ class AFLAnalyticsAgent:
                     logger.error(f"{error_msg} | SQL: {state.get('sql_query', 'N/A')}")
                     state["execution_error"] = error_msg
                     state["errors"].append(error_msg)
-                    state["thinking_message"] = f"❌ Query failed: {error_msg}"
+                    state["thinking_message"] = "Couldn't retrieve data, retrying..."
                     return state
 
                 state["sql_validated"] = True
@@ -874,7 +874,7 @@ class AFLAnalyticsAgent:
             error_msg = f"Execution error: {str(e)}"
             state["execution_error"] = error_msg
             state["errors"].append(error_msg)
-            state["thinking_message"] = f"❌ Error: {error_msg}"
+            state["thinking_message"] = "Couldn't process that query, retrying..."
 
         return state
 
@@ -1074,7 +1074,7 @@ class AFLAnalyticsAgent:
         except Exception as e:
             logger.error(f"Error in VISUALIZE node: {e}")
             state["errors"].append(f"Visualization error: {str(e)}")
-            state["thinking_message"] = f"⚠️ Skipping visualization: {str(e)}"
+            state["thinking_message"] = "Skipping chart generation"
 
         return state
 
@@ -1556,9 +1556,9 @@ class AFLAnalyticsAgent:
                 logger.error(f"RESPOND: execution_error detected: {error_detail}")
 
                 state["natural_language_summary"] = (
-                    f"I encountered an issue while analyzing your query.\n\n"
-                    f"**Debug info:** {error_detail}\n\n"
-                    f"Please check your query or try rephrasing."
+                    "I wasn't able to find an answer for that query. "
+                    "Try rephrasing your question, or if you think this data should be available, "
+                    "raise a request using the report button and I'll look into it."
                 )
                 state["confidence"] = 0.0
                 logger.info(f"RESPOND: Returning error response with debug info")
@@ -1586,6 +1586,7 @@ class AFLAnalyticsAgent:
 
                 state["natural_language_summary"] = (
                     f"I couldn't find any data matching your query. {suggestion_text}"
+                    "\n\nIf you think this data should be available, raise a request using the report button and I'll look into it."
                 )
                 state["confidence"] = 0.3
                 return state
@@ -1620,11 +1621,13 @@ class AFLAnalyticsAgent:
                         f"I couldn't find any data for {player_name} in {season}. "
                         f"I have match and player data from {earliest} through Round {hist_round} of {hist_season}. "
                         f"Try a different season or player."
+                        "\n\nIf you think this data should be available, raise a request using the report button and I'll look into it."
                     )
                 else:
                     state["natural_language_summary"] = (
                         "I found matching records but they don't contain any data values. "
                         "Try asking about a different time period or entity."
+                        "\n\nIf you think this data should be available, raise a request using the report button and I'll look into it."
                     )
 
                 state["confidence"] = 0.4
@@ -1820,7 +1823,11 @@ Provide a concise analysis (3-5 sentences):"""
             tb = traceback.format_exc()
             logger.error(f"RESPOND: Exception caught: {type(e).__name__}: {str(e)}")
             logger.error(f"RESPOND: Full traceback:\n{tb}")
-            state["natural_language_summary"] = f"I encountered an issue generating the response. Error: {str(e)}"
+            state["natural_language_summary"] = (
+                "I encountered an issue generating a response for that query. "
+                "Try rephrasing your question, or if you think this data should be available, "
+                "raise a request using the report button and I'll look into it."
+            )
             state["confidence"] = 0.0
             state["errors"].append(f"Response error: {str(e)}")
 

@@ -263,11 +263,12 @@ def handle_chat_message(data):
         logger.error(f"Error processing message: {e}")
         import traceback
         traceback.print_exc()
-        # session_emit might not be defined if error happens early
+        # Send a generic error message — never expose raw exception details to users
+        generic_error = "Something went wrong processing your request. Please try again, or rephrase your question."
         try:
-            session_emit('error', {'message': f'Error: {str(e)}'})
+            session_emit('error', {'message': generic_error})
         except:
-            socketio.emit('error', {'message': f'Error: {str(e)}'}, room=session_id)
+            socketio.emit('error', {'message': generic_error}, room=session_id)
 
 
 # ========== LIVE GAMES WEBSOCKET HANDLERS ==========

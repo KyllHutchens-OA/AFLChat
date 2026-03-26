@@ -11,7 +11,7 @@ const SpoilerContext = createContext<SpoilerContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
   SPOILER_MODE: 'afl-nac-spoiler-mode',
-  HAS_SEEN_MODAL: 'afl-nac-spoiler-modal-seen',
+  HAS_SEEN_MODAL: 'footy-nac-welcome-v2',
 };
 
 export const SpoilerProvider = ({ children }: { children: ReactNode }) => {

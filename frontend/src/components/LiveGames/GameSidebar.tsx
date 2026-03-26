@@ -39,6 +39,12 @@ interface UpcomingMatch {
   venue: string;
   date: string;
   preview?: string | null;
+  prediction?: {
+    winner: string;
+    margin: number | null;
+    home_prob: number | null;
+    away_prob: number | null;
+  } | null;
 }
 
 interface GameSidebarProps {
@@ -121,21 +127,26 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
     );
   };
 
-  // Only show upcoming matches that aren't already in the live/completed list
-  const filteredUpcoming = upcomingMatches.slice(0, 5);
+  // Sort upcoming: games with previews first, then without (preserving date order within each group)
+  const sortedUpcoming = [...upcomingMatches].sort((a, b) => {
+    const aHas = a.preview ? 0 : 1;
+    const bHas = b.preview ? 0 : 1;
+    return aHas - bHas;
+  });
 
-  const UpcomingSection = () => {
-    if (filteredUpcoming.length === 0) return null;
+  const UpcomingList: React.FC<{ matches: UpcomingMatch[]; label: string }> = ({ matches, label }) => {
+    if (matches.length === 0) return null;
 
     return (
       <div className="mt-4">
         <div className="mb-2 px-1">
-          <span className="text-xs font-semibold text-apple-gray-400 uppercase tracking-wide">Upcoming</span>
+          <span className="text-xs font-semibold text-apple-gray-400 uppercase tracking-wide">{label}</span>
         </div>
         <div className="space-y-2">
-          {filteredUpcoming.map(match => {
+          {matches.map(match => {
             const { day, time } = formatMatchTime(match.date);
             const isSelected = selectedUpcomingId === match.id;
+            const hasPreview = !!match.preview;
             return (
               <button
                 key={match.id}
@@ -144,7 +155,9 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
                   w-full text-left rounded-apple p-3 border-l-4 transition-all duration-200 ease-apple
                   ${isSelected
                     ? 'bg-apple-blue-50 border-l-apple-blue-500 shadow-apple opacity-100'
-                    : 'bg-apple-gray-50 border-l-apple-gray-200 opacity-70 hover:opacity-100 hover:bg-apple-gray-100'
+                    : hasPreview
+                      ? 'bg-apple-gray-50 border-l-blue-400 opacity-90 hover:opacity-100 hover:bg-apple-gray-100'
+                      : 'bg-apple-gray-50 border-l-apple-gray-200 opacity-70 hover:opacity-100 hover:bg-apple-gray-100'
                   }
                   active:scale-[0.98]
                 `}
@@ -166,12 +179,18 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
                   <span className="text-xs text-apple-gray-400">
                     {day} • {time}
                   </span>
-                  {match.preview && (
+                  {hasPreview && (
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-apple-blue-50 text-[10px] font-semibold text-apple-blue-600 leading-none">
                       Preview
                     </span>
                   )}
                 </div>
+                {/* Prediction */}
+                {match.prediction && match.prediction.margin != null && (
+                  <div className="mt-1.5 text-[11px] text-apple-gray-500">
+                    Squiggle tips {match.prediction.winner} by {Math.round(match.prediction.margin)}
+                  </div>
+                )}
               </button>
             );
           })}
@@ -179,6 +198,55 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
       </div>
     );
   };
+
+  const MobileUpcomingTiles: React.FC<{ matches: UpcomingMatch[] }> = ({ matches }) => (
+    <>
+      {matches.map(match => {
+        const { day, time } = formatMatchTime(match.date);
+        const isSelected = selectedUpcomingId === match.id;
+        const hasPreview = !!match.preview;
+        return (
+          <div key={match.id} className="w-36 flex-shrink-0">
+            <button
+              onClick={() => onSelectUpcoming?.(match.id)}
+              className={`
+                w-full text-left rounded-apple p-3 border-l-4 h-full transition-all duration-200 ease-apple
+                ${isSelected
+                  ? 'bg-apple-blue-50 border-l-apple-blue-500 shadow-apple opacity-100'
+                  : hasPreview
+                    ? 'bg-apple-gray-50 border-l-blue-400 opacity-90'
+                    : 'bg-apple-gray-50 border-l-apple-gray-200 opacity-70'
+                }
+                active:scale-[0.98]
+              `}
+            >
+              <div className="text-sm font-semibold text-apple-gray-700 truncate mb-1">
+                {match.home_team}
+              </div>
+              <div className="text-sm font-semibold text-apple-gray-700 truncate mb-1.5">
+                {match.away_team}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-apple-gray-400">
+                  {day} • {time}
+                </span>
+                {hasPreview && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-apple-blue-50 text-[10px] font-semibold text-apple-blue-600 leading-none">
+                    Preview
+                  </span>
+                )}
+              </div>
+              {match.prediction && match.prediction.margin != null && (
+                <div className="mt-1.5 text-[11px] text-apple-gray-500 truncate">
+                  Squiggle tips {match.prediction.winner} by {Math.round(match.prediction.margin)}
+                </div>
+              )}
+            </button>
+          </div>
+        );
+      })}
+    </>
+  );
 
   return (
     <>
@@ -200,9 +268,12 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
             </div>
           )}
 
+          {/* Upcoming (preview games sorted first) */}
+          <UpcomingList matches={sortedUpcoming} label="Upcoming" />
+
           {/* Results section */}
           {completedGames.length > 0 && (
-            <div>
+            <div className="mt-4">
               <div className="mb-2 px-1">
                 <span className="text-xs font-semibold text-apple-gray-400 uppercase tracking-wide">Results</span>
               </div>
@@ -213,9 +284,6 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
               </div>
             </div>
           )}
-
-          {/* Upcoming section */}
-          <UpcomingSection />
         </div>
       </div>
 
@@ -229,49 +297,14 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
                 <GameTile game={game} />
               </div>
             ))}
+            {/* Then upcoming (preview games first) */}
+            <MobileUpcomingTiles matches={sortedUpcoming} />
             {/* Then completed */}
             {completedGames.map(game => (
               <div key={game.id} className="w-36 flex-shrink-0">
                 <GameTile game={game} />
               </div>
             ))}
-            {/* Then upcoming */}
-            {filteredUpcoming.map(match => {
-              const { day, time } = formatMatchTime(match.date);
-              const isSelected = selectedUpcomingId === match.id;
-              return (
-                <div key={match.id} className="w-36 flex-shrink-0">
-                  <button
-                    onClick={() => onSelectUpcoming?.(match.id)}
-                    className={`
-                      w-full text-left rounded-apple p-3 border-l-4 h-full transition-all duration-200 ease-apple
-                      ${isSelected
-                        ? 'bg-apple-blue-50 border-l-apple-blue-500 shadow-apple opacity-100'
-                        : 'bg-apple-gray-50 border-l-apple-gray-200 opacity-70'
-                      }
-                      active:scale-[0.98]
-                    `}
-                  >
-                    <div className="text-sm font-semibold text-apple-gray-700 truncate mb-1">
-                      {match.home_team}
-                    </div>
-                    <div className="text-sm font-semibold text-apple-gray-700 truncate mb-1.5">
-                      {match.away_team}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-apple-gray-400">
-                        {day} • {time}
-                      </span>
-                      {match.preview && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-apple-blue-50 text-[10px] font-semibold text-apple-blue-600 leading-none">
-                          Preview
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                </div>
-              );
-            })}
           </div>
         </div>
       </div>

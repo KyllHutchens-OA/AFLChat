@@ -154,13 +154,26 @@ const LiveGames = () => {
                 </p>
               </div>
 
+              {nextMatch.prediction && nextMatch.prediction.margin != null && (
+                <div className="text-center mb-4">
+                  <span className="inline-flex items-center gap-2 px-4 py-2 bg-apple-blue-50 rounded-full text-sm font-medium text-apple-blue-700">
+                    Squiggle predicts {nextMatch.prediction.winner} by {Math.round(nextMatch.prediction.margin)} points
+                    {nextMatch.prediction.home_prob != null && nextMatch.prediction.away_prob != null && (
+                      <span className="text-apple-blue-500">
+                        ({nextMatch.prediction.home_prob}% - {nextMatch.prediction.away_prob}%)
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
+
               {nextMatch.preview && (
-                <p className="text-sm text-apple-gray-600 italic text-center mt-2 px-4 leading-relaxed">
+                <p className="text-apple-gray-600 text-center mt-2 px-4 leading-relaxed">
                   {nextMatch.preview}
                 </p>
               )}
 
-              <div className="border-t border-apple-gray-200 pt-6">
+              <div className="border-t border-apple-gray-200 pt-6 mt-4">
                 <Countdown targetDate={nextMatch.date} />
               </div>
 
@@ -191,7 +204,7 @@ const LiveGames = () => {
                 Upcoming Schedule
               </h3>
               <div className="space-y-3">
-                {upcomingMatches.slice(1, 6).map((match) => (
+                {upcomingMatches.slice(1).map((match) => (
                   <div
                     key={match.id}
                     className="p-4 bg-apple-gray-50 rounded-apple hover:bg-apple-gray-100 transition-colors"
@@ -285,6 +298,28 @@ const LiveGames = () => {
                     <Countdown targetDate={selectedUpcoming.date} />
                   </div>
                 </div>
+
+                {/* Prediction */}
+                {selectedUpcoming.prediction && selectedUpcoming.prediction.margin != null && (
+                  <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-lg font-semibold text-apple-gray-900">
+                          Squiggle Prediction
+                        </h3>
+                        <p className="text-apple-gray-700 mt-1">
+                          {selectedUpcoming.prediction.winner} by {Math.round(selectedUpcoming.prediction.margin)} points
+                        </p>
+                      </div>
+                      {selectedUpcoming.prediction.home_prob != null && selectedUpcoming.prediction.away_prob != null && (
+                        <div className="text-right text-sm text-apple-gray-500">
+                          <div>{selectedUpcoming.home_team}: {selectedUpcoming.prediction.home_prob}%</div>
+                          <div>{selectedUpcoming.away_team}: {selectedUpcoming.prediction.away_prob}%</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Preview */}
                 {selectedUpcoming.preview ? (

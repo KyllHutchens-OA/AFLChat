@@ -97,7 +97,8 @@ Examples of off_topic (truly unrelated to AFL):
   - "today" → current date
   - "yesterday", "last night" → current date - 1 day
   - "this week" → last 7 days from current date
-  - "last round", "this round" → {current_round_hint}
+  - "this round", "current round" → {current_round_hint}
+  - "last round", "previous round" → {last_round_hint}
 - **Metrics**: goals, disposals, marks, tackles, wins, losses, score, etc.
 
 ## SQL Generation Rules
@@ -117,6 +118,10 @@ Use EXACT team names: Adelaide (NOT "Adelaide Crows"), Geelong (NOT "Geelong Cat
 - status values: 'scheduled' (not started), 'playing' (in progress), 'completed', 'post_match'
 - CRITICAL: For queries about recent games (last night, yesterday, today, this week, this round, current round) in 2026, query live_games NOT matches
 - "this round" / "current round" → WHERE lg.round = '{current_round_hint_round}' AND lg.season = {current_round_hint_season}
+- "last round" / "previous round" → Round {last_round_hint_round} of {last_round_hint_season}. This round is fully completed.
+  - For TEAM totals (team goals, team score, who won): use live_games table with lg.round = '{last_round_hint_round}'. live_games has home_goals, away_goals, home_behinds, away_behinds, home_score, away_score.
+  - For PLAYER-LEVEL stats (individual disposals, marks, tackles): use player_stats JOIN matches with m.round = '{last_round_hint_round}'
+  - NEVER estimate goals by dividing scores by 6 — always use actual goal columns (home_goals/away_goals from live_games, or ps.goals from player_stats)
 - "games left" / "remaining" / "upcoming" / "scheduled" → add WHERE lg.status NOT IN ('completed', 'post_match')
 - "results so far" / "scores" → add WHERE lg.status IN ('completed', 'post_match')
 - Use same JOIN pattern as matches: JOIN teams t_home ON lg.home_team_id = t_home.id
@@ -147,6 +152,7 @@ Common patterns:
 - Team season record: JOIN teams t, filter (home_team_id=t.id OR away_team_id=t.id), CASE for wins/losses
 - Player stats: JOIN player_stats ps, players p, matches m ON ps.match_id=m.id
 - Grand Final: WHERE m.round = 'Grand Final' AND m.season = <year>
+- Bye rounds: To find bye rounds for a team, look for numeric rounds where the team has no match but other teams do. A team had a bye in round R if they have no row in matches for that round but other matches exist in that round.
 - Player name matching:
   - Surname only (e.g. "Ashcroft"): p.name ILIKE '%Ashcroft%'
   - Full name given (e.g. "Will Ashcroft"): p.name ILIKE 'Will%Ashcroft%' — include BOTH parts so you don't return other players with the same surname (e.g. Levi Ashcroft, Marcus Ashcroft)
@@ -323,14 +329,28 @@ class ConsolidatedQueryUnderstanding:
             live_season = recency.get("live_latest_season")
             live_round = recency.get("live_latest_round")
 
+            # Determine the most recently completed round and the current/upcoming round
+            # "last round" = most recently completed round
+            # "this round" / "current round" = next round (upcoming or in-progress)
             if live_season and live_round:
-                current_round_hint = f"Round {live_round} of {live_season}"
-                current_round_hint_round = str(live_round)
-                current_round_hint_season = str(live_season)
+                completed_round = int(live_round)
+                completed_season = str(live_season)
             else:
-                current_round_hint = f"Round {hist_round} of {hist_season}"
-                current_round_hint_round = str(hist_round)
-                current_round_hint_season = str(hist_season)
+                try:
+                    completed_round = int(hist_round)
+                except (ValueError, TypeError):
+                    completed_round = 0
+                completed_season = str(hist_season)
+
+            # "this round" is the next one after the last completed round
+            current_round_hint_round = str(completed_round + 1)
+            current_round_hint_season = completed_season
+            current_round_hint = f"Round {current_round_hint_round} of {current_round_hint_season}"
+
+            # "last round" is the most recently completed round
+            last_round_hint_round = str(completed_round)
+            last_round_hint_season = completed_season
+            last_round_hint = f"Round {last_round_hint_round} of {last_round_hint_season}"
 
             data_range = f"{earliest}-{hist_season}"
 
@@ -340,6 +360,9 @@ class ConsolidatedQueryUnderstanding:
                 current_round_hint=current_round_hint,
                 current_round_hint_round=current_round_hint_round,
                 current_round_hint_season=current_round_hint_season,
+                last_round_hint=last_round_hint,
+                last_round_hint_round=last_round_hint_round,
+                last_round_hint_season=last_round_hint_season,
                 data_range=data_range,
             )
 
@@ -383,7 +406,7 @@ class ConsolidatedQueryUnderstanding:
             # Accept both SELECT and WITH (CTE) statements
             sql_upper = sql.upper().strip() if sql else ""
             if not sql or not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
-                raise ValueError(f"LLM returned invalid SQL: {sql[:100]}")
+                raise ValueError("LLM returned invalid SQL")
 
             # Clean up SQL (strip markdown if model added it anyway)
             if "```sql" in sql:
@@ -428,5 +451,5 @@ class ConsolidatedQueryUnderstanding:
                 "entities": {},
                 "requires_visualization": False,
                 "sql": None,
-                "error": str(e),
+                "error": "Failed to process query — try rephrasing your question.",
             }

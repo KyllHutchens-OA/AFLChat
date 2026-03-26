@@ -123,9 +123,11 @@ def get_data_recency():
     try:
         session = Session()
         try:
-            # Latest historical match
+            # Latest historical match (only completed — exclude future fixtures with no scores)
             row = session.execute(text(
-                "SELECT season, round FROM matches WHERE match_date = (SELECT MAX(match_date) FROM matches) LIMIT 1"
+                "SELECT season, round FROM matches "
+                "WHERE (home_score > 0 OR away_score > 0) "
+                "ORDER BY match_date DESC LIMIT 1"
             )).fetchone()
             if row:
                 result["historical_latest_season"] = row[0]
@@ -139,7 +141,7 @@ def get_data_recency():
             # Latest live game
             row = session.execute(text(
                 "SELECT season, round, match_date FROM live_games "
-                "WHERE status IN ('complete', 'post_match') "
+                "WHERE status IN ('complete', 'completed', 'post_match') "
                 "ORDER BY match_date DESC LIMIT 1"
             )).fetchone()
             if row:

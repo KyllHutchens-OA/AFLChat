@@ -110,21 +110,21 @@ class DatabaseTool:
             error_msg = str(e)
             logger.error(f"Database query error ({error_type}): {error_msg}\n{tb}")
 
-            # Check for common database errors
+            # Categorise for logging but return sanitised message to callers
             if "connection" in error_msg.lower() or "connect" in error_msg.lower():
-                error_msg = f"Database connection error: {error_msg}"
+                safe_msg = "Database connection error — please try again in a moment."
             elif "timeout" in error_msg.lower():
-                error_msg = f"Database timeout: {error_msg}"
+                safe_msg = "The query took too long — try a more specific question."
             elif "permission" in error_msg.lower() or "denied" in error_msg.lower():
-                error_msg = f"Database permission denied: {error_msg}"
-            elif "ssl" in error_msg.lower():
-                error_msg = f"Database SSL error: {error_msg}"
+                safe_msg = "Database access error — please try again."
+            elif "syntax" in error_msg.lower() or "parse" in error_msg.lower():
+                safe_msg = "There was a problem with the generated query — try rephrasing your question."
             else:
-                error_msg = f"Database error ({error_type}): {error_msg}"
+                safe_msg = "A database error occurred — try rephrasing your question."
 
             return {
                 "success": False,
-                "error": error_msg,
+                "error": safe_msg,
                 "data": None,
                 "rows_returned": 0
             }
@@ -259,7 +259,7 @@ class StatisticsTool:
             logger.error(f"Statistics computation error: {e}")
             return {
                 "success": False,
-                "error": str(e)
+                "error": "Statistical analysis failed — try a different query."
             }
 
     @staticmethod
@@ -1362,7 +1362,7 @@ class BettingTool:
 
         except Exception as e:
             logger.error(f"Error getting odds: {e}")
-            return {'success': False, 'error': str(e), 'matches': []}
+            return {'success': False, 'error': 'Unable to fetch betting odds at this time.', 'matches': []}
         finally:
             session.close()
 
@@ -1451,6 +1451,6 @@ class TippingTool:
 
         except Exception as e:
             logger.error(f"Error getting tips: {e}")
-            return {'success': False, 'error': str(e), 'predictions': []}
+            return {'success': False, 'error': 'Unable to fetch tipping predictions at this time.', 'predictions': []}
         finally:
             session.close()

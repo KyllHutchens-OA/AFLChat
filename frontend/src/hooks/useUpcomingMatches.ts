@@ -12,6 +12,12 @@ interface UpcomingMatch {
   complete: number;
   is_final: boolean;
   preview?: string | null;
+  prediction?: {
+    winner: string;
+    margin: number | null;
+    home_prob: number | null;
+    away_prob: number | null;
+  } | null;
 }
 
 interface UseUpcomingMatchesResult {

@@ -40,7 +40,7 @@ def health_check():
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
         health['status'] = 'degraded'
-        health['checks']['database'] = {'status': 'error', 'message': str(e)}
+        health['checks']['database'] = {'status': 'error', 'message': 'Database unavailable'}
 
     # OpenAI API key check
     openai_key = os.getenv("OPENAI_API_KEY")
@@ -335,6 +335,55 @@ def get_live_game_detail(game_id):
         return jsonify({'error': 'Failed to fetch game detail'}), 500
 
 
+def _attach_predictions(upcoming: list, season: int):
+    """Attach Squiggle predictions to upcoming matches."""
+    try:
+        from app.data.database import get_session
+        from app.data.models import Match, Team, SquigglePrediction
+        from sqlalchemy import desc
+
+        with get_session() as session:
+            for match in upcoming:
+                match['prediction'] = None
+                home_team = session.query(Team).filter_by(name=match['home_team']).first()
+                away_team = session.query(Team).filter_by(name=match['away_team']).first()
+                if not home_team or not away_team:
+                    continue
+
+                db_match = (
+                    session.query(Match)
+                    .filter(
+                        Match.season == season,
+                        Match.home_team_id == home_team.id,
+                        Match.away_team_id == away_team.id,
+                        Match.round == str(match.get('round', '')),
+                    )
+                    .first()
+                )
+                if not db_match:
+                    continue
+
+                prediction = (
+                    session.query(SquigglePrediction)
+                    .filter(
+                        SquigglePrediction.match_id == db_match.id,
+                        SquigglePrediction.source_model == 'Squiggle',
+                    )
+                    .order_by(desc(SquigglePrediction.prediction_date))
+                    .first()
+                )
+                if prediction and prediction.predicted_winner:
+                    winner = prediction.predicted_winner
+                    match['prediction'] = {
+                        'winner': winner.name,
+                        'margin': float(prediction.predicted_margin) if prediction.predicted_margin else None,
+                        'home_prob': float(prediction.home_win_probability) if prediction.home_win_probability else None,
+                        'away_prob': float(prediction.away_win_probability) if prediction.away_win_probability else None,
+                    }
+    except Exception as e:
+        logger.debug(f"Failed to attach predictions: {e}")
+
+
 @bp.route('/upcoming-matches', methods=['GET'])
 @limiter.exempt  # Exempt from rate limiting (polled frequently)
 def get_upcoming_matches():
@@ -401,35 +450,15 @@ def get_upcoming_matches():
         # Sort by date (earliest first)
         upcoming.sort(key=lambda x: x['date'])
 
-        # Limit to next 10 games
-        upcoming = upcoming[:10]
+        # Attach Squiggle predictions
+        _attach_predictions(upcoming, current_year)
 
-        # Attach cached previews, seed cache in background if empty
-        from app.services.match_preview_service import get_cached_preview, generate_previews_for_upcoming, _preview_cache
-        any_miss = False
+        # Attach previews from DB
+        from app.services.match_preview_service import get_all_previews
+        squiggle_ids = [m['id'] for m in upcoming if m.get('id')]
+        previews = get_all_previews(squiggle_ids)
         for match in upcoming:
-            preview = get_cached_preview(match['id'])
-            match['preview'] = preview
-            if not preview:
-                any_miss = True
-
-        # If any upcoming games within 5 days lack previews, generate in background
-        if any_miss:
-            import threading
-            from app.services.match_preview_service import _is_within_days
-            games_to_generate = [
-                {'id': m['id'], 'hteam': m['home_team'], 'ateam': m['away_team'],
-                 'venue': m['venue'], 'date': m['date'], 'round': m['round']}
-                for m in upcoming
-                if not get_cached_preview(m['id']) and _is_within_days(m['date'], 5)
-            ]
-            if games_to_generate:
-                def _bg_generate():
-                    try:
-                        generate_previews_for_upcoming(games_to_generate, days_ahead=5)
-                    except Exception as e:
-                        logger.debug(f"Background preview generation: {e}")
-                threading.Thread(target=_bg_generate, daemon=True).start()
+            match['preview'] = previews.get(match['id'])
 
         return jsonify({'matches': upcoming}), 200
 
