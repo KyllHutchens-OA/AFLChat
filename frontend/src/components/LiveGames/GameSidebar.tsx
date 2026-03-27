@@ -132,12 +132,17 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
     ?? completedGames[0]?.round
     ?? (upcomingMatches.length > 0 ? String(upcomingMatches[0].round) : null);
 
-  // Split upcoming into current round vs next round (with previews only)
+  // Show only this round's remaining games + next round's games (no further)
   const currentRoundUpcoming = currentRound
     ? upcomingMatches.filter(m => String(m.round) === String(currentRound))
     : [];
-  const nextRoundWithPreviews = currentRound
-    ? upcomingMatches.filter(m => String(m.round) !== String(currentRound) && !!m.preview)
+
+  // Find the next round number (first round after current)
+  const nextRound = currentRound
+    ? upcomingMatches.find(m => String(m.round) !== String(currentRound))?.round
+    : null;
+  const nextRoundUpcoming = nextRound
+    ? upcomingMatches.filter(m => String(m.round) === String(nextRound))
     : [];
 
   const UpcomingList: React.FC<{ matches: UpcomingMatch[]; label: string }> = ({ matches, label }) => {
@@ -274,12 +279,9 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
             </div>
           )}
 
-          {/* Upcoming this round */}
-          <UpcomingList matches={currentRoundUpcoming} label="Upcoming" />
-
           {/* Results this round */}
           {completedGames.length > 0 && (
-            <div className="mt-4">
+            <div className={liveGames.length > 0 ? 'mt-4' : ''}>
               <div className="mb-2 px-1">
                 <span className="text-xs font-semibold text-apple-gray-400 uppercase tracking-wide">Results</span>
               </div>
@@ -291,11 +293,14 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
             </div>
           )}
 
-          {/* Next round (only games with previews) */}
-          {nextRoundWithPreviews.length > 0 && (
+          {/* Upcoming this round */}
+          <UpcomingList matches={currentRoundUpcoming} label="Upcoming" />
+
+          {/* Next round */}
+          {nextRoundUpcoming.length > 0 && (
             <UpcomingList
-              matches={nextRoundWithPreviews}
-              label={`Round ${nextRoundWithPreviews[0].round}`}
+              matches={nextRoundUpcoming}
+              label={`Round ${nextRoundUpcoming[0].round}`}
             />
           )}
         </div>
@@ -311,16 +316,16 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
                 <GameTile game={game} />
               </div>
             ))}
-            {/* Then upcoming this round */}
-            <MobileUpcomingTiles matches={currentRoundUpcoming} />
             {/* Then completed this round */}
             {completedGames.map(game => (
               <div key={game.id} className="w-36 flex-shrink-0">
                 <GameTile game={game} />
               </div>
             ))}
-            {/* Next round (only with previews) */}
-            <MobileUpcomingTiles matches={nextRoundWithPreviews} />
+            {/* Then upcoming this round */}
+            <MobileUpcomingTiles matches={currentRoundUpcoming} />
+            {/* Next round */}
+            <MobileUpcomingTiles matches={nextRoundUpcoming} />
           </div>
         </div>
       </div>

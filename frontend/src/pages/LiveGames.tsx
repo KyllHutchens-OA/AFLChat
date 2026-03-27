@@ -197,11 +197,12 @@ const LiveGames = () => {
             </div>
           )}
 
-          {/* Upcoming schedule — current round + next round with previews */}
+          {/* Upcoming schedule — current round + next round only */}
           {upcomingMatches.length > 1 && (() => {
             const currentRound = upcomingMatches[0]?.round;
+            const nextRound = upcomingMatches.find(m => String(m.round) !== String(currentRound))?.round;
             const relevantMatches = upcomingMatches.slice(1).filter(m =>
-              String(m.round) === String(currentRound) || !!m.preview
+              String(m.round) === String(currentRound) || (nextRound && String(m.round) === String(nextRound))
             );
             if (relevantMatches.length === 0) return null;
             return (
