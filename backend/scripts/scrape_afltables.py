@@ -569,7 +569,10 @@ class AFLTablesUpdater:
             logger.warning(f"Failed to scrape {url}")
             self.stats['errors'] += 1
             return False
+        return self._update_from_data(session, data, season)
 
+    def _update_from_data(self, session, data: dict, season: int) -> bool:
+        """Update database from scraped match data."""
         home_team_id = self._find_team_id(data['home_team'])
         away_team_id = self._find_team_id(data['away_team'])
 
@@ -632,6 +635,16 @@ class AFLTablesUpdater:
             match.away_q4_goals = aq.q4_goals
             match.away_q4_behinds = aq.q4_behinds
 
+        # Update match score and status from quarter scores
+        if home_quarters and away_quarters:
+            hq = home_quarters
+            aq = away_quarters
+            match.home_score = hq.q4_goals * 6 + hq.q4_behinds
+            match.away_score = aq.q4_goals * 6 + aq.q4_behinds
+            if match.match_status != "completed":
+                match.match_status = "completed"
+                logger.info(f"  Marked match as completed ({match.home_score} - {match.away_score})")
+
         self.stats['matches_updated'] += 1
 
         # Update player stats (using potentially swapped data)
@@ -645,8 +658,18 @@ class AFLTablesUpdater:
                 player_id = self._find_player(session, player_data.player_name, team_id)
 
                 if not player_id:
+                    # Create the player if they don't exist
+                    new_player = Player(
+                        name=player_data.player_name,
+                        team_id=team_id,
+                    )
+                    session.add(new_player)
+                    session.flush()
+                    player_id = new_player.id
+                    cache_key = f"{player_data.player_name.lower()}_{team_id}"
+                    self.player_cache[cache_key] = player_id
+                    logger.info(f"  Created player: {player_data.player_name}")
                     self.stats['players_not_found'] += 1
-                    continue
 
                 # Find or create player stat
                 player_stat = session.query(PlayerStat).filter_by(
@@ -663,7 +686,33 @@ class AFLTablesUpdater:
                     )
                     session.add(player_stat)
 
-                # Update fields that are missing/zero from API-Sports
+                # Update basic stats
+                if player_data.kicks is not None:
+                    player_stat.kicks = player_data.kicks
+                if player_data.marks is not None:
+                    player_stat.marks = player_data.marks
+                if player_data.handballs is not None:
+                    player_stat.handballs = player_data.handballs
+                if player_data.disposals is not None:
+                    player_stat.disposals = player_data.disposals
+                if player_data.goals is not None:
+                    player_stat.goals = player_data.goals
+                if player_data.behinds is not None:
+                    player_stat.behinds = player_data.behinds
+                if player_data.hitouts is not None:
+                    player_stat.hitouts = player_data.hitouts
+                if player_data.tackles is not None:
+                    player_stat.tackles = player_data.tackles
+                if player_data.clearances is not None:
+                    player_stat.clearances = player_data.clearances
+                if player_data.free_kicks_for is not None:
+                    player_stat.free_kicks_for = player_data.free_kicks_for
+                if player_data.free_kicks_against is not None:
+                    player_stat.free_kicks_against = player_data.free_kicks_against
+                if player_data.brownlow_votes is not None:
+                    player_stat.brownlow_votes = player_data.brownlow_votes
+
+                # Update advanced stats
                 if player_data.inside_50s is not None:
                     player_stat.inside_50s = player_data.inside_50s
                 if player_data.rebound_50s is not None:
@@ -692,7 +741,13 @@ class AFLTablesUpdater:
         return True
 
     def update_season(self, season: int, rounds: List[int] = None):
-        """Update all matches for a season."""
+        """Update all matches for a season.
+
+        Args:
+            season: The season year
+            rounds: Optional list of AFL Tables round numbers to filter by.
+                    Note: AFL Tables rounds start at 1 (Opening Round = 1).
+        """
         match_urls = self.scraper.get_season_match_urls(season)
 
         if not match_urls:
@@ -704,7 +759,23 @@ class AFLTablesUpdater:
 
             for url in match_urls:
                 try:
-                    self.update_from_url(session, url, season)
+                    if rounds:
+                        # Scrape the match to check its round before processing
+                        data = self.scraper.scrape_match(url)
+                        if not data:
+                            continue
+                        match_round = data.get('round')
+                        try:
+                            if int(match_round) not in rounds:
+                                logger.debug(f"Skipping round {match_round}: {url}")
+                                continue
+                        except (ValueError, TypeError):
+                            logger.debug(f"Skipping non-numeric round '{match_round}': {url}")
+                            continue
+                        # Process with already-scraped data
+                        self._update_from_data(session, data, season)
+                    else:
+                        self.update_from_url(session, url, season)
                 except Exception as e:
                     logger.error(f"Error processing {url}: {e}")
                     self.stats['errors'] += 1
@@ -736,7 +807,7 @@ def main():
     )
     parser.add_argument(
         "--rounds", type=str, default=None,
-        help="Comma-separated list of rounds (not implemented yet)"
+        help="Comma-separated list of AFL Tables round numbers to scrape (e.g. 1,2,3)"
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -750,8 +821,13 @@ def main():
     logger.info(f"Dry run: {args.dry_run}")
     logger.info("=" * 60)
 
+    rounds = None
+    if args.rounds:
+        rounds = [int(r.strip()) for r in args.rounds.split(',')]
+        logger.info(f"Filtering to rounds: {rounds}")
+
     updater = AFLTablesUpdater(dry_run=args.dry_run)
-    updater.update_season(args.season)
+    updater.update_season(args.season, rounds=rounds)
     updater.print_summary()
 
 

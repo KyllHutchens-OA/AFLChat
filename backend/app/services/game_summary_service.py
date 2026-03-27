@@ -247,7 +247,7 @@ Write a casual, engaging 2-3 sentence summary. Don't just list stats - tell the 
                     {"role": "user", "content": prompt}
                 ],
                 temperature=1,
-                max_completion_tokens=200,
+                max_completion_tokens=4096,
             )
 
             summary = response.choices[0].message.content.strip()

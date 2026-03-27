@@ -118,12 +118,12 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
-        # Job 8: Generate match previews for upcoming games (daily at 7 AM AEST)
+        # Job 9: Sync team stats from API-Sports (Tuesday at 6 AM AEST)
         self.scheduler.add_job(
-            func=self._generate_match_previews,
-            trigger=CronTrigger(hour=7, minute=0, timezone='Australia/Melbourne'),
-            id="generate_match_previews",
-            name="Generate upcoming match previews",
+            func=self._sync_round_team_stats,
+            trigger=CronTrigger(day_of_week='tue', hour=6, minute=0, timezone='Australia/Melbourne'),
+            id="sync_round_team_stats",
+            name="Sync team stats from API-Sports",
             replace_existing=True,
         )
 
@@ -274,32 +274,26 @@ class LiveGameScheduler:
         except Exception as e:
             logger.error(f"Match results job failed: {e}")
 
-    def _generate_match_previews(self):
-        """Generate AI previews for upcoming matches using weather, news, and odds."""
+    def _sync_round_team_stats(self):
+        """Tuesday 6 AM AEST: Sync team stats from API-Sports for the most recent completed round."""
         try:
-            import requests
-            from app.services.match_preview_service import generate_previews_for_upcoming
+            import subprocess
+            import sys
 
             current_year = datetime.now().year
-            response = requests.get(
-                f"https://api.squiggle.com.au/?q=games;year={current_year}",
-                headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
-                timeout=10,
+            result = subprocess.run(
+                [sys.executable, "scripts/sync_round_data.py", "--season", str(current_year)],
+                capture_output=True, text=True, timeout=600,
+                cwd=str(__import__('pathlib').Path(__file__).parent.parent.parent)
             )
-            if response.status_code != 200:
-                logger.warning(f"Squiggle returned {response.status_code} for match previews")
-                return
 
-            games = response.json().get("games", [])
-            upcoming = [g for g in games if g.get("complete", 0) == 0]
-            upcoming.sort(key=lambda g: g.get("date", ""))
-
-            count = generate_previews_for_upcoming(upcoming, days_ahead=5)
-            if count:
-                logger.info(f"Match previews job: generated {count} new preview(s)")
+            if result.returncode == 0:
+                logger.info(f"Team stats sync complete for {current_year}")
+            else:
+                logger.error(f"Team stats sync failed: {result.stderr[-500:] if result.stderr else 'no output'}")
 
         except Exception as e:
-            logger.error(f"Match previews job failed: {e}")
+            logger.error(f"Team stats sync job failed: {e}")
 
     def _prefetch_stats(self):
         """Pre-fetch and cache player stats for live and recently completed games.

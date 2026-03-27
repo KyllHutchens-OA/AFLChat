@@ -265,7 +265,45 @@ Supported chart types: `line`, `bar`, `horizontal_bar`, `grouped_bar`, `stacked_
 - `live_game_service.py` — Squiggle SSE polling, scoring events, WebSocket broadcast
 - `game_summary_service.py` — GPT-5-mini narrative summaries per quarter
 - `api_sports_service.py` — live player stats with caching
-- `scheduler.py` — background jobs (odds refresh, news fetch, live game polling)
+- `scheduler.py` — background jobs (odds refresh, news fetch, live game polling, stats ingestion)
+
+---
+
+## Automated Player Stats Pipeline (`data/ingestion/stats_ingester.py`)
+
+Automatically ingests player-level match statistics into the `player_stats` table so the chat agent always has up-to-date data.
+
+**Data source:** AFL Tables (`afltables.com`) — the authoritative source for comprehensive post-game player stats. Provides all 24 stat fields (kicks, marks, contested possessions, inside 50s, clearances, brownlow votes, time on ground, etc.). Typically updates 1–3 days after a round completes.
+
+**Scheduled job:** Daily at **6 AM AEST** (Job 10 in `scheduler.py`).
+
+**How it works:**
+1. Finds completed matches from the last 14 days with no `player_stats` rows (or missing advanced stats)
+2. Fetches the season's match page URLs from `afltables.com/afl/seas/{year}.html`
+3. Scrapes each match page for player stats, quarter scores, and attendance
+4. Matches scraped data to DB matches by season + team IDs + date (handles home/away swaps)
+5. Creates `Player` records for any new players not yet in the database
+6. Inserts/updates `PlayerStat` rows with all available fields and calculates fantasy points
+7. Stops early once all target matches are processed
+
+**Key details:**
+- **Idempotent** — safe to re-run; skips existing stats, only updates empty advanced fields
+- **Round numbering mismatch** — AFL Tables and Squiggle may number rounds differently (e.g. Opening Round). Matching uses team IDs and date, not round numbers
+- **Respectful scraping** — 1.5s delay between requests to `afltables.com`
+- **14-day lookback** — only processes recent matches, not the entire season
+
+**Manual one-off run:**
+```bash
+cd backend
+python3 -c "
+from app.data.ingestion.stats_ingester import ingest_from_afl_tables
+result = ingest_from_afl_tables(season=2026, days_back=30)
+print(result)
+"
+```
+
+**Stats fields populated from AFL Tables:**
+kicks, handballs, disposals, marks, tackles, goals, behinds, hitouts, clearances, inside_50s, rebound_50s, contested_possessions, uncontested_possessions, contested_marks, marks_inside_50, one_percenters, bounces, clangers, free_kicks_for, free_kicks_against, brownlow_votes, goal_assist, time_on_ground_pct, fantasy_points
 
 ---
 
@@ -304,3 +342,5 @@ Active development work:
 5. **Round field is a string** — rounds can be "1"–"24", "Opening Round", "Qualifying Final", etc. (V3 migration)
 6. **LLM model env vars** — always use `OPENAI_MODEL` / `NEWS_ENRICHMENT_MODEL` env vars, never hardcode model strings
 7. **Single gunicorn worker** — WebSocket state is in-process; scaling to multiple workers requires Redis adapter
+8. **AFL Tables round numbering** — AFL Tables and Squiggle may number rounds differently (Opening Round offset). The stats ingester matches by team IDs + date, not round number
+9. **AFL Tables update delay** — player stats appear on afltables.com 1–3 days after a round completes. The 6 AM daily job will pick them up automatically once available

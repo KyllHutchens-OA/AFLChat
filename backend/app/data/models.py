@@ -664,6 +664,34 @@ class UserReport(Base):
         return f"<UserReport {self.id} conv:{self.conversation_id}>"
 
 
+class MatchPreview(Base):
+    """AI-generated match previews for upcoming games."""
+
+    __tablename__ = "match_previews"
+
+    id = Column(Integer, primary_key=True)
+    squiggle_game_id = Column(Integer, nullable=False)
+    match_id = Column(Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=True)
+
+    preview_text = Column(Text, nullable=False)
+    preview_type = Column(String(20), nullable=False)  # 'early' or 'gameday'
+
+    generation_context = Column(JSONB, nullable=True)  # snapshot of inputs used
+    is_validated = Column(Boolean, default=False)
+    validation_notes = Column(Text, nullable=True)
+
+    generated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    model_used = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("squiggle_game_id", "preview_type"),)
+    match = relationship("Match", foreign_keys=[match_id])
+
+    def __repr__(self):
+        return f"<MatchPreview Game:{self.squiggle_game_id} Type:{self.preview_type}>"
+
+
 class APIRequestLog(Base):
     """Log API requests for cost monitoring and rate limiting."""
 

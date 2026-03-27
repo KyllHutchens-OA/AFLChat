@@ -25,7 +25,7 @@ API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
 # This maps API-Sports team IDs to our database team abbreviations
 API_SPORTS_TEAM_MAP = {
     1: "ADE",   # Adelaide Crows
-    2: "BRL",   # Brisbane Lions
+    2: "BRI",   # Brisbane Lions
     3: "CAR",   # Carlton Blues
     4: "COL",   # Collingwood Magpies
     5: "ESS",   # Essendon Bombers
@@ -33,13 +33,13 @@ API_SPORTS_TEAM_MAP = {
     7: "GEE",   # Geelong Cats
     8: "HAW",   # Hawthorn Hawks
     9: "MEL",   # Melbourne Demons
-    10: "NTH",  # North Melbourne Kangaroos
-    11: "PTA",  # Port Adelaide Power
+    10: "NM",   # North Melbourne Kangaroos
+    11: "PA",   # Port Adelaide Power
     12: "RIC",  # Richmond Tigers
     13: "STK",  # St Kilda Saints
     14: "SYD",  # Sydney Swans
     15: "WCE",  # West Coast Eagles
-    16: "WBD",  # Western Bulldogs
+    16: "WB",   # Western Bulldogs
     17: "GCS",  # Gold Coast Suns
     18: "GWS",  # Greater Western Sydney Giants
 }
