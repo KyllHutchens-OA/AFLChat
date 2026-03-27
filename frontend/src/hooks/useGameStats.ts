@@ -55,9 +55,9 @@ export const useGameStats = (gameId: number | null, gameStatus?: string) => {
 
     fetchStats();
 
-    // Poll every 60 seconds for live games
+    // Poll every 30 seconds for live games
     if (gameStatus === 'live') {
-      pollInterval = setInterval(fetchStats, 60000);
+      pollInterval = setInterval(fetchStats, 30000);
     }
 
     return () => {

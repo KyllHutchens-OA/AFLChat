@@ -197,14 +197,20 @@ const LiveGames = () => {
             </div>
           )}
 
-          {/* Upcoming schedule */}
-          {upcomingMatches.length > 1 && (
+          {/* Upcoming schedule — current round + next round with previews */}
+          {upcomingMatches.length > 1 && (() => {
+            const currentRound = upcomingMatches[0]?.round;
+            const relevantMatches = upcomingMatches.slice(1).filter(m =>
+              String(m.round) === String(currentRound) || !!m.preview
+            );
+            if (relevantMatches.length === 0) return null;
+            return (
             <div className="card-apple p-6">
               <h3 className="text-xl font-semibold text-apple-gray-900 mb-4">
                 Upcoming Schedule
               </h3>
               <div className="space-y-3">
-                {upcomingMatches.slice(1).map((match) => (
+                {relevantMatches.map((match) => (
                   <div
                     key={match.id}
                     className="p-4 bg-apple-gray-50 rounded-apple hover:bg-apple-gray-100 transition-colors"
@@ -243,7 +249,8 @@ const LiveGames = () => {
                 ))}
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       </div>
     );

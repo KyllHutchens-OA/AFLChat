@@ -367,7 +367,7 @@ class LiveGameScheduler:
                 games_to_fetch = []
                 for game in games:
                     if game.status == 'live' and game.stats_cache_updated_at:
-                        if (now - game.stats_cache_updated_at).total_seconds() < 120:
+                        if (now - game.stats_cache_updated_at).total_seconds() < 90:
                             continue
                     games_to_fetch.append(game)
 

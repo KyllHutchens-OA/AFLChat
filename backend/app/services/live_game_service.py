@@ -7,8 +7,8 @@ import time
 import threading
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple, Set
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.data.database import get_session
@@ -773,6 +773,29 @@ class LiveGameService:
 
         if not current_quarter:
             return
+
+        # DB-aware initialization: on restart, seed from QuarterSnapshot records
+        if live_game.id not in _previous_quarters:
+            max_snapshot_q = session.query(
+                func.max(QuarterSnapshot.quarter)
+            ).filter_by(game_id=live_game.id).scalar() or 0
+
+            if max_snapshot_q > 0:
+                # Snapshots exist — seed to the highest one
+                _previous_quarters[live_game.id] = max_snapshot_q
+                logger.info(f"Initialized quarter tracking for game {live_game.id} from DB: Q{max_snapshot_q}")
+            elif current_quarter > 1:
+                # Game is past Q1 but no snapshots — backfill missed quarters
+                logger.info(f"Backfilling missed quarters 1-{current_quarter - 1} for game {live_game.id}")
+                for missed_q in range(1, current_quarter):
+                    LiveGameService._snapshot_quarter_stats(
+                        session, live_game, missed_q,
+                        home_team_abbr, away_team_abbr, socketio
+                    )
+                _previous_quarters[live_game.id] = current_quarter
+            else:
+                # Still in Q1 — seed to current quarter, wait for normal transition
+                _previous_quarters[live_game.id] = current_quarter
 
         prev_quarter = _previous_quarters.get(live_game.id, 0)
         _previous_quarters[live_game.id] = current_quarter

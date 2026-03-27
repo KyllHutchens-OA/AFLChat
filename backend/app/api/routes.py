@@ -472,40 +472,62 @@ def get_upcoming_matches():
 def get_game_stats(game_id):
     """Get top player stats for a game, served from cache."""
     try:
-        from app.data.models import LiveGame
+        from app.data.models import LiveGame, QuarterSnapshot
         from sqlalchemy.orm import joinedload
+        from sqlalchemy import func
 
         session = Session()
-        game = session.query(LiveGame).options(
-            joinedload(LiveGame.home_team),
-            joinedload(LiveGame.away_team)
-        ).filter_by(id=game_id).first()
+        try:
+            game = session.query(LiveGame).options(
+                joinedload(LiveGame.home_team),
+                joinedload(LiveGame.away_team)
+            ).filter_by(id=game_id).first()
 
-        if not game:
-            session.close()
-            return jsonify({'error': 'Game not found'}), 404
+            if not game:
+                return jsonify({'error': 'Game not found'}), 404
 
-        # Serve from cache if available
-        if game.stats_cache:
-            result = game.stats_cache
-            session.close()
-            return jsonify(result), 200
+            # Serve from cache if available
+            if game.stats_cache:
+                return jsonify(game.stats_cache), 200
 
-        # Cache miss — fetch live and cache the result
-        from app.services.api_sports_service import APISportsService
-        from sqlalchemy.orm.attributes import flag_modified
+            # Cache miss — fetch live and cache the result
+            from app.services.api_sports_service import APISportsService
+            from sqlalchemy.orm.attributes import flag_modified
 
-        stats = APISportsService.fetch_game_stats(game)
+            stats = APISportsService.fetch_game_stats(game)
 
-        if stats:
-            game.stats_cache = stats
-            game.stats_cache_updated_at = datetime.utcnow()
-            flag_modified(game, 'stats_cache')
-            session.commit()
+            if stats:
+                game.stats_cache = stats
+                game.stats_cache_updated_at = datetime.utcnow()
+                flag_modified(game, 'stats_cache')
+                session.commit()
+                return jsonify(stats), 200
 
-        session.close()
+            # Fallback: build stats from the most recent QuarterSnapshot
+            latest_snapshot = session.query(QuarterSnapshot).filter_by(
+                game_id=game_id
+            ).order_by(QuarterSnapshot.quarter.desc()).first()
 
-        if not stats:
+            if latest_snapshot and latest_snapshot.player_stats:
+                players = latest_snapshot.player_stats
+                top_goals = sorted(players, key=lambda p: p.get('goals', 0), reverse=True)[:3]
+                top_disposals = sorted(players, key=lambda p: p.get('disposals', 0), reverse=True)[:3]
+                # Fantasy: 3*kicks + 2*handballs + 3*marks + 4*tackles + 6*goals + 1*behinds
+                for p in players:
+                    p['fantasy_points'] = (
+                        3 * p.get('kicks', 0) + 2 * p.get('handballs', 0) +
+                        3 * p.get('marks', 0) + 4 * p.get('tackles', 0) +
+                        6 * p.get('goals', 0) + p.get('behinds', 0)
+                    )
+                top_fantasy = sorted(players, key=lambda p: p.get('fantasy_points', 0), reverse=True)[:3]
+
+                return jsonify({
+                    'top_goal_kickers': [{'name': p['name'], 'team': p['team'], 'goals': p.get('goals', 0)} for p in top_goals],
+                    'top_disposals': [{'name': p['name'], 'team': p['team'], 'disposals': p.get('disposals', 0)} for p in top_disposals],
+                    'top_fantasy': [{'name': p['name'], 'team': p['team'], 'points': p.get('fantasy_points', 0)} for p in top_fantasy],
+                    'source': 'quarter_snapshot',
+                }), 200
+
             return jsonify({
                 'top_goal_kickers': [],
                 'top_disposals': [],
@@ -513,7 +535,8 @@ def get_game_stats(game_id):
                 'message': 'Player stats not available for this game'
             }), 200
 
-        return jsonify(stats), 200
+        finally:
+            session.close()
 
     except Exception as e:
         logger.error(f"Error fetching game stats: {e}")
