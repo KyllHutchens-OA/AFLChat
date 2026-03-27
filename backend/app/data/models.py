@@ -673,7 +673,7 @@ class MatchPreview(Base):
     squiggle_game_id = Column(Integer, nullable=False)
     match_id = Column(Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=True)
 
-    preview_text = Column(Text, nullable=False)
+    preview_text = Column(Text, nullable=True)  # NULL = pending (context saved, awaiting preview)
     preview_type = Column(String(20), nullable=False)  # 'early' or 'gameday'
 
     generation_context = Column(JSONB, nullable=True)  # snapshot of inputs used

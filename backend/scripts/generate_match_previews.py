@@ -1,17 +1,20 @@
 """
-Match preview generation helpers for Claude Code cloud scheduled tasks.
+Match preview generation for upcoming AFL games.
 
-Two-phase workflow:
-  1. `gather` — fetches upcoming games from Squiggle, collects context
-     (weather, injuries, predictions, news, bye status) from DB, and
-     outputs JSON for Claude to write previews from.
-  2. `insert` — reads JSON previews from stdin and stores them in the
-     match_previews DB table.
+Three-phase workflow:
+  1. `save`    — (Railway scheduler) fetches Squiggle games + weather + DB context,
+                 saves pending rows to match_previews with preview_text=NULL.
+  2. `pending` — (cloud task) reads pending rows, outputs JSON for Claude to write previews.
+  3. `insert`  — (cloud task) reads JSON previews from stdin, updates pending rows.
 
-Usage (cloud scheduled task runs these via Claude):
+Also keeps `gather` for local use (outputs JSON to stdout without saving to DB).
+
+Usage:
     cd backend
-    python3 scripts/generate_match_previews.py gather     # → JSON to stdout
-    python3 scripts/generate_match_previews.py insert      # ← JSON from stdin
+    python3 scripts/generate_match_previews.py save       # scheduler: gather + save to DB
+    python3 scripts/generate_match_previews.py pending     # cloud task: read pending from DB
+    python3 scripts/generate_match_previews.py insert      # cloud task: update with previews
+    python3 scripts/generate_match_previews.py gather      # local: gather to stdout
 
 Env vars required: DB_STRING
 """
@@ -267,103 +270,198 @@ def _determine_preview_type(match_date: datetime) -> Optional[str]:
     return None
 
 
-# ── Phase 1: Gather ──────────────────────────────────────────────────────────
-
-def gather():
-    """Fetch upcoming games, collect context, output JSON for Claude to write previews.
-
-    Outputs a JSON array of objects, each with:
-      - squiggle_id, home_team, away_team, venue, round, date, preview_type
-      - context: { weather, injuries, news, prediction, bye }
-    Only includes games that need a preview (not already in DB).
-    """
+def _fetch_squiggle_upcoming() -> list[dict]:
+    """Fetch upcoming games from Squiggle API. Returns list of game dicts."""
     current_year = datetime.now().year
-    try:
-        resp = httpx.get(
-            f"https://api.squiggle.com.au/?q=games;year={current_year}",
-            headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        games = resp.json().get("games", [])
-    except Exception as e:
-        logger.error(f"Failed to fetch from Squiggle: {e}")
-        print(json.dumps([]))
-        return []
-
+    resp = httpx.get(
+        f"https://api.squiggle.com.au/?q=games;year={current_year}",
+        headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    games = resp.json().get("games", [])
     upcoming = [g for g in games if g.get("complete", 0) == 0]
     upcoming.sort(key=lambda g: g.get("date", ""))
+    return upcoming
 
-    results = []
+
+def _gather_game_context(session, game: dict) -> Optional[dict]:
+    """Gather full context for a single game. Returns context dict or None if skipped."""
+    squiggle_id = game.get("id")
+    date_str = game.get("date", "")
+    home_team = game.get("hteam", "")
+    away_team = game.get("ateam", "")
+    venue = game.get("venue", "")
+    round_num = game.get("round", "")
+
+    # Parse match date
+    try:
+        if "Z" in date_str or "+" in date_str:
+            match_date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).replace(tzinfo=None)
+        else:
+            match_date = datetime.fromisoformat(date_str)
+    except (ValueError, AttributeError):
+        return None
+
+    preview_type = _determine_preview_type(match_date)
+    if not preview_type:
+        return None
+
+    # Check if a completed preview already exists
+    existing = (
+        session.query(MatchPreview)
+        .filter_by(squiggle_game_id=squiggle_id, preview_type=preview_type)
+        .filter(MatchPreview.preview_text.isnot(None))
+        .first()
+    )
+    if existing:
+        return None
+
+    # Gather context
+    weather = _fetch_weather(venue, match_date)
+    team_context = _fetch_team_context(session, home_team, away_team)
+    current_year = datetime.now().year
+    bye_context = _check_bye_status(session, home_team, away_team, round_num, current_year)
+
+    # Try to link to a match_id
+    match_id = None
+    home_obj = session.query(Team).filter_by(name=home_team).first()
+    away_obj = session.query(Team).filter_by(name=away_team).first()
+    if home_obj and away_obj:
+        match = (
+            session.query(Match)
+            .filter(
+                Match.home_team_id == home_obj.id,
+                Match.away_team_id == away_obj.id,
+                Match.match_date >= datetime.utcnow() - timedelta(days=1),
+            )
+            .order_by(Match.match_date.asc())
+            .first()
+        )
+        if match:
+            match_id = match.id
+
+    return {
+        "squiggle_id": squiggle_id,
+        "match_id": match_id,
+        "home_team": home_team,
+        "away_team": away_team,
+        "venue": venue,
+        "round": round_num,
+        "date": date_str,
+        "preview_type": preview_type,
+        "context": {
+            "weather": weather,
+            "injuries": team_context["injuries"][:4],
+            "news": team_context["news"][:5],
+            "prediction": team_context.get("prediction"),
+            "bye": bye_context,
+        },
+    }
+
+
+# ── Command: save ─────────────────────────────────────────────────────────────
+# Runs on Railway scheduler. Fetches Squiggle + weather + DB context, inserts
+# pending rows (preview_text=NULL) into match_previews for the cloud task.
+
+def save():
+    """Fetch upcoming games, gather context, save pending rows to DB."""
+    try:
+        upcoming = _fetch_squiggle_upcoming()
+    except Exception as e:
+        logger.error(f"Failed to fetch from Squiggle: {e}")
+        return
+
+    saved = 0
+    skipped = 0
 
     with get_session() as session:
         for game in upcoming:
-            squiggle_id = game.get("id")
-            date_str = game.get("date", "")
-            home_team = game.get("hteam", "")
-            away_team = game.get("ateam", "")
-            venue = game.get("venue", "")
-            round_num = game.get("round", "")
-
-            # Parse match date
-            try:
-                if "Z" in date_str or "+" in date_str:
-                    match_date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).replace(tzinfo=None)
-                else:
-                    match_date = datetime.fromisoformat(date_str)
-            except (ValueError, AttributeError):
+            result = _gather_game_context(session, game)
+            if not result:
+                skipped += 1
                 continue
 
-            preview_type = _determine_preview_type(match_date)
-            if not preview_type:
-                continue
-
-            # Check if preview already exists
+            # Upsert: update existing pending row or insert new one
             existing = (
                 session.query(MatchPreview)
-                .filter_by(squiggle_game_id=squiggle_id, preview_type=preview_type)
+                .filter_by(
+                    squiggle_game_id=result["squiggle_id"],
+                    preview_type=result["preview_type"],
+                )
                 .first()
             )
+
             if existing:
-                continue
+                if existing.preview_text is not None:
+                    skipped += 1
+                    continue
+                # Update context on existing pending row
+                existing.generation_context = result["context"]
+                existing.updated_at = datetime.utcnow()
+            else:
+                preview = MatchPreview(
+                    squiggle_game_id=result["squiggle_id"],
+                    match_id=result["match_id"],
+                    preview_text=None,  # Pending — cloud task fills this in
+                    preview_type=result["preview_type"],
+                    generation_context=result["context"],
+                    is_validated=False,
+                    generated_at=datetime.utcnow(),
+                    model_used=None,
+                )
+                session.add(preview)
 
-            # Gather context
-            weather = _fetch_weather(venue, match_date)
-            team_context = _fetch_team_context(session, home_team, away_team)
-            bye_context = _check_bye_status(session, home_team, away_team, round_num, current_year)
+            saved += 1
+            logger.info(f"  ✓ Saved pending {result['preview_type']} for "
+                        f"{result['home_team']} vs {result['away_team']}")
 
+    logger.info(f"Save complete: {saved} saved, {skipped} skipped")
+
+
+# ── Command: pending ──────────────────────────────────────────────────────────
+# Runs in cloud task. Reads pending rows (preview_text IS NULL) and outputs
+# JSON for Claude to write previews from. No external API calls needed.
+
+def pending():
+    """Read pending preview rows from DB, output JSON for Claude."""
+    results = []
+
+    with get_session() as session:
+        rows = (
+            session.query(MatchPreview)
+            .filter(MatchPreview.preview_text.is_(None))
+            .order_by(MatchPreview.generated_at.asc())
+            .all()
+        )
+
+        for row in rows:
+            ctx = row.generation_context or {}
             results.append({
-                "squiggle_id": squiggle_id,
-                "home_team": home_team,
-                "away_team": away_team,
-                "venue": venue,
-                "round": round_num,
-                "date": date_str,
-                "preview_type": preview_type,
-                "context": {
-                    "weather": weather,
-                    "injuries": team_context["injuries"][:4],
-                    "news": team_context["news"][:5],
-                    "prediction": team_context.get("prediction"),
-                    "bye": bye_context,
-                },
+                "id": row.id,
+                "squiggle_id": row.squiggle_game_id,
+                "preview_type": row.preview_type,
+                "context": ctx,
             })
 
     print(json.dumps(results, indent=2))
-    logger.info(f"Gathered context for {len(results)} game(s) needing previews")
+    logger.info(f"Found {len(results)} pending preview(s)")
 
 
-# ── Phase 2: Insert ──────────────────────────────────────────────────────────
+# ── Command: insert ───────────────────────────────────────────────────────────
+# Runs in cloud task. Reads JSON from stdin and updates pending rows with
+# preview text, or inserts new rows.
 
 def insert():
-    """Read JSON previews from stdin and insert into match_previews table.
+    """Read JSON previews from stdin and update/insert into match_previews.
 
     Expected input: JSON array of objects, each with:
+      - id (int, optional) — match_previews row ID to update
       - squiggle_id (int)
       - preview_type ("early" or "gameday")
       - preview_text (str) — the preview Claude wrote
-      - home_team (str)
-      - away_team (str)
+      - home_team (str, optional — needed for new inserts)
+      - away_team (str, optional — needed for new inserts)
     """
     raw = sys.stdin.read()
     try:
@@ -376,79 +474,129 @@ def insert():
         logger.error("Expected a JSON array")
         sys.exit(1)
 
+    updated = 0
     inserted = 0
     skipped = 0
 
     with get_session() as session:
         for item in previews:
+            preview_text = item.get("preview_text", "").strip()
+            if not preview_text:
+                logger.warning(f"Skipping entry with empty preview_text")
+                skipped += 1
+                continue
+
+            row_id = item.get("id")
             squiggle_id = item.get("squiggle_id")
             preview_type = item.get("preview_type")
-            preview_text = item.get("preview_text", "").strip()
-            home_team = item.get("home_team", "")
-            away_team = item.get("away_team", "")
 
-            if not squiggle_id or not preview_type or not preview_text:
-                logger.warning(f"Skipping incomplete entry: {item.get('squiggle_id')}")
-                skipped += 1
-                continue
-
-            # Check for existing (idempotent)
-            existing = (
-                session.query(MatchPreview)
-                .filter_by(squiggle_game_id=squiggle_id, preview_type=preview_type)
-                .first()
-            )
-            if existing:
-                skipped += 1
-                continue
-
-            # Try to link to a match_id
-            match_id = None
-            home_obj = session.query(Team).filter_by(name=home_team).first()
-            away_obj = session.query(Team).filter_by(name=away_team).first()
-            if home_obj and away_obj:
-                match = (
-                    session.query(Match)
-                    .filter(
-                        Match.home_team_id == home_obj.id,
-                        Match.away_team_id == away_obj.id,
-                        Match.match_date >= datetime.utcnow() - timedelta(days=1),
-                    )
-                    .order_by(Match.match_date.asc())
+            # Try to find existing row (by ID or squiggle_id + type)
+            existing = None
+            if row_id:
+                existing = session.query(MatchPreview).get(row_id)
+            if not existing and squiggle_id and preview_type:
+                existing = (
+                    session.query(MatchPreview)
+                    .filter_by(squiggle_game_id=squiggle_id, preview_type=preview_type)
                     .first()
                 )
-                if match:
-                    match_id = match.id
 
-            preview = MatchPreview(
-                squiggle_game_id=squiggle_id,
-                match_id=match_id,
-                preview_text=preview_text,
-                preview_type=preview_type,
-                generation_context=item.get("context"),
-                is_validated=True,
-                generated_at=datetime.utcnow(),
-                model_used="claude-cloud-task",
-            )
-            session.add(preview)
-            session.flush()
-            inserted += 1
-            logger.info(f"  ✓ Inserted {preview_type} preview for {home_team} vs {away_team}")
+            if existing:
+                if existing.preview_text is not None:
+                    skipped += 1
+                    continue
+                existing.preview_text = preview_text
+                existing.is_validated = True
+                existing.model_used = "claude-cloud-task"
+                existing.updated_at = datetime.utcnow()
+                updated += 1
+                logger.info(f"  ✓ Updated preview {existing.id} "
+                            f"(game {existing.squiggle_game_id})")
+            else:
+                # Direct insert (for local usage without save step)
+                if not squiggle_id or not preview_type:
+                    skipped += 1
+                    continue
 
-    print(json.dumps({"inserted": inserted, "skipped": skipped}))
-    logger.info(f"Insert complete: {inserted} inserted, {skipped} skipped")
+                home_team = item.get("home_team", "")
+                away_team = item.get("away_team", "")
+
+                match_id = None
+                home_obj = session.query(Team).filter_by(name=home_team).first()
+                away_obj = session.query(Team).filter_by(name=away_team).first()
+                if home_obj and away_obj:
+                    match = (
+                        session.query(Match)
+                        .filter(
+                            Match.home_team_id == home_obj.id,
+                            Match.away_team_id == away_obj.id,
+                            Match.match_date >= datetime.utcnow() - timedelta(days=1),
+                        )
+                        .order_by(Match.match_date.asc())
+                        .first()
+                    )
+                    if match:
+                        match_id = match.id
+
+                preview = MatchPreview(
+                    squiggle_game_id=squiggle_id,
+                    match_id=match_id,
+                    preview_text=preview_text,
+                    preview_type=preview_type,
+                    generation_context=item.get("context"),
+                    is_validated=True,
+                    generated_at=datetime.utcnow(),
+                    model_used="claude-cloud-task",
+                )
+                session.add(preview)
+                inserted += 1
+                logger.info(f"  ✓ Inserted {preview_type} preview for "
+                            f"{home_team} vs {away_team}")
+
+    result = {"updated": updated, "inserted": inserted, "skipped": skipped}
+    print(json.dumps(result))
+    logger.info(f"Insert complete: {result}")
+
+
+# ── Command: gather (local use) ──────────────────────────────────────────────
+# Outputs JSON to stdout. For local testing or manual preview generation.
+
+def gather():
+    """Fetch upcoming games, collect context, output JSON to stdout."""
+    try:
+        upcoming = _fetch_squiggle_upcoming()
+    except Exception as e:
+        logger.error(f"Failed to fetch from Squiggle: {e}")
+        print(json.dumps([]))
+        return
+
+    results = []
+    with get_session() as session:
+        for game in upcoming:
+            result = _gather_game_context(session, game)
+            if result:
+                results.append(result)
+
+    print(json.dumps(results, indent=2))
+    logger.info(f"Gathered context for {len(results)} game(s) needing previews")
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 scripts/generate_match_previews.py [gather|insert]")
+        print("Usage: python3 scripts/generate_match_previews.py [save|pending|insert|gather]",
+              file=sys.stderr)
         sys.exit(1)
 
     command = sys.argv[1]
-    if command == "gather":
-        gather()
+    if command == "save":
+        save()
+    elif command == "pending":
+        pending()
     elif command == "insert":
         insert()
+    elif command == "gather":
+        gather()
     else:
-        print(f"Unknown command: {command}. Use 'gather' or 'insert'.")
+        print(f"Unknown command: {command}. Use 'save', 'pending', 'insert', or 'gather'.",
+              file=sys.stderr)
         sys.exit(1)

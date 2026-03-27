@@ -127,6 +127,24 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
+        # Job 11: Save preview context for upcoming matches (7 AM and 5 PM AEST)
+        # Fetches Squiggle games + weather + DB context, saves pending rows
+        # for the Claude cloud scheduled task to fill in with preview text.
+        self.scheduler.add_job(
+            func=self._save_preview_context,
+            trigger=CronTrigger(hour=7, minute=0, timezone='Australia/Melbourne'),
+            id="save_preview_context_morning",
+            name="Save preview context (morning)",
+            replace_existing=True,
+        )
+        self.scheduler.add_job(
+            func=self._save_preview_context,
+            trigger=CronTrigger(hour=17, minute=0, timezone='Australia/Melbourne'),
+            id="save_preview_context_evening",
+            name="Save preview context (evening)",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         self.is_running = True
 
@@ -294,6 +312,30 @@ class LiveGameScheduler:
 
         except Exception as e:
             logger.error(f"Team stats sync job failed: {e}")
+
+    def _save_preview_context(self):
+        """Save context for upcoming match previews to DB (pending rows for cloud task)."""
+        try:
+            import subprocess
+            import sys
+
+            result = subprocess.run(
+                [sys.executable, "scripts/generate_match_previews.py", "save"],
+                capture_output=True, text=True, timeout=120,
+                cwd=str(__import__('pathlib').Path(__file__).parent.parent.parent)
+            )
+
+            if result.returncode == 0:
+                logger.info(f"Preview context save complete")
+                if result.stderr:
+                    # Log last few lines of stderr (contains info logs)
+                    for line in result.stderr.strip().split('\n')[-3:]:
+                        logger.info(f"  {line.split(' ', 3)[-1] if ' ' in line else line}")
+            else:
+                logger.error(f"Preview context save failed: {result.stderr[-500:] if result.stderr else 'no output'}")
+
+        except Exception as e:
+            logger.error(f"Preview context save job failed: {e}")
 
     def _prefetch_stats(self):
         """Pre-fetch and cache player stats for live and recently completed games.

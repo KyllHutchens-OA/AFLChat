@@ -20,7 +20,10 @@ def get_preview(squiggle_id: int) -> Optional[str]:
         with get_session() as session:
             preview = (
                 session.query(MatchPreview)
-                .filter(MatchPreview.squiggle_game_id == squiggle_id)
+                .filter(
+                    MatchPreview.squiggle_game_id == squiggle_id,
+                    MatchPreview.preview_text.isnot(None),
+                )
                 .order_by(
                     case(
                         (MatchPreview.preview_type == "gameday", 0),
@@ -47,7 +50,10 @@ def get_all_previews(squiggle_ids: list[int]) -> dict[int, str]:
         with get_session() as session:
             previews = (
                 session.query(MatchPreview)
-                .filter(MatchPreview.squiggle_game_id.in_(squiggle_ids))
+                .filter(
+                    MatchPreview.squiggle_game_id.in_(squiggle_ids),
+                    MatchPreview.preview_text.isnot(None),
+                )
                 .order_by(
                     MatchPreview.squiggle_game_id,
                     case(
