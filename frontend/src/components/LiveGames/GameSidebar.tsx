@@ -283,7 +283,7 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
 
           {/* Upcoming with preview - shown above results */}
           {upcomingWithPreview.length > 0 && (
-            <UpcomingList matches={upcomingWithPreview} label="Preview" />
+            <UpcomingList matches={upcomingWithPreview} label={`Round ${upcomingWithPreview[0].round} Preview`} />
           )}
 
           {/* Results this round */}
