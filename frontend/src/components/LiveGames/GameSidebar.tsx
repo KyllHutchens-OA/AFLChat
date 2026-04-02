@@ -201,7 +201,7 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
                 {/* Prediction */}
                 {match.prediction && match.prediction.margin != null && (
                   <div className="mt-1.5 text-[11px] text-apple-gray-500">
-                    Squiggle tips {match.prediction.winner} by {Math.round(match.prediction.margin)}
+                    Tipping {match.prediction.winner} by {Math.round(match.prediction.margin)}
                   </div>
                 )}
               </button>
@@ -251,7 +251,7 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
               </div>
               {match.prediction && match.prediction.margin != null && (
                 <div className="mt-1.5 text-[11px] text-apple-gray-500 truncate">
-                  Squiggle tips {match.prediction.winner} by {Math.round(match.prediction.margin)}
+                  Tipping {match.prediction.winner} by {Math.round(match.prediction.margin)}
                 </div>
               )}
             </button>

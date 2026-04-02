@@ -157,7 +157,7 @@ const LiveGames = () => {
               {nextMatch.prediction && nextMatch.prediction.margin != null && (
                 <div className="text-center mb-4">
                   <span className="inline-flex items-center gap-2 px-4 py-2 bg-apple-blue-50 rounded-full text-sm font-medium text-apple-blue-700">
-                    Squiggle predicts {nextMatch.prediction.winner} by {Math.round(nextMatch.prediction.margin)} points
+                    Tipping {nextMatch.prediction.winner} by {Math.round(nextMatch.prediction.margin)} points
                     {nextMatch.prediction.home_prob != null && nextMatch.prediction.away_prob != null && (
                       <span className="text-apple-blue-500">
                         ({nextMatch.prediction.home_prob}% - {nextMatch.prediction.away_prob}%)
@@ -313,7 +313,7 @@ const LiveGames = () => {
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="text-lg font-semibold text-apple-gray-900">
-                          Squiggle Prediction
+                          Match Prediction
                         </h3>
                         <p className="text-apple-gray-700 mt-1">
                           {selectedUpcoming.prediction.winner} by {Math.round(selectedUpcoming.prediction.margin)} points
