@@ -127,26 +127,24 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
     );
   };
 
-  // Determine the current round from live/completed games or earliest upcoming
-  const currentRound = liveGames[0]?.round
-    ?? completedGames[0]?.round
-    ?? (upcomingMatches.length > 0 ? String(upcomingMatches[0].round) : null);
+  // Games with previews — shown above results regardless of round
+  const upcomingWithPreview = upcomingMatches.filter(m => !!m.preview);
 
-  // Show only this round's remaining games + next round's games (no further)
-  const currentRoundUpcoming = currentRound
-    ? upcomingMatches.filter(m => String(m.round) === String(currentRound))
+  // Remaining upcoming without preview, grouped by round
+  const upcomingNoPreview = upcomingMatches.filter(m => !m.preview);
+  const firstUpcomingRound = upcomingNoPreview.length > 0 ? String(upcomingNoPreview[0].round) : null;
+  const upcomingWithoutPreview = firstUpcomingRound
+    ? upcomingNoPreview.filter(m => String(m.round) === firstUpcomingRound)
     : [];
 
-  // Split upcoming into games with previews (shown higher) and without
-  const upcomingWithPreview = currentRoundUpcoming.filter(m => !!m.preview);
-  const upcomingWithoutPreview = currentRoundUpcoming.filter(m => !m.preview);
-
-  // Find the next round number (first round after current)
-  const nextRound = currentRound
-    ? upcomingMatches.find(m => String(m.round) !== String(currentRound))?.round
-    : null;
+  // Next round (the round after the first upcoming round)
+  const nextRound = firstUpcomingRound
+    ? upcomingNoPreview.find(m => String(m.round) !== firstUpcomingRound)?.round ?? null
+    : (upcomingWithPreview.length > 0
+      ? upcomingMatches.find(m => !m.preview && String(m.round) !== String(upcomingWithPreview[0].round))?.round ?? null
+      : null);
   const nextRoundUpcoming = nextRound
-    ? upcomingMatches.filter(m => String(m.round) === String(nextRound))
+    ? upcomingMatches.filter(m => String(m.round) === String(nextRound) && !m.preview)
     : [];
 
   const UpcomingList: React.FC<{ matches: UpcomingMatch[]; label: string }> = ({ matches, label }) => {

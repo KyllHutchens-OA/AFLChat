@@ -384,10 +384,18 @@ def _attach_predictions(upcoming: list, season: int):
         logger.debug(f"Failed to attach predictions: {e}")
 
 
+_upcoming_cache = {"data": None, "expires": 0}
+
 @bp.route('/upcoming-matches', methods=['GET'])
 @limiter.exempt  # Exempt from rate limiting (polled frequently)
 def get_upcoming_matches():
     """Get upcoming scheduled AFL matches from Squiggle API."""
+    import time as _time
+
+    # Return cached data if fresh (2 min TTL)
+    if _upcoming_cache["data"] is not None and _time.time() < _upcoming_cache["expires"]:
+        return jsonify(_upcoming_cache["data"]), 200
+
     try:
         import requests
         from datetime import datetime
@@ -457,10 +465,17 @@ def get_upcoming_matches():
         for match in upcoming:
             match['preview'] = previews.get(match['id'])
 
-        return jsonify({'matches': upcoming}), 200
+        result = {'matches': upcoming}
+        _upcoming_cache["data"] = result
+        _upcoming_cache["expires"] = _time.time() + 120  # 2 min TTL
+
+        return jsonify(result), 200
 
     except Exception as e:
         logger.error(f"Error fetching upcoming matches: {e}")
+        # Return stale cache if available, otherwise empty
+        if _upcoming_cache["data"] is not None:
+            return jsonify(_upcoming_cache["data"]), 200
         return jsonify({'matches': [], 'error': 'Squiggle API unavailable'}), 200
 
 
