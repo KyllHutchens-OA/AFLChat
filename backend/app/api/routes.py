@@ -393,47 +393,45 @@ def get_upcoming_matches():
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        # Fetch from Squiggle API
         current_year = datetime.now().year
-        response = requests.get(
-            f"https://api.squiggle.com.au/?q=games;year={current_year}",
-            headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
-            timeout=10
-        )
-
-        if response.status_code != 200:
-            return jsonify({'error': 'Failed to fetch from Squiggle'}), 500
-
-        data = response.json()
-        games = data.get('games', [])
-
-        # Filter for upcoming games (not started yet)
-        # Get current time in Australian timezone for accurate comparison
         aus_tz = ZoneInfo('Australia/Melbourne')
         now = datetime.now(aus_tz)
-        upcoming = []
 
-        for game in games:
-            # Parse date
+        # Determine the current/next round from live_games DB to avoid fetching all 200+ games
+        from app.data.database import get_data_recency
+        recency = get_data_recency()
+        live_round = recency.get("live_latest_round")
+
+        # Fetch only the next 2 rounds from Squiggle (much faster than full season)
+        all_games = []
+        start_round = int(live_round) + 1 if live_round else 1
+        for r in range(start_round, start_round + 2):
+            try:
+                resp = requests.get(
+                    f"https://api.squiggle.com.au/?q=games;year={current_year};round={r}",
+                    headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
+                    timeout=10
+                )
+                if resp.status_code == 200:
+                    all_games.extend(resp.json().get('games', []))
+            except Exception as round_err:
+                logger.warning(f"Failed to fetch round {r} from Squiggle: {round_err}")
+
+        upcoming = []
+        for game in all_games:
             date_str = game.get('date')
             if not date_str:
                 continue
 
             try:
-                # Squiggle returns dates in Australian Eastern time without timezone info
-                # Parse as naive datetime, then localize to Australian timezone
                 if 'Z' in date_str or '+' in date_str:
-                    # Already has timezone info
                     game_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                 else:
-                    # No timezone info - assume Australian Eastern time
                     naive_date = datetime.fromisoformat(date_str)
                     game_date = naive_date.replace(tzinfo=aus_tz)
             except (ValueError, AttributeError):
                 continue
 
-            # Only include games that haven't started yet
-            # A game has started if: complete > 0 OR current time > game time
             complete = game.get('complete', 0)
             if complete == 0 and game_date > now:
                 upcoming.append({
@@ -442,12 +440,11 @@ def get_upcoming_matches():
                     'home_team': game.get('hteam'),
                     'away_team': game.get('ateam'),
                     'venue': game.get('venue'),
-                    'date': game_date.isoformat(),  # Now includes timezone info
+                    'date': game_date.isoformat(),
                     'complete': complete,
                     'is_final': game.get('is_final', False),
                 })
 
-        # Sort by date (earliest first)
         upcoming.sort(key=lambda x: x['date'])
 
         # Attach Squiggle predictions
