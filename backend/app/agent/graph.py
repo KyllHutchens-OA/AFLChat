@@ -481,6 +481,14 @@ class AFLAnalyticsAgent:
 
             state["requires_visualization"] = understanding.get("requires_visualization", False)
 
+            # Force visualization if user explicitly requested a chart type
+            from app.visualization.chart_selector import ChartSelector
+            explicit_chart = ChartSelector._detect_explicit_chart_type(state["user_query"])
+            if explicit_chart:
+                state["requires_visualization"] = True
+                state["llm_chart_type_hint"] = explicit_chart
+                logger.info(f"UNDERSTAND: User explicitly requested '{explicit_chart}' chart — forcing visualization")
+
             logger.info(f"Intent: {state['intent']}, Raw entities: {raw_entities}, Resolved entities: {state['entities']}")
 
         except Exception as e:
@@ -790,12 +798,40 @@ class AFLAnalyticsAgent:
                 logger.info(f"EXECUTE: Database query result: success={db_result.get('success')}, rows={db_result.get('rows_returned')}, error={db_result.get('error')}")
 
                 if not db_result["success"]:
-                    error_msg = f"Database query failed: {db_result['error']}"
-                    logger.error(f"{error_msg} | SQL: {state.get('sql_query', 'N/A')}")
-                    state["execution_error"] = error_msg
-                    state["errors"].append(error_msg)
-                    state["thinking_message"] = "Couldn't retrieve data, retrying..."
-                    return state
+                    # --- LLM SQL retry (max 1 attempt) ---
+                    raw_error = db_result.get("raw_error", db_result["error"])
+                    logger.warning(f"EXECUTE: SQL failed, attempting LLM retry. Error: {raw_error}")
+                    state["thinking_message"] = "Query failed, retrying with fix..."
+                    self._emit_progress(state, "execute", "Query failed, retrying with fix...")
+
+                    retried_sql = self._llm_retry_sql(
+                        original_sql=state["sql_query"],
+                        error_message=raw_error,
+                        user_query=state["user_query"],
+                    )
+                    if retried_sql and retried_sql != state["sql_query"]:
+                        logger.info(f"EXECUTE: Retrying with LLM-corrected SQL: {retried_sql[:200]}...")
+                        db_result2 = DatabaseTool.query_database(retried_sql)
+                        if db_result2["success"]:
+                            logger.info(f"EXECUTE: LLM retry succeeded with {db_result2['rows_returned']} rows")
+                            state["sql_query"] = retried_sql
+                            state["sql_validated"] = True
+                            state["query_results"] = db_result2["data"]
+                            set_cached_result(retried_sql, db_result2["data"])
+                            # Skip the error path — jump to stats
+                            db_result = db_result2
+                        else:
+                            logger.error(f"EXECUTE: LLM retry also failed: {db_result2.get('error')}")
+                            error_msg = f"Database query failed: {db_result['error']}"
+                            state["execution_error"] = error_msg
+                            state["errors"].append(error_msg)
+                            return state
+                    else:
+                        error_msg = f"Database query failed: {db_result['error']}"
+                        logger.error(f"{error_msg} | SQL: {state.get('sql_query', 'N/A')}")
+                        state["execution_error"] = error_msg
+                        state["errors"].append(error_msg)
+                        return state
 
                 state["sql_validated"] = True
                 state["query_results"] = db_result["data"]
@@ -921,8 +957,18 @@ class AFLAnalyticsAgent:
             if len(data) < MIN_DATA_POINTS:
                 logger.warning(f"Insufficient data for visualization: {len(data)} rows (need at least {MIN_DATA_POINTS})")
                 state["thinking_message"] = f"⚠️ Not enough data points for chart ({len(data)} rows)"
-                # Skip visualization - will go to respond node without chart
                 return state
+
+            # VALIDATION: Skip chart if every row has the same x-axis value (e.g., all "Charlie Cameron")
+            # — a bar chart with duplicate x labels is meaningless; the table is better
+            non_numeric = data.select_dtypes(exclude=['number']).columns.tolist()
+            temporal_cols_present = [c for c in data.columns if c in ['season', 'year', 'match_date', 'round']]
+            if non_numeric and not temporal_cols_present:
+                likely_x = non_numeric[0]
+                if data[likely_x].nunique() == 1 and len(data) <= 10:
+                    logger.info(f"VISUALIZE: Skipping chart — x-axis '{likely_x}' has only 1 unique value across {len(data)} rows")
+                    state["thinking_message"] = "Table is more useful than a chart for this data"
+                    return state
 
             # Use intelligent ChartSelector to determine optimal chart configuration
             user_query = state.get("user_query", "")
@@ -974,6 +1020,18 @@ class AFLAnalyticsAgent:
                     params["y_col"] = y_col
                 if group_col:
                     params["group_col"] = group_col
+
+            # ── POST-VALIDATION: sanity-check chart_type vs data shape ────────
+            # Skip type-changing overrides if user explicitly requested a chart type
+            user_explicit = chart_config.get("user_explicit", False)
+            if not user_explicit:
+                chart_type, x_col, y_col = self._validate_chart_selection(
+                    chart_type, x_col, y_col, data, user_query
+                )
+            # Update params after validation may have changed x/y_col
+            if isinstance(y_col, str):
+                params["x_col"] = x_col
+                params["y_col"] = y_col
 
             # AUTO-AGGREGATE: If charting by season but data has multiple rows per season
             # (e.g., per-game stats for a career trend), aggregate to season averages.
@@ -1077,6 +1135,239 @@ class AFLAnalyticsAgent:
             state["thinking_message"] = "Skipping chart generation"
 
         return state
+
+    @staticmethod
+    def _validate_chart_selection(
+        chart_type: str,
+        x_col: Optional[str],
+        y_col: Any,
+        data: Any,
+        user_query: str,
+    ) -> tuple:
+        """Post-validate chart type vs actual data shape. Returns (chart_type, x_col, y_col)."""
+        import pandas as pd
+
+        if not isinstance(data, pd.DataFrame) or len(data) == 0:
+            return chart_type, x_col, y_col
+
+        n_rows = len(data)
+
+        # Rule: Line charts need at least 3 data points to show a trend
+        if chart_type == "line" and n_rows < 3:
+            logger.info(f"CHART-VALIDATE: line→bar (only {n_rows} rows, need ≥3 for trend)")
+            chart_type = "bar"
+
+        # Rule: Vertical bar charts — cap at 12 categories for readability
+        if chart_type == "bar" and n_rows > 12:
+            logger.info(f"CHART-VALIDATE: bar→horizontal_bar ({n_rows} categories exceeds 12)")
+            chart_type = "horizontal_bar"
+
+        # Rule: Pie charts — only valid for 2-7 categories
+        if chart_type == "pie":
+            if n_rows > 7:
+                logger.info(f"CHART-VALIDATE: pie→bar ({n_rows} categories too many for pie)")
+                chart_type = "bar"
+            elif n_rows < 2:
+                logger.info(f"CHART-VALIDATE: pie→bar (only {n_rows} category)")
+                chart_type = "bar"
+
+        # Rule: Scatter needs at least 5 points to be useful
+        if chart_type == "scatter" and n_rows < 5:
+            logger.info(f"CHART-VALIDATE: scatter→bar (only {n_rows} points)")
+            chart_type = "bar"
+
+        # Rule: Validate x_col and y_col actually exist in data
+        if x_col and x_col not in data.columns:
+            fallback_x = data.columns[0]
+            logger.info(f"CHART-VALIDATE: x_col '{x_col}' not in data, using '{fallback_x}'")
+            x_col = fallback_x
+
+        if isinstance(y_col, str) and y_col not in data.columns:
+            numeric_cols = data.select_dtypes(include=["number"]).columns.tolist()
+            numeric_cols = [c for c in numeric_cols if "id" not in c.lower()]
+            if numeric_cols:
+                fallback_y = numeric_cols[0]
+                logger.info(f"CHART-VALIDATE: y_col '{y_col}' not in data, using '{fallback_y}'")
+                y_col = fallback_y
+
+        return chart_type, x_col, y_col
+
+    @staticmethod
+    def _get_example_queries(intent: Optional[str] = None, entities: Optional[Dict] = None) -> str:
+        """Return 2-3 example queries relevant to the user's intent."""
+        examples_by_intent = {
+            "simple_stat": [
+                "How many goals did Hawkins kick in 2024?",
+                "Who won the 2024 grand final?",
+                "What was Carlton's record in 2023?",
+            ],
+            "player_comparison": [
+                "Compare Cripps and Oliver in 2024",
+                "Top 5 disposal getters in 2024",
+            ],
+            "team_analysis": [
+                "How did Collingwood perform in 2023?",
+                "Show Carlton's scoring trend from 2018 to 2024",
+            ],
+            "trend_analysis": [
+                "Show Geelong's win count per season from 2018 to 2024",
+                "Cripps disposal average over time",
+            ],
+        }
+        intent_key = str(intent).lower().replace("queryintent.", "") if intent else ""
+        examples = examples_by_intent.get(intent_key, examples_by_intent["simple_stat"])
+        formatted = "\n".join(f'- "{e}"' for e in examples[:2])
+        return f"\n\nHere are some example queries:\n{formatted}"
+
+    @staticmethod
+    def _build_error_response(state: Dict[str, Any]) -> str:
+        """Build a helpful error response based on context."""
+        intent = state.get("intent")
+        entities = state.get("entities", {})
+        error_detail = state.get("execution_error", "")
+        players = entities.get("players", [])
+        teams = entities.get("teams", [])
+
+        from app.data.database import get_data_recency
+        recency = get_data_recency()
+        earliest = recency["earliest_season"]
+        hist_season = recency["historical_latest_season"]
+
+        # Tailor the message to the error type
+        if "connection" in error_detail.lower() or "timeout" in error_detail.lower():
+            return (
+                "I'm having trouble reaching the database right now. "
+                "Please try again in a moment."
+            )
+
+        parts = ["I wasn't able to answer that query."]
+
+        if players:
+            parts.append(
+                f"Check that \"{players[0]}\" is spelled correctly — "
+                f"I match player names from AFL Tables data ({earliest}–{hist_season})."
+            )
+        elif teams:
+            parts.append(
+                f"I have data for all 18 AFL teams from {earliest} to {hist_season}. "
+                f"Make sure the team name is correct."
+            )
+        else:
+            parts.append(
+                f"I have AFL data from {earliest} to {hist_season}. "
+                f"Try being more specific about the team, player, or season."
+            )
+
+        examples = AFLAnalyticsAgent._get_example_queries(intent, entities)
+        parts.append(examples)
+
+        parts.append(
+            "\nIf you think this data should be available, "
+            "raise a request using the report button and I'll look into it."
+        )
+
+        return " ".join(parts[:2]) + "".join(parts[2:])
+
+    @staticmethod
+    def _build_empty_results_response(state: Dict[str, Any]) -> str:
+        """Build a helpful response when the query returned no results."""
+        entities = state.get("entities", {})
+        intent = state.get("intent")
+        players = entities.get("players", [])
+        teams = entities.get("teams", [])
+        seasons = entities.get("seasons", [])
+
+        from app.data.database import get_data_recency
+        recency = get_data_recency()
+        earliest = recency["earliest_season"]
+        hist_season = recency["historical_latest_season"]
+        hist_round = recency["historical_latest_round"]
+
+        parts = ["I couldn't find any data matching your query."]
+
+        if players and seasons:
+            parts.append(
+                f"I don't have stats for {players[0]} in {seasons[0]}. "
+                f"Player data covers {earliest} through Round {hist_round} of {hist_season}. "
+                f"The player may not have played that season, or the name could be misspelled."
+            )
+        elif players:
+            parts.append(
+                f"Check that \"{players[0]}\" is spelled correctly. "
+                f"I have player stats from {earliest} to {hist_season}."
+            )
+        elif teams and seasons:
+            parts.append(
+                f"No results for {teams[0]} in {seasons[0]}. "
+                f"Match data covers {earliest} to {hist_season}."
+            )
+        else:
+            # Check if user asked about remaining/upcoming games
+            query_lower = state.get("user_query", "").lower()
+            remaining_keywords = ["left", "remaining", "upcoming", "scheduled", "still to play"]
+            if any(kw in query_lower for kw in remaining_keywords):
+                parts = ["All games this round have been completed — no remaining games to play."]
+            else:
+                parts.append(
+                    f"I have AFL data from {earliest} to {hist_season}. "
+                    f"Try checking the team/player name or adjusting the season."
+                )
+
+        examples = AFLAnalyticsAgent._get_example_queries(intent, entities)
+        parts.append(examples)
+
+        parts.append(
+            "\nIf you think this data should be available, "
+            "raise a request using the report button and I'll look into it."
+        )
+
+        return " ".join(parts[:2]) + "".join(parts[2:])
+
+    @staticmethod
+    def _llm_retry_sql(original_sql: str, error_message: str, user_query: str) -> Optional[str]:
+        """
+        Ask the LLM to fix a failed SQL query based on the Postgres error.
+
+        Returns corrected SQL string, or None if unable to fix.
+        """
+        try:
+            prompt = f"""Fix this PostgreSQL query that failed with an error.
+
+Original SQL:
+{original_sql}
+
+Postgres error:
+{error_message}
+
+User's question: {user_query}
+
+Return ONLY the corrected SQL query, nothing else. No markdown, no explanation.
+If you cannot fix it, return the string UNFIXABLE."""
+
+            response = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
+                messages=[{"role": "user", "content": prompt}],
+            )
+            fixed = (response.choices[0].message.content or "").strip()
+
+            # Clean up response
+            if "```sql" in fixed:
+                fixed = fixed.split("```sql")[1].split("```")[0].strip()
+            elif "```" in fixed:
+                fixed = fixed.split("```")[1].split("```")[0].strip()
+
+            if fixed.upper().startswith("UNFIXABLE") or not fixed.upper().startswith(("SELECT", "WITH")):
+                logger.info("LLM SQL retry: could not fix the query")
+                return None
+
+            # Normalize whitespace
+            fixed = " ".join(fixed.split())
+            logger.info(f"LLM SQL retry: generated fix ({len(fixed)} chars)")
+            return fixed
+
+        except Exception as e:
+            logger.error(f"LLM SQL retry failed: {e}")
+            return None
 
     def _format_stats_for_gpt(self, stats: Dict[str, Any]) -> str:
         """
@@ -1192,6 +1483,56 @@ class AFLAnalyticsAgent:
         return "\n".join(parts)
 
     @staticmethod
+    def _humanize_value_label(col_name: str) -> str:
+        """Convert database column names to natural response labels."""
+        _LABEL_MAP = {
+            "total_goals": "goals",
+            "total_disposals": "disposals",
+            "total_marks": "marks",
+            "total_tackles": "tackles",
+            "total_kicks": "kicks",
+            "total_handballs": "handballs",
+            "total_votes": "votes",
+            "total_fantasy": "fantasy points",
+            "total_score": "points",
+            "win_count": "wins",
+            "loss_count": "losses",
+            "draw_count": "draws",
+            "top4_count": "top-four finishes",
+            "games_played": "games",
+            "avg_disposals": "average disposals per game",
+            "avg_goals": "average goals per game",
+            "avg_score": "average score",
+            "avg_margin": "average margin",
+            "avg_fantasy": "average fantasy points per game",
+            "career_goals": "career goals",
+            "career_disposals": "career disposals",
+            "win_rate": "win rate",
+            "win_percentage": "win percentage",
+            "home_wins": "home wins",
+            "away_wins": "away wins",
+            "attendance": "attendance",
+        }
+        lower = col_name.lower()
+        if lower in _LABEL_MAP:
+            return _LABEL_MAP[lower]
+        # Strip common prefixes
+        for prefix in ("total_", "avg_", "count_", "sum_", "num_"):
+            if lower.startswith(prefix):
+                return lower[len(prefix):].replace("_", " ")
+        return lower.replace("_", " ")
+
+    @staticmethod
+    def _strip_id_columns(data):
+        """Remove id and *_id columns from DataFrame to prevent leaking DB IDs in responses."""
+        import pandas as pd
+        if isinstance(data, pd.DataFrame) and len(data) > 0:
+            id_cols = [c for c in data.columns if c.lower() == 'id' or c.lower().endswith('_id')]
+            if id_cols:
+                data = data.drop(columns=id_cols, errors='ignore')
+        return data
+
+    @staticmethod
     def _try_template_response(state: AgentState) -> Optional[str]:
         """
         Try to generate a response from templates without an LLM call.
@@ -1212,6 +1553,11 @@ class AFLAnalyticsAgent:
         teams = entities.get("teams", [])
         players = entities.get("players", [])
         seasons = entities.get("seasons", [])
+
+        # Strip ID columns to prevent leaking DB IDs in responses
+        import pandas as pd
+        if isinstance(data, pd.DataFrame):
+            data = AFLAnalyticsAgent._strip_id_columns(data)
 
         # Handle empty results for tool-based intents with helpful messages
         if data is None or len(data) == 0:
@@ -1342,7 +1688,6 @@ class AFLAnalyticsAgent:
                 return f"{winner} defeated {away_team if winner == home_team else home_team} {max(home_score, away_score)}-{min(home_score, away_score)} by {margin} points{venue_text}{round_text}."
 
             numeric_cols = data.select_dtypes(include=['number']).columns.tolist()
-            # Check for name columns in the result (player_name, winner, team, name)
             name_cols = [c for c in data.columns if c.lower() in ['name', 'player', 'player_name', 'team', 'team_name', 'winner']]
 
             def _fmt_val(v):
@@ -1352,41 +1697,42 @@ class AFLAnalyticsAgent:
                     return f"{v:.1f}"
                 return str(v)
 
+            # Get subject from: 1) name column in result, 2) entities, 3) empty
+            subject = ""
+            if name_cols:
+                subject = str(row[name_cols[0]])
+            elif players:
+                subject = players[0]
+            elif teams:
+                subject = teams[0]
+
+            season_str = f" in {seasons[0]}" if seasons else ""
+
             if len(numeric_cols) == 1:
                 col = numeric_cols[0]
                 value = row[col]
-                col_label = col.replace("_", " ")
-
-                # Try to get subject from: 1) name column in result, 2) entities, 3) empty
-                subject = ""
-                if name_cols:
-                    subject = str(row[name_cols[0]])
-                elif players:
-                    subject = players[0]
-                elif teams:
-                    subject = teams[0]
-
-                season_str = f" in {seasons[0]}" if seasons else ""
+                label = AFLAnalyticsAgent._humanize_value_label(col)
 
                 if subject:
-                    return f"{subject} had {_fmt_val(value)} {col_label}{season_str}."
+                    # Natural phrasing based on the metric type
+                    val_str = _fmt_val(value)
+                    if any(w in label for w in ["wins", "losses", "finishes", "games"]):
+                        return f"{subject} had {val_str} {label}{season_str}."
+                    elif "average" in label or "avg" in label:
+                        return f"{subject} averaged {val_str} {label.replace('average ', '')}{season_str}."
+                    elif "rate" in label or "percentage" in label:
+                        return f"{subject} had a {val_str}% {label}{season_str}."
+                    else:
+                        return f"{subject} had {val_str} {label}{season_str}."
                 else:
-                    return f"The result is {_fmt_val(value)} {col_label}{season_str}."
+                    label = AFLAnalyticsAgent._humanize_value_label(col)
+                    return f"The {label}{season_str} is {_fmt_val(value)}."
 
             elif 2 <= len(numeric_cols) <= 5:
-                # Try to get subject from: 1) name column in result, 2) entities, 3) empty
-                subject = ""
-                if name_cols:
-                    subject = str(row[name_cols[0]])
-                elif players:
-                    subject = players[0]
-                elif teams:
-                    subject = teams[0]
-
-                season_str = f" in {seasons[0]}" if seasons else ""
                 parts = []
                 for col in numeric_cols:
-                    parts.append(f"{_fmt_val(row[col])} {col.replace('_', ' ')}")
+                    label = AFLAnalyticsAgent._humanize_value_label(col)
+                    parts.append(f"{_fmt_val(row[col])} {label}")
                 stats_str = ", ".join(parts)
                 if subject:
                     return f"{subject}{season_str}: {stats_str}."
@@ -1461,8 +1807,19 @@ class AFLAnalyticsAgent:
                             vals.append(str(v))
                     lines.append(f"| {i+1} | " + " | ".join(vals) + " |")
 
-                metric_label = numeric_cols[0].replace("_", " ")
-                header = f"Top {metric_label}{season_str}:\n\n"
+                metric_label = AFLAnalyticsAgent._humanize_value_label(numeric_cols[0])
+                # Try to derive a meaningful header from the query context
+                # Check if all rows are the same player (per-game breakdown, not a ranking)
+                unique_names = data[name_col].nunique() if name_col in data.columns else 0
+                if unique_names == 1:
+                    player_name = str(data.iloc[0][name_col])
+                    header = f"{player_name}'s game-by-game stats{season_str}:\n\n"
+                elif players and len(players) >= 2:
+                    header = f"{' vs '.join(players[:3])}{season_str}:\n\n"
+                elif teams and len(teams) >= 2:
+                    header = f"{' vs '.join(teams[:3])}{season_str}:\n\n"
+                else:
+                    header = f"Top {metric_label}{season_str}:\n\n"
                 return header + "\n".join(lines)
 
             # Fallback: any multi-row DataFrame with 3+ columns → auto markdown table
@@ -1506,23 +1863,129 @@ class AFLAnalyticsAgent:
         # --- PATTERN 3: Chart accompaniment (very brief text) ---
         if has_chart:
             subject = players[0] if players else teams[0] if teams else "the data"
-            season_str = f" ({seasons[0]})" if seasons else ""
             intent_str = str(intent).upper() if intent else ""
+            chart_data = state.get("query_results")
+
+            # Try to extract time range from the data
+            time_range = ""
+            if chart_data is not None and "season" in chart_data.columns:
+                seasons_in_data = sorted(chart_data["season"].unique())
+                if len(seasons_in_data) > 1:
+                    time_range = f" from {int(seasons_in_data[0])} to {int(seasons_in_data[-1])}"
+                elif len(seasons_in_data) == 1:
+                    time_range = f" in {int(seasons_in_data[0])}"
+            elif seasons:
+                time_range = f" in {seasons[0]}" if len(seasons) == 1 else f" from {seasons[0]} to {seasons[-1]}"
+
+            # Detect the chart type for a more descriptive accompaniment
+            viz_spec = state.get("visualization_spec", {})
+            viz_traces = viz_spec.get("data", []) if isinstance(viz_spec, dict) else []
+            chart_type_name = viz_traces[0].get("type", "") if viz_traces else ""
 
             if "TREND" in intent_str:
-                # Distinguish per-game (round-level) from multi-season trends
-                has_round_col = state.get("query_results") is not None and "round" in state["query_results"].columns
-                season_count = state["query_results"]["season"].nunique() if (state.get("query_results") is not None and "season" in state["query_results"].columns) else 0
+                has_round_col = chart_data is not None and "round" in chart_data.columns
+                season_count = chart_data["season"].nunique() if (chart_data is not None and "season" in chart_data.columns) else 0
                 if has_round_col and season_count <= 1:
-                    return f"Here's {subject}'s game-by-game stats{season_str}."
-                return f"Here's {subject}'s trend over time{season_str}."
+                    return f"Here's {subject}'s game-by-game performance{time_range}."
+                return f"Here's how {subject}'s numbers have changed{time_range}."
             elif "COMPARISON" in intent_str:
                 compared = " and ".join(players[:3]) if players else "the players"
-                return f"Here's a comparison of {compared}{season_str}. See the chart for the full breakdown."
+                return f"Here's a head-to-head comparison of {compared}{time_range}."
             elif "TEAM" in intent_str:
-                return f"Here's {subject}'s performance breakdown{season_str}."
+                return f"Here's {subject}'s performance breakdown{time_range}."
+            elif chart_type_name == "pie":
+                # Describe what the pie chart shows
+                numeric_cols = chart_data.select_dtypes(include=['number']).columns.tolist() if chart_data is not None else []
+                metric = AFLAnalyticsAgent._humanize_value_label(numeric_cols[0]) if numeric_cols else "breakdown"
+                return f"Here's {subject}'s {metric} breakdown{time_range}."
+            elif chart_type_name == "box":
+                return f"Here's the distribution of {subject}'s stats{time_range}."
             else:
-                return f"Here are the results for {subject}{season_str}."
+                # Generic but still descriptive
+                return f"Here's {subject}'s data{time_range}."
+
+        return None
+
+    @staticmethod
+    def _needs_data_range_disclaimer(state: Dict[str, Any]) -> bool:
+        """Check if the response should include a data range disclaimer."""
+        entities = state.get("entities", {})
+        seasons = entities.get("seasons", [])
+        user_query = state.get("user_query", "").lower()
+
+        # If user specified a season, no disclaimer needed
+        if seasons:
+            return False
+
+        # Check for all-time/historical indicators
+        all_time_keywords = ["all-time", "all time", "ever", "most", "record", "history",
+                             "career", "total", "highest ever", "best ever", "worst ever"]
+        return any(kw in user_query for kw in all_time_keywords)
+
+    @staticmethod
+    def _generate_follow_up(state: Dict[str, Any]) -> Optional[str]:
+        """Generate contextual follow-up suggestions based on the query result."""
+        import pandas as pd
+
+        data = state.get("query_results")
+        entities = state.get("entities", {})
+        intent = state.get("intent")
+        teams = entities.get("teams", [])
+        players = entities.get("players", [])
+        seasons = entities.get("seasons", [])
+
+        if not isinstance(data, pd.DataFrame) or len(data) < 2:
+            return None
+
+        # Only add follow-ups for list/table results
+        name_cols = [c for c in data.columns if c.lower() in ['name', 'player', 'player_name']]
+        team_cols = [c for c in data.columns if c.lower() in ['team', 'team_name']]
+
+        import random
+
+        # Top-N player list → suggest comparing top 2
+        if name_cols and len(data) >= 2:
+            p1 = str(data.iloc[0][name_cols[0]])
+            p2 = str(data.iloc[1][name_cols[0]])
+            season_str = f" in {seasons[0]}" if seasons else ""
+            prompts = [
+                f"Curious how {p1} and {p2} compare{season_str}? Just ask.",
+                f"Want to dig deeper? You could compare {p1} and {p2}, or check out {p1}'s full career.",
+                f"You could also compare {p1} and {p2} head-to-head{season_str}.",
+            ]
+            return random.choice(prompts)
+
+        # Team record → suggest comparison or previous season
+        if teams and len(teams) == 1:
+            team = teams[0]
+            if seasons:
+                prev_year = str(int(seasons[0]) - 1)
+                prompts = [
+                    f"Want to see how {team} went in {prev_year} for comparison?",
+                    f"I can also show you {team}'s scoring trend over time if you're interested.",
+                    f"You could also look at {team}'s {prev_year} season to compare.",
+                ]
+            else:
+                prompts = [
+                    f"I can also chart {team}'s performance over time if you'd like.",
+                    f"Want to see {team}'s scoring trend across seasons?",
+                ]
+            return random.choice(prompts)
+
+        # Player stats → suggest career or comparison
+        if players and len(players) == 1:
+            player = players[0]
+            if seasons:
+                prompts = [
+                    f"I can also pull up {player}'s full career numbers if you're interested.",
+                    f"Want to see how {player} stacks up against the rest of the league in {seasons[0]}?",
+                ]
+            else:
+                prompts = [
+                    f"Want to see {player}'s season-by-season breakdown?",
+                    f"I can also compare {player} against other players if you'd like.",
+                ]
+            return random.choice(prompts)
 
         return None
 
@@ -1555,39 +2018,14 @@ class AFLAnalyticsAgent:
                 error_detail = state.get("execution_error", "Unknown error")
                 logger.error(f"RESPOND: execution_error detected: {error_detail}")
 
-                state["natural_language_summary"] = (
-                    "I wasn't able to find an answer for that query. "
-                    "Try rephrasing your question, or if you think this data should be available, "
-                    "raise a request using the report button and I'll look into it."
-                )
+                state["natural_language_summary"] = self._build_error_response(state)
                 state["confidence"] = 0.0
-                logger.info(f"RESPOND: Returning error response with debug info")
+                logger.info(f"RESPOND: Returning error response")
                 return state
 
             # Check if we have results
             if state.get("query_results") is None or len(state["query_results"]) == 0:
-                raw_query = state.get("user_query", "")
-                suggestions = []
-
-                if state.get("needs_clarification"):
-                    suggestions.append(state.get("clarification_question", ""))
-
-                if "entities" in state and "teams" in state["entities"]:
-                    if not state["entities"]["teams"]:
-                        suggestions.append(
-                            f"Available teams: Adelaide, Brisbane Lions, Carlton, Collingwood, Essendon, "
-                            f"Fremantle, Geelong, Gold Coast, GWS, Hawthorn, Melbourne, North Melbourne, "
-                            f"Port Adelaide, Richmond, St Kilda, Sydney, West Coast, Western Bulldogs"
-                        )
-
-                suggestion_text = " ".join(suggestions) if suggestions else (
-                    "Try rephrasing your question or check that team/player names are correct."
-                )
-
-                state["natural_language_summary"] = (
-                    f"I couldn't find any data matching your query. {suggestion_text}"
-                    "\n\nIf you think this data should be available, raise a request using the report button and I'll look into it."
-                )
+                state["natural_language_summary"] = self._build_empty_results_response(state)
                 state["confidence"] = 0.3
                 return state
 
@@ -1636,6 +2074,16 @@ class AFLAnalyticsAgent:
             # Try template response first (avoids LLM call for simple queries)
             template_response = self._try_template_response(state)
             if template_response is not None:
+                # Add data range disclaimer for all-time queries
+                if self._needs_data_range_disclaimer(state):
+                    from app.data.database import get_data_recency
+                    _dr = get_data_recency()
+                    template_response += f"\n\n*Based on data from {_dr['earliest_season']} to present.*"
+                # Add follow-up suggestions for list/table responses (not charts — the chart speaks for itself)
+                if not state.get("visualization_spec"):
+                    follow_up = self._generate_follow_up(state)
+                    if follow_up:
+                        template_response += f"\n\n{follow_up}"
                 state["natural_language_summary"] = template_response
                 state["confidence"] = 0.9
                 from app.data.database import get_data_recency
@@ -1711,7 +2159,7 @@ class AFLAnalyticsAgent:
             query_lower = state['user_query'].lower()
             is_breakdown_query = any(term in query_lower for term in ['by round', 'round by round', 'each round', 'per round', 'breakdown', 'by game', 'by match'])
 
-            results_df = state['query_results']
+            results_df = self._strip_id_columns(state['query_results'])
             if is_breakdown_query or len(results_df) <= 50:
                 # Show all results for breakdown queries or smaller result sets
                 results_text = results_df.to_string()
@@ -1750,7 +2198,7 @@ CRITICAL RULES:
 - State the number/fact directly
 - DO NOT mention what additional analysis you could do
 - DO NOT mention limitations or missing data unless the query CANNOT be answered
-- DO NOT offer follow-up analysis unprompted
+- After answering, you may suggest 1 brief follow-up the user might find interesting. Keep it casual and conversational — NOT "Try: 'query'" format. Instead, something like "I can also show you X if you're interested." or "Want to see how that compares to Y?"
 - When presenting multiple rows of data, format as a markdown table
 
 {conversation_context_text}User asked: {state['user_query']}
@@ -1810,7 +2258,11 @@ Provide a concise analysis (3-5 sentences):"""
                 reasoning_effort="low",
             )
 
-            state["natural_language_summary"] = (response.choices[0].message.content or "").strip()
+            llm_response = (response.choices[0].message.content or "").strip()
+            # Add data range disclaimer for all-time queries
+            if self._needs_data_range_disclaimer(state):
+                llm_response += f"\n\n*Based on data from {_earliest} to present.*"
+            state["natural_language_summary"] = llm_response
             state["confidence"] = 0.9
             state["sources"] = [f"AFL Tables ({_earliest}-{_hist_season})"]
             state["thinking_message"] = "Response complete"

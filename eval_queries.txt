@@ -1,0 +1,128 @@
+How many games has Collingwood won this season?
+Who kicked the most goals last round?
+Show me the top 10 disposal getters in 2025
+What was the score in the 2024 grand final?
+Who won the Brownlow Medal in 2023?
+How many premierships has Hawthorn won?
+Show me a chart of Melbourne's wins per season since 2018
+What's Dustin Martin's career goals tally?
+Who has the most tackles in the AFL this year?
+Compare disposals per game for Marcus Bontempelli and Patrick Cripps this season
+Which team has the best percentage in 2025?
+Show me a bar chart of goals kicked by each team in round 5
+What's the average winning margin in grand finals since 2000?
+Who holds the record for most marks in a single game?
+How has Brisbane's scoring changed quarter by quarter this season?
+List every Coleman Medal winner since 2010
+Which ground does Geelong have the best win rate at?
+Show me Patrick Dangerfield's disposal trend over his career season by season
+Who are the top 5 contested possession players in the league right now?
+What's Carlton's win-loss record against Essendon since 1990?
+Show me a pie chart of scoring sources - goals vs behinds for Sydney in 2024
+Which player has the most inside 50s this season?
+How does Tom Green's tackle rate compare to other midfielders?
+Show me a line chart of Fremantle's ladder position at the end of each season since 2010
+What's the biggest upset in terms of margin this season?
+Who has played the most consecutive games in AFL history?
+Show me Richmond's average attendance per season over the last decade
+What percentage of games does the home team win at the MCG?
+Compare Clayton Oliver and Andrew Brayshaw's stats side by side for 2024
+Which team gives up the most points per game this year?
+Show me a scatter plot of disposals vs fantasy points for all midfielders in 2025
+Who kicked 10 goals in a game most recently?
+What's the average number of goals per game in the AFL across each season since 2000?
+How many times has Geelong finished top 4 since 2007?
+Show me Nick Daicos's stats progression from his debut to now
+Which team has won the most games at Marvel Stadium?
+What's West Coast's record when scoring over 100 points?
+Who are the top 5 mark takers in the league this season?
+Show me a grouped bar chart comparing GWS and Western Bulldogs in goals, behinds, and points per game
+Has there ever been a drawn grand final?
+What's the longest winning streak by any team this century?
+How does Chad Warner's 2025 compare to his 2024 statistically?
+Show me every team's average margin of victory this season as a horizontal bar chart
+Which rookies have averaged the most disposals this year?
+What's the head-to-head record between Sydney and Collingwood in finals?
+Show me a stacked bar chart of contested vs uncontested possessions for the top 8 teams
+Who has the highest goal accuracy percentage this season with at least 15 goals?
+How many games has Touk Miller played and what's his career disposal average?
+What's the highest scoring game in AFL history?
+List the top 10 fantasy point scorers over the last 3 seasons combined
+Which team has improved the most from last season to this season in terms of wins?
+Show me a box plot of Zach Merrett's disposal counts across all games in 2024
+How does Port Adelaide perform in night games vs day games?
+Who has the most clearances in a single season since 2015?
+What are the average scores by quarter across the league this season?
+Show me a chart of North Melbourne's draft picks and where those players are now in terms of games played
+Compare Max Gawn and Brodie Grundy's hitout numbers over the past 5 seasons
+What's the most common winning margin range in the AFL?
+Which player has the best ratio of goals to behinds this year?
+How does Essendon's form in the first 6 rounds compare to their form after the bye historically?
+Show me the top disposal getters per round this season as a line chart tracking the leader over time
+Who has taken the most contested marks this year?
+What's Adelaide's record in games decided by less than a goal since 2020?
+How many times has a team come back from 40+ points down to win this decade?
+Show me a heatmap or grouped chart of each team's scoring by quarter this season
+Which key forward has the best goals-per-game average over their career with 100+ games?
+What was Jordan De Goey's best statistical game ever?
+How does St Kilda's percentage track across each round this season?
+Who are the leading goalkickers for each team this year?
+Show me a trend line of average game scores in the AFL from 1990 to present
+What's the youngest team by average age in the league right now?
+Compare Isaac Heeney's 2024 season to Lachie Neale's 2020 Brownlow year
+Which team has the most losses by under 6 points this season?
+How do teams that win the clearance count perform in terms of winning the game?
+Show me every Norm Smith Medal winner and their stats from that grand final
+What's Gold Coast's all-time record against every other team?
+Who has played the most games without a finals appearance?
+Show me a bar chart of brownlow votes by team this season
+How does the bye week affect team performance - do teams win more or less the week after?
+What's the scoring trend in the first quarter vs the last quarter across the league?
+Which players have kicked bags of 5+ goals multiple times this season?
+Compare the defensive stats of Sam Taylor and Steven May in 2024
+How has the average number of tackles per game changed over the last 20 years?
+Show me Hawthorn's scoring worm for their last game
+Who has the most one percenters this season?
+What's the record for most behinds kicked in a single match?
+Show me a chart comparing each team's home vs away win percentage this season
+Which midfielders average over 30 disposals and 5 tackles per game?
+How does playing on a Thursday night affect scoring compared to Saturday afternoon?
+List every Rising Star winner from the last 15 years and their career games played
+What's the biggest comeback in finals history?
+How do contested possession differential and match result correlate?
+Show me a scatter plot of inside 50s vs goals scored per game for all teams in 2025
+Who has the most clangers in the league this year?
+What's the average time on ground percentage for key position players vs midfielders?
+Compare Errol Gulden, Sam Walsh, and Caleb Serong across all major stat categories in 2025
+How many games have ended with a team scoring exactly 100 points this season?
+What's the win rate for teams that lead at three quarter time across the last 5 years?
+Show me a line chart of the number of free kicks per game over the last 30 years - has it gone up or down?
+Which team converts inside 50s to goals at the highest rate?
+How does rebound 50 count relate to winning percentage for each team this season?
+Give me a full statistical breakdown of the 2023 grand final - every player's stats
+Show me a chart of every team's average fantasy points per player ranked from highest to lowest
+What was the quarter by quarter score in the 2023 grand final?
+Who won the Coleman Medal in 2024?
+How many career goals has Tom Hawkins kicked?
+What happened in round 10 2024?
+What was the score in round 8 Carlton vs Collingwood 2024?
+Geelong vs Sydney results in 2023
+Show me a pie chart of wins by each team in the top 8 in 2024
+Give me a box plot of disposal counts for Cripps in 2024
+Show me a horizontal bar chart of the top 10 goal kickers in 2024
+Show me a stacked bar chart of goals and behinds for Melbourne in 2024
+What are the all-time most goals kicked in a season?
+Who has the best record at Kardinia Park since 2010?
+How have teams performed at the Gabba over the last 5 years?
+Which team has won the most games at Docklands?
+Who are the top midfielders by disposals in 2024?
+What's Collingwood's scoring in each quarter in the 2023 grand final?
+What was the halftime score in the 2022 grand final?
+Dustin Martin career stats
+Who kicked the most goals in round 3 2024?
+Show me Carlton's goal kickers in round 12 2024 as a bar chart
+What was the margin in the 2024 preliminary final between Sydney and Port Adelaide?
+How many games did Jeremy Cameron play in his career?
+Show me a scatter plot of marks vs goals for all players with 20+ goals in 2024
+Who has the most all-time Brownlow votes?
+What was the score at three quarter time in the 2024 grand final?

@@ -125,6 +125,7 @@ class DatabaseTool:
             return {
                 "success": False,
                 "error": safe_msg,
+                "raw_error": error_msg,
                 "data": None,
                 "rows_returned": 0
             }

@@ -36,12 +36,15 @@ client = OpenAI(
 # Cache identical (query, context) pairs to avoid repeat LLM calls.
 # TTL-style: stores up to 128 recent queries in memory.
 _llm_cache: Dict[str, Dict[str, Any]] = {}
-_LLM_CACHE_MAX = 128
+_LLM_CACHE_MAX = 512
+
+
+_PROMPT_VERSION = "v3"  # Bump when prompt template changes to invalidate cache
 
 
 def _cache_key(user_query: str, conv_ctx: str) -> str:
-    """Deterministic cache key from query + conversation context."""
-    raw = f"{user_query.strip().lower()}|{conv_ctx.strip()}"
+    """Deterministic cache key from query + conversation context + prompt version."""
+    raw = f"{_PROMPT_VERSION}|{user_query.strip().lower()}|{conv_ctx.strip()}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
@@ -103,12 +106,30 @@ Examples of off_topic (truly unrelated to AFL):
 
 ## SQL Generation Rules
 
+The ONLY tables in this database are: `matches`, `teams`, `players`, `player_stats`, `team_stats`, `live_games`, `betting_odds`, `squiggle_predictions`, `news_articles`. Do NOT reference any other tables.
+
 Database Schema:
 
 ### teams: id, name, abbreviation, stadium
 Use EXACT team names: Adelaide (NOT "Adelaide Crows"), Geelong (NOT "Geelong Cats"), Greater Western Sydney (NOT "GWS Giants"), Sydney (NOT "Sydney Swans"), West Coast (NOT "West Coast Eagles")
 
-### matches: id, season (INTEGER), round (VARCHAR), match_date (TIMESTAMP), home_team_id, away_team_id, home_score, away_score, venue, attendance
+Common venue aliases (use the DB canonical name in SQL):
+- MCG / Melbourne Cricket Ground → 'M.C.G.'
+- Marvel Stadium / Docklands / Etihad Stadium / Colonial Stadium / Telstra Dome → 'Marvel Stadium'
+- GMHBA Stadium / Kardinia Park / Simonds Stadium / Skilled Stadium → 'GMHBA Stadium'
+- The Gabba / Woolloongabba / Brisbane Cricket Ground → 'Gabba'
+- SCG / Sydney Cricket Ground → 'S.C.G.'
+- Optus Stadium / Perth Stadium → 'Optus Stadium'
+- Adelaide Oval → 'Adelaide Oval'
+- People First Stadium / Metricon Stadium / Carrara → 'People First Stadium'
+- Blundstone Arena / Bellerive Oval → 'Blundstone Arena'
+- UNSW Canberra Oval / Manuka Oval → 'UNSW Canberra Oval'
+- TIO Traeger Park / Traeger Park → 'TIO Traeger Park'
+When filtering by venue, use ILIKE for fuzzy matching: WHERE m.venue ILIKE '%MCG%' or WHERE m.venue ILIKE '%Marvel%'
+
+### matches: id, season (INTEGER), round (VARCHAR), match_date (TIMESTAMP), home_team_id, away_team_id, home_score, away_score, venue, attendance, home_q1_goals, home_q1_behinds, home_q2_goals, home_q2_behinds, home_q3_goals, home_q3_behinds, home_q4_goals, home_q4_behinds, away_q1_goals, away_q1_behinds, away_q2_goals, away_q2_behinds, away_q3_goals, away_q3_behinds, away_q4_goals, away_q4_behinds
+- Quarter scores are stored IN this table. Do NOT look for a separate `quarter_scores` table.
+- Quarter score formula: Q1 score = q1_goals * 6 + q1_behinds. Cumulative: Q2 total = q1 + q2, etc.
 - round values: regular rounds "0","1".."24"; finals: "Qualifying Final","Elimination Final","Semi Final","Preliminary Final","Grand Final"
 - ALWAYS include finals in round-by-round season queries
 - Contains historical data ({data_range})
@@ -126,7 +147,7 @@ Use EXACT team names: Adelaide (NOT "Adelaide Crows"), Geelong (NOT "Geelong Cat
 - "results so far" / "scores" → add WHERE lg.status IN ('completed', 'post_match')
 - Use same JOIN pattern as matches: JOIN teams t_home ON lg.home_team_id = t_home.id
 
-### players: id, name, team_id (CURRENT team only — WARNING: wrong for traded players), position, height, weight, debut_year
+### players: id, name, team_id (CURRENT team only — WARNING: wrong for traded players), height, weight, debut_year
 
 ### player_stats: match_id, player_id, team_id (team player played FOR — correct for trades!), disposals, kicks, handballs, marks, tackles, goals, behinds, hitouts, clearances, inside_50s, rebound_50s, contested_possessions, uncontested_possessions, contested_marks, marks_inside_50, one_percenters, bounces, goal_assist, clangers, free_kicks_for, free_kicks_against, fantasy_points, brownlow_votes, time_on_ground_pct
 - IMPORTANT: fantasy_points is PRE-COMPUTED in the database using official AFL Fantasy scoring. For fantasy queries, SELECT fantasy_points directly — do NOT ask the user which scoring system to use.
@@ -140,13 +161,42 @@ CRITICAL RULES:
 6. For temporal/trend queries: return ONE ROW PER SEASON, GROUP BY season
 7. For single-season performance: return ONE ROW PER MATCH (round-by-round)
 8. NEVER use CROSS JOIN
-9. CRITICAL: For "who won" or "who played" queries, SELECT must include:
+9. CRITICAL — PLAYER IDENTITY: Multiple players can share the same name (e.g. two different Josh Kennedys). ALWAYS GROUP BY p.id, p.name (not just p.name) when aggregating player stats, so same-name players are counted separately.
+10. CRITICAL: For "who won" or "who played" queries, SELECT must include:
    - Both team names (home_team, away_team)
    - Both scores (home_score, away_score)
    - Winner calculation (CASE statement)
    - Margin (ABS difference)
    - Match context (venue, match_date, round)
    Do NOT return only partial data like just margin or just one team!
+
+## CURRENT ROUND FALLBACK:
+For the CURRENT ROUND of the current season (where match data may not yet be in the `matches` table), use `live_games` with `status IN ('completed', 'post_match')` for scores, results, and game-level stats. For all prior rounds of the current season, use `matches` as normal — that data is ingested from AFL Tables weekly. The `player_stats` table only has rows for ingested matches, so current-round player stats may not be available yet.
+
+## DO NOT (common LLM mistakes):
+- DO NOT use round numbers like WHERE m.round = 1. Round is VARCHAR — use WHERE m.round = '1'
+- DO NOT join players.team_id for historical stats — it only stores CURRENT team. Use player_stats.team_id
+- DO NOT use CROSS JOIN or cartesian products
+- DO NOT generate INSERT/UPDATE/DELETE/DROP statements
+- DO NOT estimate goals by dividing scores by 6 — use actual goal columns
+- DO NOT use LIMIT without ORDER BY
+- DO NOT GROUP BY p.name alone for player stats — always include p.id to distinguish same-name players (e.g. Josh Kennedy played for both Sydney and West Coast)
+- DO NOT filter by player position (`p.position`) — this column is not populated. If asked for 'midfielders' or 'forwards', suggest filtering by relevant stats instead (high disposals for mids, high goals for forwards).
+- DO NOT reference tables that don't exist. Awards, draft picks, and ladder tables do NOT exist. Brownlow votes per game are in `player_stats.brownlow_votes`.
+
+## Few-shot SQL examples (error-prone patterns):
+
+Q: "How many goals did Hawkins kick in 2024?"
+SQL: SELECT p.name, SUM(ps.goals) AS total_goals FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN matches m ON ps.match_id = m.id WHERE p.name ILIKE '%Hawkins%' AND m.season = 2024 GROUP BY p.id, p.name
+
+Q: "Carlton's win-loss record in 2023"
+SQL: SELECT t.name, SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score) OR (m.away_team_id = t.id AND m.away_score > m.home_score) THEN 1 ELSE 0 END) AS wins, SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score < m.away_score) OR (m.away_team_id = t.id AND m.away_score < m.home_score) THEN 1 ELSE 0 END) AS losses, COUNT(*) AS games FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id) WHERE t.name = 'Carlton' AND m.season = 2023 GROUP BY t.name
+
+Q: "Top 5 disposal getters in 2024"
+SQL: SELECT p.name, SUM(ps.disposals) AS total_disposals, t.name AS team FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN matches m ON ps.match_id = m.id JOIN teams t ON ps.team_id = t.id WHERE m.season = 2024 AND ps.disposals IS NOT NULL GROUP BY p.id, p.name, t.id, t.name ORDER BY total_disposals DESC NULLS LAST LIMIT 5
+
+Q: "Geelong's scoring trend from 2018 to 2024"
+SQL: SELECT m.season, ROUND(AVG(CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END), 1) AS avg_score FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id) WHERE t.name = 'Geelong' AND m.season BETWEEN 2018 AND 2024 GROUP BY m.season ORDER BY m.season
 
 Common patterns:
 - Team season record: JOIN teams t, filter (home_team_id=t.id OR away_team_id=t.id), CASE for wins/losses
@@ -225,7 +275,7 @@ Common patterns:
     "rounds": [...]
   }},
   "requires_visualization": true|false,
-  "chart_type": "line"|"bar"|"grouped_bar"|"scatter"|null,
+  "data_shape_hint": "temporal_trend"|"top_n_ranking"|"comparison"|"single_value"|"distribution"|null,
   "chart_config": {{
     "x_col_hint": "expected x-axis column name from the SQL (e.g. 'season', 'name')",
     "y_col_hint": "expected y-axis column name from the SQL (e.g. 'total_goals', 'avg_disposals')"
@@ -233,12 +283,17 @@ Common patterns:
   "sql": "SELECT ..."
 }}
 
-Chart type rules:
-- trend_analysis or temporal queries -> "line"
-- player_comparison -> "grouped_bar" (multiple metrics) or "bar"
-- top-N / ranking queries -> "bar"
-- simple_stat with single number -> null (no chart)
-- If unsure, set chart_type to null
+requires_visualization rules:
+- true: trends over time, comparisons of 3+ entities, top-N rankings (N≥3), round-by-round data
+- false: single facts/numbers, yes/no answers, match results, 1-2 row results, news/odds/tips
+
+Data shape hint rules (describes the SHAPE of the expected result, NOT the chart type):
+- temporal_trend: data has a time dimension (season, round) — one row per time period
+- top_n_ranking: data is a ranked list of items (players, teams) — ordered by a metric
+- comparison: side-by-side comparison of 2-5 entities across metrics
+- single_value: query returns a single number/fact — no chart needed
+- distribution: statistical spread of values (e.g., score distributions)
+- null: if unsure
 
 User question: {user_query}"""
 
@@ -383,7 +438,16 @@ class ConsolidatedQueryUnderstanding:
             entities = data.get("entities", {})
             requires_viz = bool(data.get("requires_visualization", False))
             sql = data.get("sql", "").strip()
-            chart_type = data.get("chart_type")  # May be null/None
+            # Map data_shape_hint to chart_type for downstream consumers
+            data_shape = data.get("data_shape_hint")
+            _SHAPE_TO_CHART = {
+                "temporal_trend": "line",
+                "top_n_ranking": "bar",
+                "comparison": "grouped_bar",
+                "single_value": None,
+                "distribution": "box",
+            }
+            chart_type = _SHAPE_TO_CHART.get(data_shape, data.get("chart_type"))
             chart_config = data.get("chart_config", {})
 
             # Intents that don't require SQL (handled by specialized tools)
