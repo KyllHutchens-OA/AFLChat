@@ -447,6 +447,81 @@ class EntityResolver:
         return cls.TEAM_NICKNAMES.get(canonical_name, [])
 
 
+# Venue alias resolution
+class VenueResolver:
+    """Resolves venue aliases to canonical database names."""
+
+    VENUE_ALIASES = {
+        "M.C.G.": [
+            "mcg", "m.c.g.", "melbourne cricket ground", "the mcg", "the g"
+        ],
+        "Marvel Stadium": [
+            "marvel stadium", "marvel", "docklands", "etihad stadium", "etihad",
+            "colonial stadium", "telstra dome", "docklands stadium"
+        ],
+        "GMHBA Stadium": [
+            "gmhba stadium", "gmhba", "kardinia park", "simonds stadium",
+            "skilled stadium", "geelong", "kardinia"
+        ],
+        "Gabba": [
+            "gabba", "the gabba", "woolloongabba", "brisbane cricket ground"
+        ],
+        "S.C.G.": [
+            "scg", "s.c.g.", "sydney cricket ground", "the scg"
+        ],
+        "Optus Stadium": [
+            "optus stadium", "optus", "perth stadium", "perth"
+        ],
+        "Adelaide Oval": [
+            "adelaide oval", "adelaide"
+        ],
+        "People First Stadium": [
+            "people first stadium", "metricon stadium", "metricon", "carrara",
+            "heritage bank stadium"
+        ],
+        "Blundstone Arena": [
+            "blundstone arena", "blundstone", "bellerive oval", "bellerive"
+        ],
+        "UNSW Canberra Oval": [
+            "unsw canberra oval", "manuka oval", "manuka", "canberra"
+        ],
+        "TIO Traeger Park": [
+            "tio traeger park", "traeger park", "alice springs"
+        ],
+        "Sydney Showground Stadium": [
+            "sydney showground", "showground", "giants stadium", "engie stadium"
+        ],
+        "TIO Stadium": [
+            "tio stadium", "marrara oval", "darwin"
+        ],
+    }
+
+    _ALIAS_LOOKUP = None
+
+    @classmethod
+    def _build_lookup(cls):
+        if cls._ALIAS_LOOKUP is None:
+            cls._ALIAS_LOOKUP = {}
+            for canonical, aliases in cls.VENUE_ALIASES.items():
+                for alias in aliases:
+                    cls._ALIAS_LOOKUP[alias.lower()] = canonical
+
+    @classmethod
+    def resolve_venue(cls, user_input: str) -> Optional[str]:
+        """Resolve a venue name from user input to canonical database name."""
+        if not user_input:
+            return None
+        cls._build_lookup()
+        normalized = user_input.strip().lower()
+        if normalized in cls._ALIAS_LOOKUP:
+            return cls._ALIAS_LOOKUP[normalized]
+        # Try fuzzy partial match
+        for alias, canonical in cls._ALIAS_LOOKUP.items():
+            if alias in normalized or normalized in alias:
+                return canonical
+        return None
+
+
 # Metric normalization
 class MetricResolver:
     """Resolves metric aliases to canonical metric names."""

@@ -432,6 +432,22 @@ class PlotlyBuilder:
             elif chart_type == "scatter":
                 return PlotlyBuilder._build_scatter_chart(data, params)
 
+            elif chart_type == "horizontal_bar":
+                params["orientation"] = "h"
+                return PlotlyBuilder._build_bar_chart(data, params)
+
+            elif chart_type == "pie":
+                return PlotlyBuilder._build_pie_chart(data, params)
+
+            elif chart_type == "box":
+                return PlotlyBuilder._build_box_chart(data, params)
+
+            elif chart_type == "stacked_bar":
+                return PlotlyBuilder._build_multi_bar_chart(data, params, barmode="stack")
+
+            elif chart_type == "grouped_bar":
+                return PlotlyBuilder._build_multi_bar_chart(data, params, barmode="group")
+
             elif chart_type == "comparison":
                 return PlotlyBuilder._build_comparison_chart(data, params)
 
@@ -773,6 +789,151 @@ class PlotlyBuilder:
                 return None
             else:
                 return obj
+
+        return clean_nan(fig_dict)
+
+    @staticmethod
+    def _build_pie_chart(data: pd.DataFrame, params: Dict) -> Dict:
+        """Build a pie chart for proportions."""
+        x_col = params.get("x_col", data.columns[0])
+        y_col = params.get("y_col", data.columns[1])
+        title = params.get("title", "Distribution")
+
+        traces = [go.Pie(
+            labels=data[x_col].tolist(),
+            values=data[y_col].tolist(),
+            marker={"colors": PlotlyBuilder.COLOR_SEQUENCE},
+            textinfo="percent+label",
+            hole=0.3,
+        )]
+
+        layout = PlotlyBuilder.BASE_LAYOUT.copy()
+        layout["title"] = {
+            "text": title,
+            "x": 0.5,
+            "xanchor": "center",
+            "font": {"size": 18},
+            "pad": {"b": 20}
+        }
+        layout["showlegend"] = True
+
+        fig = go.Figure(data=traces, layout=layout)
+        fig_dict = fig.to_dict()
+
+        import math
+        def clean_nan(obj):
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(item) for item in obj]
+            elif isinstance(obj, float) and math.isnan(obj):
+                return None
+            return obj
+
+        return clean_nan(fig_dict)
+
+    @staticmethod
+    def _build_box_chart(data: pd.DataFrame, params: Dict) -> Dict:
+        """Build a box plot for distributions."""
+        y_col = params.get("y_col", data.columns[-1])
+        group_col = params.get("group_col") or params.get("x_col")
+        title = params.get("title", "Distribution Analysis")
+
+        traces = []
+        if group_col and group_col in data.columns and data[group_col].nunique() <= 20:
+            for i, group in enumerate(data[group_col].unique()):
+                group_data = data[data[group_col] == group]
+                traces.append(go.Box(
+                    y=group_data[y_col].tolist(),
+                    name=str(group),
+                    marker={"color": PlotlyBuilder.COLOR_SEQUENCE[i % len(PlotlyBuilder.COLOR_SEQUENCE)]},
+                ))
+        else:
+            traces.append(go.Box(
+                y=data[y_col].tolist(),
+                name=ChartHelper.humanize_column_name(y_col),
+                marker={"color": PlotlyBuilder.COLORS["primary"]},
+            ))
+
+        layout = PlotlyBuilder.BASE_LAYOUT.copy()
+        layout["title"] = {
+            "text": title,
+            "x": 0.5,
+            "xanchor": "center",
+            "font": {"size": 18},
+            "pad": {"b": 20}
+        }
+        layout["yaxis"]["title"] = {"text": ChartHelper.humanize_column_name(y_col)}
+
+        fig = go.Figure(data=traces, layout=layout)
+        fig_dict = fig.to_dict()
+
+        import math
+        def clean_nan(obj):
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(item) for item in obj]
+            elif isinstance(obj, float) and math.isnan(obj):
+                return None
+            return obj
+
+        return clean_nan(fig_dict)
+
+    @staticmethod
+    def _build_multi_bar_chart(data: pd.DataFrame, params: Dict, barmode: str = "group") -> Dict:
+        """Build a stacked or grouped bar chart with multiple traces."""
+        x_col = params.get("x_col", data.columns[0])
+        group_col = params.get("group_col")
+        title = params.get("title", "Comparison")
+
+        numeric_cols = [c for c in data.select_dtypes(include=['number']).columns.tolist()
+                        if 'id' not in c.lower()]
+
+        traces = []
+        if group_col and group_col in data.columns:
+            y_col = params.get("y_col", numeric_cols[0] if numeric_cols else data.columns[-1])
+            for i, group in enumerate(data[group_col].unique()):
+                group_data = data[data[group_col] == group]
+                traces.append(go.Bar(
+                    x=group_data[x_col].tolist(),
+                    y=group_data[y_col].tolist(),
+                    name=str(group),
+                    marker={"color": PlotlyBuilder.COLOR_SEQUENCE[i % len(PlotlyBuilder.COLOR_SEQUENCE)]},
+                ))
+        else:
+            # Use multiple numeric columns as separate traces
+            for i, col in enumerate(numeric_cols[:6]):
+                traces.append(go.Bar(
+                    x=data[x_col].tolist(),
+                    y=data[col].tolist(),
+                    name=ChartHelper.humanize_column_name(col),
+                    marker={"color": PlotlyBuilder.COLOR_SEQUENCE[i % len(PlotlyBuilder.COLOR_SEQUENCE)]},
+                ))
+
+        layout = PlotlyBuilder.BASE_LAYOUT.copy()
+        layout["title"] = {
+            "text": title,
+            "x": 0.5,
+            "xanchor": "center",
+            "font": {"size": 18},
+            "pad": {"b": 20}
+        }
+        layout["barmode"] = barmode
+        layout["xaxis"]["title"] = {"text": ChartHelper.humanize_column_name(x_col)}
+
+        fig = go.Figure(data=traces, layout=layout)
+        fig_dict = fig.to_dict()
+
+        import math
+        def clean_nan(obj):
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(item) for item in obj]
+            elif isinstance(obj, float) and math.isnan(obj):
+                return None
+            return obj
 
         return clean_nan(fig_dict)
 

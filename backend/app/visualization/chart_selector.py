@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, List
 import pandas as pd
 import logging
 import json
+import re
 from openai import OpenAI
 import os
 
@@ -39,6 +40,26 @@ class ChartSelector:
         "box": "Shows distribution and outliers. Best for statistical analysis.",
     }
 
+    # Regex patterns for explicit chart type requests
+    _EXPLICIT_CHART_PATTERNS = [
+        (re.compile(r'\bpie\s+chart\b', re.IGNORECASE), "pie"),
+        (re.compile(r'\bscatter\s+(?:plot|chart|graph)\b', re.IGNORECASE), "scatter"),
+        (re.compile(r'\bbox\s+(?:plot|chart|graph)\b', re.IGNORECASE), "box"),
+        (re.compile(r'\bhorizontal\s+bar\s*(?:chart|graph)?\b', re.IGNORECASE), "horizontal_bar"),
+        (re.compile(r'\bstacked\s+bar\s*(?:chart|graph)?\b', re.IGNORECASE), "stacked_bar"),
+        (re.compile(r'\bgrouped\s+bar\s*(?:chart|graph)?\b', re.IGNORECASE), "grouped_bar"),
+        (re.compile(r'\bline\s+(?:chart|graph|plot)\b', re.IGNORECASE), "line"),
+        (re.compile(r'\bbar\s+(?:chart|graph|plot)\b', re.IGNORECASE), "bar"),
+    ]
+
+    @classmethod
+    def _detect_explicit_chart_type(cls, user_query: str) -> Optional[str]:
+        """Detect if user explicitly requested a specific chart type."""
+        for pattern, chart_type in cls._EXPLICIT_CHART_PATTERNS:
+            if pattern.search(user_query):
+                return chart_type
+        return None
+
     @classmethod
     def select_chart_configuration(
         cls,
@@ -67,6 +88,29 @@ class ChartSelector:
             - reasoning: str (why this chart was chosen)
         """
         try:
+            # Check for explicit chart type request from user FIRST
+            explicit_type = cls._detect_explicit_chart_type(user_query)
+            if explicit_type:
+                logger.info(f"Chart selection via explicit user request: {explicit_type}")
+                # Infer x/y columns
+                numeric_cols = [c for c in data.select_dtypes(include=['number']).columns.tolist()
+                                if 'id' not in c.lower() and c not in ('season', 'year')]
+                non_numeric = data.select_dtypes(exclude=['number']).columns.tolist()
+                temporal_cols = [c for c in data.columns if c in ['season', 'year', 'match_date', 'round']]
+
+                x_col = temporal_cols[0] if temporal_cols else (non_numeric[0] if non_numeric else data.columns[0])
+                y_col = numeric_cols[0] if numeric_cols else data.columns[-1]
+
+                return {
+                    "chart_type": explicit_type,
+                    "x_col": x_col,
+                    "y_col": y_col,
+                    "group_col": None,
+                    "reasoning": f"User explicitly requested {explicit_type} chart",
+                    "confidence": "high",
+                    "user_explicit": True,
+                }
+
             # Quick heuristics for obvious cases (covers ~90% of queries)
             quick_result = cls._quick_heuristics(data, intent, entities, user_query)
             if quick_result:

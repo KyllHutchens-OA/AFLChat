@@ -45,7 +45,9 @@ _AFL_KEYWORDS = re.compile(
     r"top\s?\d+|best|worst|most|least|highest|lowest|compare|comparison|"
     r"trend|over time|year by year|historical|performance|"
     r"bye|byes|home|away|attendance|venue|stadium|"
-    r"news|latest|current|happening|update|updates)\b",
+    r"news|latest|current|happening|update|updates|"
+    r"how\s+(?:has|did|is|are|was|were)|gone\s+(?:so\s+far|this)|this\s+year|"
+    r"form|career|season\s+so\s+far|averaging|kicked|played)\b",
     re.IGNORECASE
 )
 
@@ -69,6 +71,45 @@ def _get_off_topic_response():
         f"Try something like: \"How many goals did Hawkins kick in 2024?\" or "
         f"\"What are the odds for this week's games?\""
     )
+
+
+# ── Meta-question patterns ───────────────────────────────────────────────────
+_META_PATTERNS = re.compile(
+    r"^(what can you do|what do you do|help|how do I use|how does this work|"
+    r"what are you|who are you|what is this|capabilities|features|"
+    r"what questions can I ask|what kind of questions|what sort of questions|"
+    r"how to use this|give me examples|example questions|show me examples)\s*\??$",
+    re.IGNORECASE
+)
+
+
+def _get_meta_response() -> str:
+    """Response for meta-questions about the agent's capabilities."""
+    from app.data.database import get_data_recency
+    recency = get_data_recency()
+    earliest = recency["earliest_season"]
+    hist_season = recency["historical_latest_season"]
+    return (
+        f"I'm an AFL analytics assistant. I can answer questions about Australian Football League "
+        f"statistics from {earliest} to {hist_season}. Here's what I can help with:\n\n"
+        f"**Stats & Records**\n"
+        f"- \"How many goals did Tom Hawkins kick in 2024?\"\n"
+        f"- \"Top 5 disposal getters in 2023\"\n"
+        f"- \"Who won the 2024 grand final?\"\n\n"
+        f"**Comparisons & Trends**\n"
+        f"- \"Compare Cripps and Oliver in 2024\"\n"
+        f"- \"Show Carlton's scoring trend from 2018 to 2024\"\n\n"
+        f"**Live & Current**\n"
+        f"- \"What are the odds for this week?\"\n"
+        f"- \"Who should I tip this round?\"\n"
+        f"- \"What's the latest AFL news?\"\n\n"
+        f"Just ask a question in plain English!"
+    )
+
+
+def _is_meta_question(query: str) -> bool:
+    """Return True if the query is a meta-question about capabilities."""
+    return bool(_META_PATTERNS.match(query.strip()))
 
 
 def _is_off_topic(query: str) -> bool:
@@ -176,7 +217,7 @@ class FastPathRouter:
         JOIN matches m ON ps.match_id = m.id
         JOIN teams t ON ps.team_id = t.id
         WHERE m.season = {year} AND ps.goals IS NOT NULL
-        GROUP BY p.name, t.name
+        GROUP BY p.id, p.name, t.id, t.name
         ORDER BY total_goals DESC NULLS LAST
         LIMIT 5
     """
@@ -188,7 +229,7 @@ class FastPathRouter:
         JOIN matches m ON ps.match_id = m.id
         JOIN teams t ON ps.team_id = t.id
         WHERE m.season = {year} AND ps.disposals IS NOT NULL
-        GROUP BY p.name, t.name
+        GROUP BY p.id, p.name, t.id, t.name
         ORDER BY total_disposals DESC NULLS LAST
         LIMIT 5
     """
@@ -227,7 +268,7 @@ class FastPathRouter:
         JOIN matches m ON ps.match_id = m.id
         JOIN teams t ON ps.team_id = t.id
         WHERE m.season = {year}
-        GROUP BY p.name, t.name
+        GROUP BY p.id, p.name, t.id, t.name
         HAVING COUNT(*) >= 5
         ORDER BY avg_fantasy DESC NULLS LAST
         LIMIT 5
@@ -240,7 +281,7 @@ class FastPathRouter:
         JOIN matches m ON ps.match_id = m.id
         JOIN teams t ON ps.team_id = t.id
         WHERE m.season = {year} AND ps.brownlow_votes IS NOT NULL AND ps.brownlow_votes > 0
-        GROUP BY p.name, t.name
+        GROUP BY p.id, p.name, t.id, t.name
         ORDER BY total_votes DESC NULLS LAST
         LIMIT 1
     """
@@ -261,7 +302,7 @@ class FastPathRouter:
         JOIN matches m ON ps.match_id = m.id
         JOIN teams t ON ps.team_id = t.id
         WHERE LOWER(p.name) LIKE LOWER('%{player}%') AND m.season = {year}
-        GROUP BY p.name, t.name
+        GROUP BY p.id, p.name, t.id, t.name
     """
 
     _TEAM_LADDER_SQL = """
@@ -324,6 +365,69 @@ class FastPathRouter:
             SELECT m.away_team_id FROM matches m WHERE m.season = {year}
         )
         ORDER BY t.name
+    """
+
+    _ROUND_RESULTS_SQL = """
+        SELECT ht.name AS home_team, at.name AS away_team,
+               m.home_score, m.away_score,
+               CASE WHEN m.home_score > m.away_score THEN ht.name
+                    WHEN m.away_score > m.home_score THEN at.name
+                    ELSE 'Draw' END AS winner,
+               ABS(m.home_score - m.away_score) AS margin,
+               m.venue
+        FROM matches m
+        JOIN teams ht ON m.home_team_id = ht.id
+        JOIN teams at ON m.away_team_id = at.id
+        WHERE m.season = {year} AND m.round = '{round}'
+        ORDER BY m.match_date
+    """
+
+    _MATCH_RESULT_SQL = """
+        SELECT ht.name AS home_team, at.name AS away_team,
+               m.home_score, m.away_score,
+               CASE WHEN m.home_score > m.away_score THEN ht.name
+                    WHEN m.away_score > m.home_score THEN at.name
+                    ELSE 'Draw' END AS winner,
+               ABS(m.home_score - m.away_score) AS margin,
+               m.venue, m.round
+        FROM matches m
+        JOIN teams ht ON m.home_team_id = ht.id
+        JOIN teams at ON m.away_team_id = at.id
+        WHERE m.season = {year} AND m.round = '{round}'
+          AND ((ht.name = '{team1}' AND at.name = '{team2}')
+               OR (ht.name = '{team2}' AND at.name = '{team1}'))
+        LIMIT 1
+    """
+
+    _COLEMAN_SQL = """
+        SELECT p.name, SUM(ps.goals) AS total_goals, t.name AS team
+        FROM player_stats ps
+        JOIN players p ON ps.player_id = p.id
+        JOIN matches m ON ps.match_id = m.id
+        JOIN teams t ON ps.team_id = t.id
+        WHERE m.season = {year} AND ps.goals IS NOT NULL
+          AND m.round ~ '^[0-9]+$'
+        GROUP BY p.id, p.name, t.id, t.name
+        ORDER BY total_goals DESC NULLS LAST
+        LIMIT 1
+    """
+
+    _PLAYER_CAREER_SQL = """
+        SELECT p.name,
+               COUNT(DISTINCT m.id) AS games,
+               SUM(ps.goals) AS career_goals,
+               SUM(ps.disposals) AS career_disposals,
+               SUM(ps.marks) AS career_marks,
+               SUM(ps.tackles) AS career_tackles,
+               ROUND(AVG(ps.disposals), 1) AS avg_disposals,
+               ROUND(AVG(ps.goals), 1) AS avg_goals,
+               MIN(m.season) AS first_season,
+               MAX(m.season) AS last_season
+        FROM player_stats ps
+        JOIN players p ON ps.player_id = p.id
+        JOIN matches m ON ps.match_id = m.id
+        WHERE LOWER(p.name) LIKE LOWER('%{player}%')
+        GROUP BY p.id, p.name
     """
 
     _HIGHEST_SCORE_SQL = """
@@ -501,6 +605,69 @@ class FastPathRouter:
                 lines.append(f"Round {rd}: {winner} def. {loser} by {margin} pts ({hs}-{aws})")
         header = f"{team1} vs {team2} in {year}:"
         return header + "\n" + "\n".join(lines)
+
+    @staticmethod
+    def _fmt_round_results(df, year: int, round: str = "", **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        lines = [f"Round {round}, {year} results:\n"]
+        for _, row in df.iterrows():
+            home = row["home_team"]
+            away = row["away_team"]
+            hs, aws = int(row["home_score"]), int(row["away_score"])
+            winner = row["winner"]
+            margin = int(row["margin"])
+            if winner == "Draw":
+                lines.append(f"- {home} {hs} drew with {away} {aws}")
+            else:
+                loser = away if winner == home else home
+                lines.append(f"- {winner} def. {loser} by {margin} pts ({hs}-{aws})")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _fmt_match_result(df, year: int, team1: str = "", team2: str = "", round: str = "", **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        row = df.iloc[0]
+        home = row["home_team"]
+        away = row["away_team"]
+        hs, aws = int(row["home_score"]), int(row["away_score"])
+        winner = row["winner"]
+        margin = int(row["margin"])
+        venue = row.get("venue", "")
+        venue_text = f" at {venue}" if venue else ""
+        if winner == "Draw":
+            return f"Round {round} {year}: {home} {hs} drew with {away} {aws}{venue_text}."
+        loser = away if winner == home else home
+        return f"{winner} defeated {loser} by {margin} points ({hs}-{aws}) in Round {round} {year}{venue_text}."
+
+    @staticmethod
+    def _fmt_coleman(df, year: int, **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        row = df.iloc[0]
+        return (f"{row['name']} ({row['team']}) was the leading goal kicker in {year} "
+                f"with {int(row['total_goals'])} goals (home-and-away season).")
+
+    @staticmethod
+    def _fmt_player_career(df, player: str = "", **_) -> str:
+        if df is None or len(df) == 0:
+            return None
+        if len(df) > 1:
+            return None  # Ambiguous — fall through
+        row = df.iloc[0]
+        name = row["name"]
+        games = int(row["games"])
+        goals = int(row["career_goals"]) if row["career_goals"] else 0
+        disposals = int(row["career_disposals"]) if row["career_disposals"] else 0
+        marks = int(row["career_marks"]) if row["career_marks"] else 0
+        tackles = int(row["career_tackles"]) if row["career_tackles"] else 0
+        first = int(row["first_season"])
+        last = int(row["last_season"])
+        return (
+            f"{name}'s career stats ({first}–{last}): {games} games, "
+            f"{goals} goals, {disposals} disposals, {marks} marks, {tackles} tackles."
+        )
 
     @staticmethod
     def _fmt_highest_score(df, year: int, **_) -> str:
@@ -701,6 +868,78 @@ class FastPathRouter:
                 requires_team=False,
                 requires_season=True,
             ),
+
+            # Head-to-head — "Carlton vs Essendon 2024" / "Geelong vs Sydney record in 2023"
+            QueryPattern(
+                name="head_to_head",
+                regex=re.compile(
+                    r"(.+?)\s+(?:vs?\.?|versus)\s+(.+?)\s+(?:in\s+)?(\d{4})"
+                    r"|(.+?)\s+(?:vs?\.?|versus)\s+(.+?)\s+(?:record|results?|history)\s*(?:in\s+)?(\d{4})",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._HEAD_TO_HEAD_SQL,
+                response_formatter=cls._fmt_head_to_head,
+                requires_team=False,  # handled specially
+                requires_season=True,
+            ),
+
+            # Round results — "what happened in round 5 2024" / "round 3 results 2024"
+            QueryPattern(
+                name="round_results",
+                regex=re.compile(
+                    r"(?:what\s+happened\s+in\s+|results?\s+(?:for|from|of)\s+)?"
+                    r"(?:round|r)\s*(\d{1,2})\s+(?:in\s+)?(\d{4})"
+                    r"|(\d{4})\s+(?:round|r)\s*(\d{1,2})\s*(?:results?)?",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._ROUND_RESULTS_SQL,
+                response_formatter=cls._fmt_round_results,
+                requires_team=False,
+                requires_season=True,
+            ),
+
+            # Match result — "score in round 5 Collingwood vs Carlton 2024"
+            QueryPattern(
+                name="match_result",
+                regex=re.compile(
+                    r"(?:score|result)\s+(?:in\s+)?(?:round|r)\s*(\d{1,2})"
+                    r"\s+(.+?)\s+(?:vs?\.?|versus)\s+(.+?)\s+(?:in\s+)?(\d{4})",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._MATCH_RESULT_SQL,
+                response_formatter=cls._fmt_match_result,
+                requires_team=False,
+                requires_season=True,
+            ),
+
+            # Coleman Medal — "who won the Coleman in 2024" / "Coleman medal winner 2024"
+            QueryPattern(
+                name="coleman_winner",
+                regex=re.compile(
+                    r"(?:who\s+won|winner\s+of(?:\s+the)?)\s+(?:the\s+)?coleman"
+                    r"(?:\s+medal)?(?:\s+in)?\s*(\d{4})"
+                    r"|(\d{4})\s*coleman(?:\s+medal)?\s*(?:winner|medallist)?",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._COLEMAN_SQL,
+                response_formatter=cls._fmt_coleman,
+                requires_team=False,
+                requires_season=True,
+            ),
+
+            # Player career stats — "Dustin Martin career goals" / "how many career goals has Martin kicked"
+            QueryPattern(
+                name="player_career_stats",
+                regex=re.compile(
+                    r"(?:(.+?)(?:'s)?\s+career\s+(?:stats?|statistics|goals?|disposals?|marks?|tackles?|games?))"
+                    r"|(?:how\s+many\s+career\s+(?:goals?|disposals?|games?)\s+(?:has|did)\s+(.+?)\s+(?:kick|have|play))",
+                    re.IGNORECASE
+                ),
+                sql_template=cls._PLAYER_CAREER_SQL,
+                response_formatter=cls._fmt_player_career,
+                requires_team=False,
+                requires_season=False,
+            ),
         ]
 
     @classmethod
@@ -795,6 +1034,41 @@ class FastPathRouter:
         from app.agent.tools import DatabaseTool
         from app.utils.cache import get_cached_result, set_cached_result
 
+        # Meta-question detection — "what can you do?", "help", etc.
+        if _is_meta_question(user_query):
+            logger.info(f"FAST-PATH: Meta-question detected: {user_query[:80]}")
+            return {
+                "user_query": user_query,
+                "intent": QueryIntent.SIMPLE_STAT,
+                "entities": {},
+                "needs_clarification": False,
+                "clarification_question": None,
+                "analysis_plan": ["Meta-question"],
+                "requires_visualization": False,
+                "chart_type": None,
+                "fallback_approach": None,
+                "analysis_mode": "summary",
+                "analysis_types": [],
+                "context_insights": {},
+                "data_quality": {},
+                "stats_summary": {},
+                "sql_query": None,
+                "sql_validated": False,
+                "query_results": None,
+                "statistical_analysis": {},
+                "execution_error": None,
+                "visualization_spec": None,
+                "natural_language_summary": _get_meta_response(),
+                "confidence": 1.0,
+                "sources": [],
+                "current_step": WorkflowStep.RESPOND,
+                "thinking_message": "Done",
+                "errors": [],
+                "socketio_emit": socketio_emit,
+                "conversation_history": conversation_history or [],
+                "conversation_id": None,
+            }
+
         # Off-topic detection — reject clearly non-AFL queries immediately
         # BUT: If there's conversation history, the query might be a follow-up
         # that doesn't contain AFL keywords (e.g., "Who came second?" after asking about Grand Final)
@@ -858,14 +1132,42 @@ class FastPathRouter:
 
             # Extract year from whichever capture group matched
             year_str = next((g for g in match.groups() if g and g.isdigit() and len(g) == 4), None)
-            if not year_str:
+            if not year_str and pattern.requires_season:
                 logger.debug(f"FAST-PATH: No year found in match groups {match.groups()}")
                 continue
 
-            year = cls._validate_year(year_str)
-            if year is None:
+            year = cls._validate_year(year_str) if year_str else None
+            if year is None and pattern.requires_season:
                 logger.debug(f"FAST-PATH: Year {year_str} out of valid range")
                 continue
+
+            # Guard: detect when the query is more specific than the pattern can handle
+            query_lower = user_query.lower()
+
+            # Skip season-aggregate patterns when query references a specific round/match
+            _SEASON_AGGREGATE_PATTERNS = {
+                "top_goal_kickers", "top_disposal_getters", "afl_fantasy_top_scorers",
+                "brownlow_winner", "coleman_winner", "team_season_record", "team_ladder_position",
+            }
+            if pattern.name in _SEASON_AGGREGATE_PATTERNS:
+                has_round_ref = bool(re.search(r'\bround\s+\d{1,2}\b', query_lower))
+                has_match_ref = any(kw in query_lower for kw in ['match between', 'game between', 'match against'])
+                if has_round_ref or has_match_ref:
+                    logger.info(f"FAST-PATH: Skipping season-aggregate pattern '{pattern.name}' — query references specific round/match")
+                    continue
+
+            # Skip match-level patterns (round_results, match_result, head_to_head) when
+            # query asks for player-level stats — these patterns only return team scores
+            _MATCH_LEVEL_PATTERNS = {"round_results", "match_result", "head_to_head"}
+            _PLAYER_STAT_KEYWORDS = [
+                "fantasy", "disposal", "kick", "handball", "mark", "tackle",
+                "hitout", "clearance", "goal kicker", "player", "stats", "scoring",
+                "contested", "inside 50", "brownlow", "best on ground",
+            ]
+            if pattern.name in _MATCH_LEVEL_PATTERNS:
+                if any(kw in query_lower for kw in _PLAYER_STAT_KEYWORDS):
+                    logger.info(f"FAST-PATH: Skipping match-level pattern '{pattern.name}' — query asks for player stats")
+                    continue
 
             # Extract team if required
             team = None
@@ -875,19 +1177,52 @@ class FastPathRouter:
                     logger.debug(f"FAST-PATH: Pattern '{pattern.name}' requires team but none found")
                     continue  # Try next pattern
 
-            # Extract round number for round_byes pattern
+            # Extract round number for round-related patterns
             round_num = None
             if pattern.name == "round_byes":
-                # Group 1 is round number, group 2 is year
                 round_num = match.group(1)
                 if not round_num:
                     logger.debug(f"FAST-PATH: round_byes requires round but none found")
                     continue
+            elif pattern.name == "round_results":
+                # Groups: (round, year) or (year, round) depending on which alt matched
+                groups = match.groups()
+                round_num = groups[0] or groups[3]
+                year_str = groups[1] or groups[2]
+                if not round_num:
+                    continue
+                year = cls._validate_year(year_str)
+                if year is None:
+                    continue
+            elif pattern.name == "match_result":
+                # Groups: round, team1_text, team2_text, year
+                round_num = match.group(1)
 
-            # Extract player if needed (for player_season_stats pattern)
+            # Extract two teams for head-to-head and match_result patterns
+            team1, team2 = None, None
+            if pattern.name == "head_to_head":
+                groups = match.groups()
+                t1_text = groups[0] or groups[3]
+                t2_text = groups[1] or groups[4]
+                if t1_text and t2_text:
+                    team1 = cls._extract_team(t1_text.strip())
+                    team2 = cls._extract_team(t2_text.strip())
+                if not team1 or not team2:
+                    logger.debug(f"FAST-PATH: head_to_head requires two teams but couldn't resolve both")
+                    continue
+            elif pattern.name == "match_result":
+                t1_text = match.group(2)
+                t2_text = match.group(3)
+                if t1_text and t2_text:
+                    team1 = cls._extract_team(t1_text.strip())
+                    team2 = cls._extract_team(t2_text.strip())
+                if not team1 or not team2:
+                    logger.debug(f"FAST-PATH: match_result requires two teams but couldn't resolve both")
+                    continue
+
+            # Extract player if needed (for player_season_stats and player_career_stats patterns)
             player = None
             if pattern.name == "player_season_stats":
-                # Try to get player name from regex capture groups (groups 1-3 are player name)
                 player = next((g for g in match.groups()[:3] if g and not g.isdigit()), None)
                 if player:
                     player = player.strip()
@@ -895,6 +1230,15 @@ class FastPathRouter:
                     player = cls._extract_player_name(user_query)
                 if not player:
                     logger.debug(f"FAST-PATH: player_season_stats requires player but none found")
+                    continue
+            elif pattern.name == "player_career_stats":
+                player = next((g for g in match.groups() if g and not g.isdigit()), None)
+                if player:
+                    player = player.strip()
+                else:
+                    player = cls._extract_player_name(user_query)
+                if not player:
+                    logger.debug(f"FAST-PATH: player_career_stats requires player but none found")
                     continue
 
             # Emit progress to WebSocket
@@ -908,7 +1252,8 @@ class FastPathRouter:
             try:
                 sql = pattern.sql_template.format(
                     year=year, team=team or "", player=player or "",
-                    round=round_num or ""
+                    round=round_num or "",
+                    team1=team1 or "", team2=team2 or "",
                 )
                 sql = " ".join(sql.split())  # Normalise whitespace
 
@@ -935,7 +1280,8 @@ class FastPathRouter:
                         return None
 
                 # Format response
-                fmt_kwargs = {"year": year, "team": team, "player": player, "round": round_num}
+                fmt_kwargs = {"year": year, "team": team, "player": player, "round": round_num,
+                              "team1": team1, "team2": team2}
                 response_text = pattern.response_formatter(df, **fmt_kwargs)
 
                 if response_text is None:
@@ -946,11 +1292,11 @@ class FastPathRouter:
 
                 # Build AgentState-compatible result
                 entities: Dict[str, Any] = {
-                    "teams": [team] if team else [],
-                    "players": [],
-                    "seasons": [str(year)],
+                    "teams": ([team1, team2] if team1 and team2 else [team] if team else []),
+                    "players": [player] if player else [],
+                    "seasons": [str(year)] if year else [],
                     "metrics": [],
-                    "rounds": [],
+                    "rounds": [str(round_num)] if round_num else [],
                 }
 
                 return {

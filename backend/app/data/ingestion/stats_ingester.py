@@ -567,6 +567,21 @@ def _build_team_name_cache(session) -> Dict[str, int]:
         if simple not in cache:
             cache[simple] = team.id
 
+    # Priority 3: historical team name aliases
+    _ALIASES = {
+        "kangaroos": "North Melbourne",
+        "the kangaroos": "North Melbourne",
+        "footscray": "Western Bulldogs",
+        "south melbourne": "Sydney",
+        "fitzroy": "Brisbane Lions",
+        "bears": "Brisbane Lions",
+        "brisbane bears": "Brisbane Lions",
+    }
+    for alias, canonical in _ALIASES.items():
+        canonical_lower = canonical.lower()
+        if canonical_lower in cache and alias not in cache:
+            cache[alias] = cache[canonical_lower]
+
     return cache
 
 
