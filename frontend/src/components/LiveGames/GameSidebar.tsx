@@ -137,6 +137,10 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
     ? upcomingMatches.filter(m => String(m.round) === String(currentRound))
     : [];
 
+  // Split upcoming into games with previews (shown higher) and without
+  const upcomingWithPreview = currentRoundUpcoming.filter(m => !!m.preview);
+  const upcomingWithoutPreview = currentRoundUpcoming.filter(m => !m.preview);
+
   // Find the next round number (first round after current)
   const nextRound = currentRound
     ? upcomingMatches.find(m => String(m.round) !== String(currentRound))?.round
@@ -279,9 +283,14 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
             </div>
           )}
 
+          {/* Upcoming with preview - shown above results */}
+          {upcomingWithPreview.length > 0 && (
+            <UpcomingList matches={upcomingWithPreview} label="Preview" />
+          )}
+
           {/* Results this round */}
           {completedGames.length > 0 && (
-            <div className={liveGames.length > 0 ? 'mt-4' : ''}>
+            <div className={liveGames.length > 0 || upcomingWithPreview.length > 0 ? 'mt-4' : ''}>
               <div className="mb-2 px-1">
                 <span className="text-xs font-semibold text-apple-gray-400 uppercase tracking-wide">Results</span>
               </div>
@@ -293,8 +302,10 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
             </div>
           )}
 
-          {/* Upcoming this round */}
-          <UpcomingList matches={currentRoundUpcoming} label="Upcoming" />
+          {/* Upcoming without preview */}
+          {upcomingWithoutPreview.length > 0 && (
+            <UpcomingList matches={upcomingWithoutPreview} label="Upcoming" />
+          )}
 
           {/* Next round */}
           {nextRoundUpcoming.length > 0 && (
@@ -316,14 +327,16 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
                 <GameTile game={game} />
               </div>
             ))}
+            {/* Then upcoming with preview */}
+            <MobileUpcomingTiles matches={upcomingWithPreview} />
             {/* Then completed this round */}
             {completedGames.map(game => (
               <div key={game.id} className="w-36 flex-shrink-0">
                 <GameTile game={game} />
               </div>
             ))}
-            {/* Then upcoming this round */}
-            <MobileUpcomingTiles matches={currentRoundUpcoming} />
+            {/* Then upcoming without preview */}
+            <MobileUpcomingTiles matches={upcomingWithoutPreview} />
             {/* Next round */}
             <MobileUpcomingTiles matches={nextRoundUpcoming} />
           </div>

@@ -107,10 +107,10 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
         <GameStats gameId={game.id} gameStatus={game.status} />
       )}
 
-      {/* Quarter Summaries - shown when available */}
-      {!hideScores && hasQuarterSummaries && (
+      {/* Quarter Summaries - temporarily hidden while quality is improved */}
+      {/* {!hideScores && hasQuarterSummaries && (
         <QuarterSummaries quarterSummaries={game.quarter_summaries!} quarterScores={game.quarter_scores} />
-      )}
+      )} */}
 
       {/* AI Summary for completed games - hidden when spoiler mode is on */}
       {!hideScores && game.status === 'completed' && game.ai_summary && (
