@@ -12,7 +12,7 @@
     margin: 0;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: #F5F5F7;  /* Apple gray-50 */
+    background-color: #FAF7F2;  /* afl-warm-50 */
     color: #1C1C1E;  /* Apple gray-900 */
   }
 
@@ -29,7 +29,7 @@
 @layer components {
   /* Frosted glass effect (Apple's signature) */
   .glass {
-    @apply bg-white/70 backdrop-blur-apple border border-apple-gray-200/50;
+    @apply bg-white/80 backdrop-blur-apple border border-afl-warm-200/50;
   }
 
   .glass-dark {
@@ -38,8 +38,8 @@
 
   /* Apple button styles */
   .btn-apple-primary {
-    @apply px-6 py-2.5 bg-apple-blue-500 text-white rounded-apple font-medium
-           shadow-apple hover:bg-apple-blue-600 active:scale-95
+    @apply px-6 py-2.5 bg-afl-accent text-white rounded-apple font-medium
+           shadow-apple hover:bg-afl-accent-600 active:scale-95
            transition-all duration-200 ease-apple;
   }
 
@@ -52,14 +52,22 @@
   /* Apple input styles */
   .input-apple {
     @apply px-4 py-2.5 bg-white border border-apple-gray-300 rounded-apple
-           focus:outline-none focus:ring-2 focus:ring-apple-blue-500 focus:border-transparent
+           focus:outline-none focus:ring-2 focus:ring-afl-accent focus:border-transparent
            transition-all duration-200 ease-apple placeholder:text-apple-gray-500;
   }
 
   /* Card with subtle depth */
   .card-apple {
-    @apply bg-white rounded-apple-lg shadow-apple border border-apple-gray-200/50
+    @apply bg-white rounded-apple-lg shadow-apple border border-afl-warm-200/50
            transition-all duration-300 ease-apple hover:shadow-apple-md;
+  }
+
+  .stat-number {
+    @apply text-5xl font-bold tracking-tight text-afl-warm-900;
+  }
+
+  .section-label {
+    @apply text-xs font-semibold uppercase tracking-wider text-afl-warm-500;
   }
 }
 
@@ -92,15 +100,15 @@
   font-size: 0.875rem;
 }
 .chat-markdown th {
-  background: #F5F5F7; /* apple-gray-50 */
+  background: #FAF7F2; /* afl-warm-50 */
   font-weight: 600;
   text-align: left;
   padding: 6px 10px;
-  border-bottom: 2px solid #D1D1D6; /* apple-gray-300 */
+  border-bottom: 2px solid #E0D5C8; /* afl-warm-200 */
 }
 .chat-markdown td {
   padding: 6px 10px;
-  border-bottom: 1px solid #E5E5EA; /* apple-gray-200 */
+  border-bottom: 1px solid #F0EBE3; /* afl-warm-100 */
 }
 .chat-markdown tr:last-child td {
   border-bottom: none;

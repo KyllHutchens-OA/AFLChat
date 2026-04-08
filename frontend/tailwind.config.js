@@ -32,6 +32,34 @@ export default {
         'apple-green': '#34C759',
         'apple-red': '#FF3B30',
         'apple-orange': '#FF9500',
+
+        // AFL warm accent palette (red-based primary)
+        'afl-accent': {
+          DEFAULT: '#CC2936',
+          50: '#FEF2F2',
+          100: '#FDE6E7',
+          200: '#FACDD0',
+          300: '#F5A3A9',
+          400: '#E8636C',
+          500: '#CC2936',
+          600: '#B8232F',
+          700: '#9A1D28',
+          800: '#7D1821',
+          900: '#60121A',
+        },
+        // AFL warm neutral palette (cream/tan)
+        'afl-warm': {
+          50: '#FAF7F2',
+          100: '#F0EBE3',
+          200: '#E0D5C8',
+          300: '#C8B9A8',
+          400: '#A89888',
+          500: '#8A7B6B',
+          600: '#706354',
+          700: '#574D42',
+          800: '#3E3732',
+          900: '#2A2522',
+        },
       },
 
       // SF Pro-like typography
@@ -49,6 +77,9 @@ export default {
         '2xl': ['1.5rem', { lineHeight: '2rem', letterSpacing: '-0.019em' }],
         '3xl': ['1.875rem', { lineHeight: '2.25rem', letterSpacing: '-0.021em' }],
         '4xl': ['2.25rem', { lineHeight: '2.5rem', letterSpacing: '-0.022em' }],
+        '5xl': ['3rem', { lineHeight: '1', letterSpacing: '-0.025em' }],
+        '6xl': ['3.75rem', { lineHeight: '1', letterSpacing: '-0.025em' }],
+        '7xl': ['4.5rem', { lineHeight: '1', letterSpacing: '-0.025em' }],
       },
 
       // Apple-style shadows (subtle depth)
@@ -83,10 +114,24 @@ export default {
         'apple-sm': '8px',
         'apple-lg': '16px',
         'apple-xl': '20px',
+        // Clean 3-tier hierarchy aliases
+        'sm': '8px',
+        'md': '12px',
+        'lg': '16px',
       },
 
-      // Spacing scale (Apple uses generous whitespace)
+      // Spacing scale (8pt grid + Apple generous whitespace)
       spacing: {
+        '1': '0.25rem',
+        '2': '0.5rem',
+        '3': '0.75rem',
+        '4': '1rem',
+        '5': '1.25rem',
+        '6': '1.5rem',
+        '8': '2rem',
+        '10': '2.5rem',
+        '12': '3rem',
+        '16': '4rem',
         '18': '4.5rem',
         '22': '5.5rem',
       },
