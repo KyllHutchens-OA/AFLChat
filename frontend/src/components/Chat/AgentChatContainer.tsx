@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useAgentWebSocket } from '../../hooks/useAgentWebSocket';
-import ChartRenderer from '../Visualization/ChartRenderer';
+import QueryEcho from './QueryEcho';
+import ResponseCard from './ResponseCard';
+import SuggestedQuestions from './SuggestedQuestions';
+import ThinkingCard from './ThinkingCard';
 import FeedbackButton from './FeedbackButton';
 
 const MESSAGE_THRESHOLD = 20;
@@ -23,6 +24,9 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const { messages, isConnected, isThinking, thinkingStep, isLoadingHistory, currentConversationId, sendMessage, startNewChat } =
     useAgentWebSocket({ conversationId, onConversationCreated });
+
+  // Read team from localStorage (avoid importing TeamContext to keep this self-contained)
+  const teamName = localStorage.getItem('footy-nac-team');
 
   const showNewChatPrompt = messages.length >= MESSAGE_THRESHOLD && !dismissedNewChatPrompt;
 
@@ -59,191 +63,148 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!input.trim() || isThinking) {
-      return;
-    }
-
+    if (!input.trim() || isThinking) return;
     sendMessage(input.trim());
     setInput('');
   };
 
+  const handleSuggestedQuestion = (question: string) => {
+    sendMessage(question);
+  };
+
   return (
-  <>
-    <div
-      className="flex flex-col h-[calc(100vh-14rem)] glass rounded-apple-xl shadow-apple-lg"
-      style={{ marginBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : undefined }}
-    >
-      {/* Connection Status & New Chat Button */}
-      <div className="px-4 py-2 glass sticky top-0 z-10 border-b border-apple-gray-200/50 rounded-t-apple-xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-apple-green animate-pulse' : 'bg-apple-red'}`} />
-            <span className="text-sm text-apple-gray-700">
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
+    <>
+      <div
+        className="flex flex-col h-[calc(100vh-8rem)]"
+        style={{ marginBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : undefined }}
+      >
+        {/* Disconnected warning - only show when disconnected */}
+        {!isConnected && (
+          <div className="px-4 py-2 bg-red-50 border border-red-200 rounded-lg mb-3 flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-red-500" />
+            <span className="text-sm text-red-700">Disconnected — reconnecting...</span>
           </div>
+        )}
+
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+          {isLoadingHistory && (
+            <div className="text-center text-afl-warm-500 mt-8">
+              <div className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-afl-accent border-t-transparent rounded-full animate-spin" />
+                <span>Loading conversation...</span>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!isLoadingHistory && messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-center px-4 animate-fade-in">
+              <h2 className="text-2xl font-semibold text-afl-warm-900 mb-2">
+                {teamName ? `What do you want to know about the ${teamName}?` : 'Ask me about AFL statistics'}
+              </h2>
+              <p className="text-sm text-afl-warm-500 mb-8">
+                Stats, records, player comparisons — ask anything
+              </p>
+              <SuggestedQuestions teamName={teamName} onSelect={handleSuggestedQuestion} />
+            </div>
+          )}
+
+          {/* Message list */}
+          {messages.map((message) => (
+            <div key={message.id} className="animate-fade-in">
+              {message.type === 'user' ? (
+                <QueryEcho text={message.text} />
+              ) : (
+                <ResponseCard
+                  text={message.text}
+                  visualization={message.visualization}
+                  isError={message.isError}
+                />
+              )}
+            </div>
+          ))}
+
+          {/* Thinking */}
+          {isThinking && <ThinkingCard step={thinkingStep} />}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* New Chat Suggestion Banner */}
+        {showNewChatPrompt && (
+          <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg mb-3 flex items-center justify-between">
+            <span className="text-sm text-amber-800">
+              This conversation is getting long. Consider starting fresh.
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setDismissedNewChatPrompt(true)}
+                className="text-sm text-afl-warm-500 hover:text-afl-warm-700 px-2 py-1"
+              >
+                Dismiss
+              </button>
+              <button
+                onClick={() => { startNewChat(); setDismissedNewChatPrompt(false); }}
+                className="btn-apple-primary text-sm"
+              >
+                New Chat
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Input Area */}
+        <form onSubmit={handleSubmit} className="flex items-center gap-2 pt-3">
           {messages.length > 0 && (
             <button
+              type="button"
               onClick={startNewChat}
-              className="btn-apple-secondary text-sm flex items-center gap-1"
+              className="p-2.5 rounded-lg text-afl-warm-400 hover:text-afl-warm-700 hover:bg-afl-warm-100 transition-colors"
+              title="New Chat"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              New Chat
             </button>
           )}
-        </div>
-      </div>
-
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {isLoadingHistory && (
-          <div className="text-center text-apple-gray-500 mt-8">
-            <div className="flex items-center justify-center gap-2">
-              <div className="w-4 h-4 border-2 border-apple-blue-500 border-t-transparent rounded-full animate-spin"></div>
-              <span>Loading conversation history...</span>
-            </div>
+          <div className="flex-1 relative">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onFocus={handleInputFocus}
+              placeholder={teamName ? `Ask about ${teamName}...` : 'Ask about AFL statistics...'}
+              disabled={!isConnected || isThinking}
+              className="w-full px-4 py-3 rounded-xl border border-afl-warm-200 bg-white
+                         focus:outline-none focus:ring-2 focus:ring-afl-accent/30 focus:border-afl-accent
+                         text-sm disabled:bg-afl-warm-50 disabled:cursor-not-allowed
+                         placeholder:text-afl-warm-400 transition-all"
+            />
           </div>
-        )}
-
-        {!isLoadingHistory && messages.length === 0 && (
-          <div className="text-center text-apple-gray-500 mt-8 animate-fade-in-up">
-            <h2 className="text-xl font-semibold mb-2 text-apple-gray-900">Ask me about AFL statistics!</h2>
-            <p className="text-sm">Try questions like:</p>
-            <ul className="text-sm mt-2 space-y-1">
-              <li>"Who won the 2025 grand final?"</li>
-              <li>"Show me Richmond's performance in 2024"</li>
-              <li>"Which teams had the most wins in 2023?"</li>
-            </ul>
-          </div>
-        )}
-
-        {messages.map((message) => (
-          <div key={message.id} className="mb-4 animate-scale-in">
-            {/* Message bubble */}
-            <div
-              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-3xl rounded-[18px] px-4 py-3 ${
-                  message.type === 'user'
-                    ? 'bg-apple-blue-500 text-white shadow-apple'
-                    : message.isError
-                    ? 'bg-apple-red/10 border border-apple-red/30 text-apple-gray-900'
-                    : 'bg-apple-gray-100 text-apple-gray-900'
-                }`}
-              >
-                {/* Error icon for error messages */}
-                {message.isError && (
-                  <div className="flex items-center gap-2 mb-2 text-apple-red">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                    <span className="text-sm font-medium">Something went wrong</span>
-                  </div>
-                )}
-                {message.type === 'agent' ? (
-                  <div className="chat-markdown">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
-                  </div>
-                ) : (
-                  <div className="whitespace-pre-wrap">{message.text}</div>
-                )}
-
-              </div>
-            </div>
-
-            {/* Chart - full width outside message bubble */}
-            {message.type === 'agent' && message.visualization && (
-              <div className="w-full mt-3">
-                <ChartRenderer spec={message.visualization} />
-              </div>
-            )}
-          </div>
-        ))}
-
-        {/* Thinking Indicator */}
-        {isThinking && (
-          <div className="flex justify-start">
-            <div className="max-w-3xl glass rounded-apple px-4 py-3">
-              <div className="flex items-center gap-2">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-apple-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 bg-apple-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 bg-apple-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                </div>
-                <span className="text-sm text-apple-gray-700">{thinkingStep}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* New Chat Suggestion Banner */}
-      {showNewChatPrompt && (
-        <div className="px-4 py-3 glass border-t-2 border-apple-orange bg-apple-orange/10 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-apple-orange">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="text-sm font-medium">This conversation is getting long. Consider starting a new chat for better responses.</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setDismissedNewChatPrompt(true)}
-              className="text-sm text-apple-gray-700 hover:text-apple-gray-900 px-2 py-1 transition-colors"
-            >
-              Dismiss
-            </button>
-            <button
-              onClick={() => {
-                startNewChat();
-                setDismissedNewChatPrompt(false);
-              }}
-              className="btn-apple-primary text-sm"
-            >
-              New Chat
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Input Area */}
-      <form onSubmit={handleSubmit} className="border-t border-apple-gray-200 p-3 sm:p-4 bg-white/50 rounded-b-apple-xl">
-        <div className="flex gap-2">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onFocus={handleInputFocus}
-            placeholder="Ask about AFL statistics..."
-            disabled={!isConnected || isThinking}
-            className="input-apple flex-1 text-sm sm:text-base disabled:bg-apple-gray-100 disabled:cursor-not-allowed"
-          />
           <button
             type="submit"
             disabled={!isConnected || isThinking || !input.trim()}
-            className="btn-apple-primary text-sm sm:text-base disabled:bg-apple-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
+            className="p-2.5 rounded-xl bg-afl-accent text-white
+                       hover:bg-afl-accent-600 disabled:bg-afl-warm-200 disabled:cursor-not-allowed
+                       transition-all duration-200"
           >
-            {isThinking ? '...' : 'Send'}
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
+            </svg>
           </button>
-        </div>
-      </form>
-    </div>
+        </form>
+      </div>
 
-    {/* Feedback section - outside main container */}
-    {messages.length > 0 && (
-      <FeedbackButton
-        conversationId={currentConversationId}
-        messageText={messages.filter(m => m.type === 'agent' && !m.isError).slice(-1)[0]?.text || ''}
-      />
-    )}
-  </>
+      {/* Feedback section */}
+      {messages.length > 0 && (
+        <FeedbackButton
+          conversationId={currentConversationId}
+          messageText={messages.filter(m => m.type === 'agent' && !m.isError).slice(-1)[0]?.text || ''}
+        />
+      )}
+    </>
   );
 };
 

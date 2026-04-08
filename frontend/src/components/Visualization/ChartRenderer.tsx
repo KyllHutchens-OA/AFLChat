@@ -21,9 +21,9 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
             family: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif',
             color: '#1C1C1E',
           },
-          paper_bgcolor: 'rgba(255, 255, 255, 0)',
-          plot_bgcolor: 'rgba(255, 255, 255, 0)',
-          colorway: ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#5E5CE6', '#AF52DE', '#FF2D55', '#5AC8FA'],
+          paper_bgcolor: 'rgba(255, 253, 249, 0)',
+          plot_bgcolor: 'rgba(255, 253, 249, 0)',
+          colorway: ['#C2581C', '#2D7A6F', '#D4794D', '#246359', '#8C7B6B', '#A30046', '#D4001A', '#002B5C'],
         }}
         config={{
           responsive: true,
