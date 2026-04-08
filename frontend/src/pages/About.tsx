@@ -3,20 +3,20 @@ const About = () => {
     <div className="max-w-3xl mx-auto px-6 sm:px-8 lg:px-10 py-12">
       {/* Hero Section */}
       <div className="text-center mb-12">
-        <h1 className="text-4xl font-semibold text-apple-gray-900 mb-4">
+        <h1 className="text-4xl font-semibold text-afl-warm-900 mb-4">
           Footy-NAC
         </h1>
-        <p className="text-xl text-apple-gray-500">
+        <p className="text-xl text-afl-warm-500">
           Not Another Commentator
         </p>
       </div>
 
       {/* About Section */}
       <section className="card-apple p-8 mb-8">
-        <h2 className="text-2xl font-semibold text-apple-gray-900 mb-4">
+        <h2 className="text-2xl font-semibold text-afl-warm-900 mb-4">
           Welcome to Footy-NAC
         </h2>
-        <div className="text-apple-gray-700 space-y-4">
+        <div className="text-afl-warm-700 space-y-4">
           <p>
             This app allows users to answer their weird couch questions. Like
             what game did a player get the most handballs in one game? Or who
@@ -32,10 +32,10 @@ const About = () => {
 
       {/* About Me Section */}
       <section className="card-apple p-8 mb-8">
-        <h2 className="text-2xl font-semibold text-apple-gray-900 mb-4">
+        <h2 className="text-2xl font-semibold text-afl-warm-900 mb-4">
           About Me
         </h2>
-        <div className="text-apple-gray-700 space-y-4">
+        <div className="text-afl-warm-700 space-y-4">
           <p>
             I am a Data Scientist who loves the AFL and wants an easier way to
             pull together fun stats.
@@ -45,7 +45,7 @@ const About = () => {
 
       {/* Connect Section */}
       <section className="card-apple p-8">
-        <h2 className="text-2xl font-semibold text-apple-gray-900 mb-6">
+        <h2 className="text-2xl font-semibold text-afl-warm-900 mb-6">
           Connect & Support
         </h2>
 
@@ -87,7 +87,7 @@ const About = () => {
       </section>
 
       {/* Footer */}
-      <footer className="text-center mt-12 text-sm text-apple-gray-500">
+      <footer className="text-center mt-12 text-sm text-afl-warm-500">
         <p>&copy; {new Date().getFullYear()} Footy-NAC. All rights reserved.</p>
       </footer>
     </div>

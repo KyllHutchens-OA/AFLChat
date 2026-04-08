@@ -20,24 +20,12 @@ const AFLAgent: React.FC = () => {
   );
 
   return (
-    <div>
-      {/* Page header */}
-      <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 pt-4 pb-2">
-        <h1 className="text-2xl font-semibold text-apple-gray-900">
-          AFL Chat Agent
-        </h1>
-        <p className="text-xs text-apple-gray-500 mt-0.5">
-          Ask me questions about AFL stats, performance, fixtures, injuries and many more
-        </p>
-      </div>
-
-      <main className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 pb-4">
-        <AgentChatContainer
-          conversationId={conversationId}
-          onConversationCreated={handleConversationCreated}
-        />
-      </main>
-    </div>
+    <main className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 py-4">
+      <AgentChatContainer
+        conversationId={conversationId}
+        onConversationCreated={handleConversationCreated}
+      />
+    </main>
   );
 };
 

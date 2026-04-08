@@ -18,7 +18,7 @@ const SpoilerModal = () => {
         /* Step 1: Welcome */
         <div className="bg-apple-gray-900/95 backdrop-blur-xl max-w-md w-full rounded-apple-xl p-8 shadow-apple-xl border border-white/10">
           <div className="text-center mb-6">
-            <div className="w-16 h-16 mx-auto bg-apple-blue-500 rounded-full flex items-center justify-center mb-4">
+            <div className="w-16 h-16 mx-auto bg-afl-accent rounded-full flex items-center justify-center mb-4">
               <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -29,11 +29,11 @@ const SpoilerModal = () => {
             </h2>
             <div className="text-left space-y-2 text-sm text-apple-gray-300">
               <div className="flex items-start gap-2">
-                <span className="text-apple-blue-400 mt-0.5 flex-shrink-0">&#x2022;</span>
+                <span className="text-afl-accent-400 mt-0.5 flex-shrink-0">&#x2022;</span>
                 <span><strong className="text-white">Chat Agent</strong> — Ask any AFL question and get instant stats, charts, and analysis</span>
               </div>
               <div className="flex items-start gap-2">
-                <span className="text-apple-blue-400 mt-0.5 flex-shrink-0">&#x2022;</span>
+                <span className="text-afl-accent-400 mt-0.5 flex-shrink-0">&#x2022;</span>
                 <span><strong className="text-white">Live Games</strong> — Follow games in real-time with AI-powered quarter summaries and match previews</span>
               </div>
             </div>
@@ -41,8 +41,8 @@ const SpoilerModal = () => {
 
           <button
             onClick={() => setStep('spoiler')}
-            className="w-full py-3 px-6 bg-apple-blue-500 text-white rounded-apple font-medium
-                       hover:bg-apple-blue-600 active:scale-[0.98] transition-all duration-200"
+            className="w-full py-3 px-6 bg-afl-accent text-white rounded-apple font-medium
+                       hover:bg-afl-accent-600 active:scale-[0.98] transition-all duration-200"
           >
             Get Started
           </button>
@@ -71,7 +71,7 @@ const SpoilerModal = () => {
         /* Step 2: Spoiler preference */
         <div className="bg-apple-gray-900/95 backdrop-blur-xl max-w-md w-full rounded-apple-xl p-8 shadow-apple-xl border border-white/10">
           <div className="text-center mb-6">
-            <div className="w-16 h-16 mx-auto bg-apple-blue-500 rounded-full flex items-center justify-center mb-4">
+            <div className="w-16 h-16 mx-auto bg-afl-accent rounded-full flex items-center justify-center mb-4">
               <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -97,8 +97,8 @@ const SpoilerModal = () => {
             </button>
             <button
               onClick={() => handleSpoilerChoice(false)}
-              className="w-full py-3 px-6 bg-apple-blue-500 text-white rounded-apple font-medium
-                         hover:bg-apple-blue-600 active:scale-[0.98] transition-all duration-200"
+              className="w-full py-3 px-6 bg-afl-accent text-white rounded-apple font-medium
+                         hover:bg-afl-accent-600 active:scale-[0.98] transition-all duration-200"
             >
               Show Scores (See Everything)
             </button>
