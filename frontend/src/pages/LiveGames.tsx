@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useLiveGames } from '../hooks/useLiveGames';
-import { useUpcomingMatches } from '../hooks/useUpcomingMatches';
+import { useLiveData } from '../contexts/LiveDataContext';
 import { useSpoilerMode } from '../hooks/useSpoilerMode';
 import GameSidebar from '../components/LiveGames/GameSidebar';
 import LiveDashboard from '../components/LiveGames/LiveDashboard';
@@ -8,8 +7,7 @@ import ScoringPopup from '../components/LiveGames/ScoringPopup';
 import Countdown from '../components/LiveGames/Countdown';
 
 const LiveGames = () => {
-  const { games, loading, error } = useLiveGames();
-  const { matches: upcomingMatches, nextMatch } = useUpcomingMatches();
+  const { games, gamesLoading, gamesError, upcomingMatches, nextMatch } = useLiveData();
   // Subscribe to spoiler mode to ensure re-renders when it changes
   useSpoilerMode();
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
@@ -35,7 +33,7 @@ const LiveGames = () => {
   const PageHeader = () => (
     <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 pt-8 pb-4">
       <div className="flex items-center gap-4">
-        <h1 className="text-3xl font-semibold text-apple-gray-900">Live Games</h1>
+        <h1 className="text-3xl font-semibold text-afl-warm-900">Live Games</h1>
         {liveCount > 0 && (
           <div className="flex items-center gap-2 px-4 py-2 bg-apple-red/10 border border-apple-red/30 rounded-full">
             <div className="w-2 h-2 bg-apple-red rounded-full animate-pulse"></div>
@@ -81,7 +79,7 @@ const LiveGames = () => {
     }
   }, [games, selectedGameId]);
 
-  if (loading) {
+  if (gamesLoading) {
     return (
       <div>
         <PageHeader />
@@ -89,15 +87,15 @@ const LiveGames = () => {
         {/* Loading shimmer */}
         <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 pb-8">
           <div className="animate-shimmer">
-            <div className="h-32 bg-apple-gray-200 rounded-apple mb-6"></div>
-            <div className="h-96 bg-apple-gray-200 rounded-apple"></div>
+            <div className="h-32 bg-afl-warm-200 rounded-apple mb-6"></div>
+            <div className="h-96 bg-afl-warm-200 rounded-apple"></div>
           </div>
         </div>
       </div>
     );
   }
 
-  if (error) {
+  if (gamesError) {
     return (
       <div>
         <PageHeader />
@@ -106,10 +104,10 @@ const LiveGames = () => {
         <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 pb-8">
           <div className="card-apple p-8 text-center">
             <div className="text-6xl mb-4">⚠️</div>
-            <h2 className="text-2xl font-semibold text-apple-gray-900 mb-2">
+            <h2 className="text-2xl font-semibold text-afl-warm-900 mb-2">
               The umpire's called a delay...
             </h2>
-            <p className="text-apple-gray-500">We're having trouble loading the games right now. Try again in a moment.</p>
+            <p className="text-afl-warm-500">We're having trouble loading the games right now. Try again in a moment.</p>
           </div>
         </div>
       </div>
@@ -131,10 +129,10 @@ const LiveGames = () => {
         <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10 pb-8 space-y-6">
           {/* No live games message */}
           <div className="card-apple p-8 text-center">
-            <h2 className="text-3xl font-semibold text-apple-gray-900 mb-2">
+            <h2 className="text-3xl font-semibold text-afl-warm-900 mb-2">
               No games on right now
             </h2>
-            <p className="text-lg text-apple-gray-500">
+            <p className="text-lg text-afl-warm-500">
               The next bounce is coming soon
             </p>
           </div>
@@ -143,23 +141,23 @@ const LiveGames = () => {
           {nextMatch && (
             <div className="card-apple p-8">
               <div className="text-center mb-6">
-                <h3 className="text-xl font-semibold text-apple-gray-900 mb-2">
+                <h3 className="text-xl font-semibold text-afl-warm-900 mb-2">
                   Next Game
                 </h3>
-                <p className="text-apple-gray-600">
+                <p className="text-afl-warm-500">
                   Round {nextMatch.round} • {nextMatch.venue}
                 </p>
-                <p className="text-2xl font-semibold text-apple-gray-900 mt-3">
+                <p className="text-2xl font-semibold text-afl-warm-900 mt-3">
                   {nextMatch.home_team} vs {nextMatch.away_team}
                 </p>
               </div>
 
               {nextMatch.prediction && nextMatch.prediction.margin != null && (
                 <div className="text-center mb-4">
-                  <span className="inline-flex items-center gap-2 px-4 py-2 bg-apple-blue-50 rounded-full text-sm font-medium text-apple-blue-700">
+                  <span className="inline-flex items-center gap-2 px-4 py-2 bg-afl-accent-50 rounded-full text-sm font-medium text-afl-accent-700">
                     Tipping {nextMatch.prediction.winner} by {Math.round(nextMatch.prediction.margin)} points
                     {nextMatch.prediction.home_prob != null && nextMatch.prediction.away_prob != null && (
-                      <span className="text-apple-blue-500">
+                      <span className="text-afl-accent-400">
                         ({nextMatch.prediction.home_prob}% - {nextMatch.prediction.away_prob}%)
                       </span>
                     )}
@@ -168,17 +166,17 @@ const LiveGames = () => {
               )}
 
               {nextMatch.preview && (
-                <p className="text-apple-gray-600 text-center mt-2 px-4 leading-relaxed">
+                <p className="text-afl-warm-600 text-center mt-2 px-4 leading-relaxed">
                   {nextMatch.preview}
                 </p>
               )}
 
-              <div className="border-t border-apple-gray-200 pt-6 mt-4">
+              <div className="border-t border-afl-warm-200 pt-6 mt-4">
                 <Countdown targetDate={nextMatch.date} />
               </div>
 
               <div className="text-center mt-4 space-y-1">
-                <div className="text-sm font-medium text-apple-gray-700">
+                <div className="text-sm font-medium text-afl-warm-700">
                   {new Date(nextMatch.date).toLocaleString('en-AU', {
                     weekday: 'long',
                     year: 'numeric',
@@ -188,7 +186,7 @@ const LiveGames = () => {
                     minute: '2-digit',
                   })}
                 </div>
-                <div className="text-xs text-apple-gray-500">
+                <div className="text-xs text-afl-warm-500">
                   {new Date(nextMatch.date).toLocaleString('en-AU', {
                     timeZoneName: 'long',
                   }).split(', ').pop()}
@@ -207,33 +205,33 @@ const LiveGames = () => {
             if (relevantMatches.length === 0) return null;
             return (
             <div className="card-apple p-6">
-              <h3 className="text-xl font-semibold text-apple-gray-900 mb-4">
+              <h3 className="text-xl font-semibold text-afl-warm-900 mb-4">
                 Upcoming Schedule
               </h3>
               <div className="space-y-3">
                 {relevantMatches.map((match) => (
                   <div
                     key={match.id}
-                    className="p-4 bg-apple-gray-50 rounded-apple hover:bg-apple-gray-100 transition-colors"
+                    className="p-4 bg-afl-warm-50 rounded-apple hover:bg-afl-warm-100 transition-colors"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
-                        <div className="font-medium text-apple-gray-900">
+                        <div className="font-medium text-afl-warm-900">
                           {match.home_team} vs {match.away_team}
                         </div>
-                        <div className="text-sm text-apple-gray-500 mt-1">
+                        <div className="text-sm text-afl-warm-500 mt-1">
                           Round {match.round} • {match.venue}
                         </div>
                       </div>
                       <div className="text-right ml-4">
-                        <div className="text-sm font-medium text-apple-gray-700">
+                        <div className="text-sm font-medium text-afl-warm-700">
                           {new Date(match.date).toLocaleDateString('en-AU', {
                             weekday: 'short',
                             month: 'short',
                             day: 'numeric',
                           })}
                         </div>
-                        <div className="text-sm text-apple-gray-500">
+                        <div className="text-sm text-afl-warm-500">
                           {new Date(match.date).toLocaleTimeString('en-AU', {
                             hour: '2-digit',
                             minute: '2-digit',
@@ -242,7 +240,7 @@ const LiveGames = () => {
                       </div>
                     </div>
                     {match.preview && (
-                      <p className="text-sm text-apple-gray-600 italic mt-2 leading-relaxed">
+                      <p className="text-sm text-afl-warm-600 italic mt-2 leading-relaxed">
                         {match.preview}
                       </p>
                     )}
@@ -284,17 +282,17 @@ const LiveGames = () => {
                 {/* Match header */}
                 <div className="glass rounded-apple-xl p-8 shadow-apple-lg">
                   <div className="text-center mb-6">
-                    <p className="text-sm font-medium text-apple-gray-500 uppercase tracking-wide">
+                    <p className="text-sm font-medium text-afl-warm-500 uppercase tracking-wide">
                       Round {selectedUpcoming.round} • {selectedUpcoming.venue}
                     </p>
                   </div>
                   <div className="text-center mb-6">
-                    <p className="text-2xl font-semibold text-apple-gray-900">
+                    <p className="text-2xl font-semibold text-afl-warm-900">
                       {selectedUpcoming.home_team} vs {selectedUpcoming.away_team}
                     </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-lg font-medium text-apple-gray-700">
+                    <p className="text-lg font-medium text-afl-warm-700">
                       {new Date(selectedUpcoming.date).toLocaleString('en-AU', {
                         weekday: 'long',
                         day: 'numeric',
@@ -312,15 +310,15 @@ const LiveGames = () => {
                   <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="text-lg font-semibold text-apple-gray-900">
+                        <h3 className="text-lg font-semibold text-afl-warm-900">
                           Match Prediction
                         </h3>
-                        <p className="text-apple-gray-700 mt-1">
+                        <p className="text-afl-warm-700 mt-1">
                           {selectedUpcoming.prediction.winner} by {Math.round(selectedUpcoming.prediction.margin)} points
                         </p>
                       </div>
                       {selectedUpcoming.prediction.home_prob != null && selectedUpcoming.prediction.away_prob != null && (
-                        <div className="text-right text-sm text-apple-gray-500">
+                        <div className="text-right text-sm text-afl-warm-500">
                           <div>{selectedUpcoming.home_team}: {selectedUpcoming.prediction.home_prob}%</div>
                           <div>{selectedUpcoming.away_team}: {selectedUpcoming.prediction.away_prob}%</div>
                         </div>
@@ -332,16 +330,16 @@ const LiveGames = () => {
                 {/* Preview */}
                 {selectedUpcoming.preview ? (
                   <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
-                    <h3 className="text-xl font-semibold text-apple-gray-900 mb-3">
+                    <h3 className="text-xl font-semibold text-afl-warm-900 mb-3">
                       Match Preview
                     </h3>
-                    <p className="text-apple-gray-700 leading-relaxed">
+                    <p className="text-afl-warm-700 leading-relaxed">
                       {selectedUpcoming.preview}
                     </p>
                   </div>
                 ) : (
                   <div className="glass rounded-apple-xl p-6 shadow-apple-lg text-center">
-                    <p className="text-apple-gray-500">
+                    <p className="text-afl-warm-500">
                       Match preview will be available closer to game time
                     </p>
                   </div>
@@ -350,7 +348,7 @@ const LiveGames = () => {
             )}
             {!selectedGameId && !selectedUpcoming && (
               <div className="card-apple p-8 text-center">
-                <p className="text-apple-gray-500">Select a game to view details</p>
+                <p className="text-afl-warm-500">Select a game to view details</p>
               </div>
             )}
           </div>

@@ -133,46 +133,55 @@ def _get_matches_needing_advanced_stats(session, season: int = None, days_back: 
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _find_or_create_player(session, name: str, team_id: int) -> Optional[int]:
-    """Find a player by name, or create if not found.
+    """Find a player by name + team, or create if not found.
 
-    Handles "First Last" name format from API-Sports.
+    Matches team first to avoid merging different players who share a name
+    (e.g. 4 Josh Kennedys, 2 Gary Abletts, 2 Tom Lynches).
+    Falls back to name-only for traded players whose team_id hasn't been updated.
     """
     if not name or name == "Unknown" or name.isdigit():
         return None
 
-    # Try exact match first
-    player = session.query(Player).filter(
-        Player.name.ilike(name)
-    ).first()
+    def _try_match(filter_name, with_team=True):
+        """Try to find a player, optionally filtering by team."""
+        query = session.query(Player).filter(Player.name.ilike(filter_name))
+        if with_team:
+            query = query.filter(Player.team_id == team_id)
+        return query.first()
+
+    # 1. Exact name + team match (preferred — handles shared names correctly)
+    player = _try_match(name, with_team=True)
     if player:
         return player.id
 
-    # Try partial match (handles middle names, suffixes)
-    player = session.query(Player).filter(
-        Player.name.ilike(f"%{name}%")
-    ).first()
+    # 2. Exact name only (for traded players whose team_id is their old team)
+    #    But only if there's exactly ONE match — if multiple, we can't disambiguate
+    candidates = session.query(Player).filter(Player.name.ilike(name)).all()
+    if len(candidates) == 1:
+        return candidates[0].id
+
+    # 3. Partial match + team (handles middle names, suffixes)
+    player = _try_match(f"%{name}%", with_team=True)
     if player:
         return player.id
 
-    # Try reversed name parts for "Last, First" vs "First Last"
+    # 4. Partial match, single result only
+    candidates = session.query(Player).filter(Player.name.ilike(f"%{name}%")).all()
+    if len(candidates) == 1:
+        return candidates[0].id
+
+    # 5. Reversed name parts for "Last, First" vs "First Last"
     parts = name.split()
     if len(parts) >= 2:
-        reversed_name = f"{parts[-1]}, {' '.join(parts[:-1])}"
-        player = session.query(Player).filter(
-            Player.name.ilike(f"%{reversed_name}%")
-        ).first()
-        if player:
-            return player.id
+        for fmt in [f"{parts[-1]}, {' '.join(parts[:-1])}", f"{parts[-1]} {' '.join(parts[:-1])}"]:
+            player = _try_match(f"%{fmt}%", with_team=True)
+            if player:
+                return player.id
+            candidates = session.query(Player).filter(Player.name.ilike(f"%{fmt}%")).all()
+            if len(candidates) == 1:
+                return candidates[0].id
 
-        # Try "Last First" without comma
-        reversed_name = f"{parts[-1]} {' '.join(parts[:-1])}"
-        player = session.query(Player).filter(
-            Player.name.ilike(f"%{reversed_name}%")
-        ).first()
-        if player:
-            return player.id
-
-    # Create new player
+    # 6. Create new player
     first_name = parts[0] if parts else name
     last_name = parts[-1] if len(parts) > 1 else ""
 

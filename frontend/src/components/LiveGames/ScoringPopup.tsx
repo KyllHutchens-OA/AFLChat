@@ -83,24 +83,24 @@ const ScoringPopup: React.FC<ScoringPopupProps> = ({ enabled = false }) => {
               </div>
 
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-apple-gray-900 mb-0.5">
+                <p className="text-sm font-semibold text-afl-warm-900 mb-0.5">
                   {isGoal ? 'GOAL!' : 'Behind'} - {notification.team_abbreviation}
                 </p>
                 {notification.player_name && (
-                  <p className="text-sm font-medium text-apple-gray-800 mb-0.5">
+                  <p className="text-sm font-medium text-afl-warm-800 mb-0.5">
                     {notification.jersey_number && `#${notification.jersey_number} `}
                     {notification.player_name}
                     {isGoal && notification.player_total_goals && notification.player_total_goals > 1 && (
-                      <span className="text-apple-gray-500 ml-1">
+                      <span className="text-afl-warm-500 ml-1">
                         ({notification.player_total_goals} goals)
                       </span>
                     )}
                   </p>
                 )}
-                <p className="text-xs text-apple-gray-600 mb-1">
+                <p className="text-xs text-afl-warm-600 mb-1">
                   {notification.time_str}
                 </p>
-                <p className="text-sm font-medium text-apple-gray-700">
+                <p className="text-sm font-medium text-afl-warm-700">
                   Score: {notification.home_score} - {notification.away_score}
                 </p>
               </div>

@@ -64,7 +64,7 @@ const EventTimeline: React.FC<EventTimelineProps> = ({ events, homeTeamAbbr, awa
 
   if (scoringEvents.length === 0) {
     return (
-      <div className="text-center py-12 text-apple-gray-500">
+      <div className="text-center py-12 text-afl-warm-500">
         <div className="text-4xl mb-3">📋</div>
         <p className="font-medium">No scoring events yet</p>
         <p className="text-sm mt-1">Events will appear here as the game progresses</p>
@@ -80,8 +80,8 @@ const EventTimeline: React.FC<EventTimelineProps> = ({ events, homeTeamAbbr, awa
       {quarters.map((quarter) => (
         <div key={quarter} className="mb-6 last:mb-0">
           {/* Quarter Header */}
-          <div className="sticky top-0 bg-white/90 backdrop-blur-sm z-10 py-2 mb-3 border-b border-apple-gray-200">
-            <h4 className="text-sm font-semibold text-apple-gray-600 uppercase tracking-wide">
+          <div className="sticky top-0 bg-white/90 backdrop-blur-sm z-10 py-2 mb-3 border-b border-afl-warm-200">
+            <h4 className="text-sm font-semibold text-afl-warm-600 uppercase tracking-wide">
               {quarter === 0 ? 'Pre-Game' : `Quarter ${quarter}`}
             </h4>
           </div>
@@ -89,7 +89,7 @@ const EventTimeline: React.FC<EventTimelineProps> = ({ events, homeTeamAbbr, awa
           {/* Events in this quarter */}
           <div className="relative">
             {/* Timeline line */}
-            <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-apple-gray-200" />
+            <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-afl-warm-200" />
 
             <div className="space-y-3">
               {groupedEvents.get(quarter)!.map((event) => {
@@ -130,18 +130,18 @@ const EventTimeline: React.FC<EventTimelineProps> = ({ events, homeTeamAbbr, awa
                             >
                               {isGoal ? 'GOAL' : 'BEHIND'}
                             </span>
-                            <span className="text-sm font-semibold text-apple-gray-900">
+                            <span className="text-sm font-semibold text-afl-warm-900">
                               {event.team?.name || 'Unknown Team'}
                             </span>
                           </div>
 
                           {event.player_name && (
-                            <p className="text-sm text-apple-gray-700 mb-1">
+                            <p className="text-sm text-afl-warm-700 mb-1">
                               {event.player_name}
                             </p>
                           )}
 
-                          <p className="text-xs text-apple-gray-500">
+                          <p className="text-xs text-afl-warm-500">
                             {event.time_str} • {getRelativeTime(event.timestamp)}
                           </p>
                         </div>
@@ -149,15 +149,15 @@ const EventTimeline: React.FC<EventTimelineProps> = ({ events, homeTeamAbbr, awa
                         {/* Right side - Score */}
                         <div className="text-right flex-shrink-0">
                           <div className="flex items-center gap-1 text-lg font-bold">
-                            <span className={isHomeTeam && isGoal ? 'text-apple-green' : 'text-apple-gray-700'}>
+                            <span className={isHomeTeam && isGoal ? 'text-apple-green' : 'text-afl-warm-700'}>
                               {event.home_score_after}
                             </span>
-                            <span className="text-apple-gray-400">-</span>
-                            <span className={!isHomeTeam && isGoal ? 'text-apple-green' : 'text-apple-gray-700'}>
+                            <span className="text-afl-warm-400">-</span>
+                            <span className={!isHomeTeam && isGoal ? 'text-apple-green' : 'text-afl-warm-700'}>
                               {event.away_score_after}
                             </span>
                           </div>
-                          <p className="text-xs text-apple-gray-500 mt-0.5">
+                          <p className="text-xs text-afl-warm-500 mt-0.5">
                             {homeTeamAbbr} - {awayTeamAbbr}
                           </p>
                         </div>

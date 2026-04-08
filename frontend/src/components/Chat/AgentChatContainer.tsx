@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAgentWebSocket } from '../../hooks/useAgentWebSocket';
-import QueryEcho from './QueryEcho';
 import ResponseCard from './ResponseCard';
 import SuggestedQuestions from './SuggestedQuestions';
 import ThinkingCard from './ThinkingCard';
@@ -25,28 +24,22 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   const { messages, isConnected, isThinking, thinkingStep, isLoadingHistory, currentConversationId, sendMessage, startNewChat } =
     useAgentWebSocket({ conversationId, onConversationCreated });
 
-  // Read team from localStorage (avoid importing TeamContext to keep this self-contained)
   const teamName = localStorage.getItem('footy-nac-team');
-
   const showNewChatPrompt = messages.length >= MESSAGE_THRESHOLD && !dismissedNewChatPrompt;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Handle mobile keyboard visibility using visualViewport API
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
-
     const handleResize = () => {
       const keyboardH = window.innerHeight - viewport.height;
       setKeyboardHeight(keyboardH > 50 ? keyboardH : 0);
     };
-
     viewport.addEventListener('resize', handleResize);
     viewport.addEventListener('scroll', handleResize);
-
     return () => {
       viewport.removeEventListener('resize', handleResize);
       viewport.removeEventListener('scroll', handleResize);
@@ -73,12 +66,13 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   };
 
   return (
-    <>
       <div
-        className="flex flex-col h-[calc(100vh-8rem)]"
-        style={{ marginBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : undefined }}
+        className="flex flex-col h-full overflow-hidden"
+        style={{
+          marginBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : undefined,
+        }}
       >
-        {/* Disconnected warning - only show when disconnected */}
+        {/* Disconnected warning */}
         {!isConnected && (
           <div className="px-4 py-2 bg-red-50 border border-red-200 rounded-lg mb-3 flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-red-500" />
@@ -87,7 +81,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
         )}
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+        <div className="flex-1 overflow-y-auto space-y-4 pb-4 min-h-0">
           {isLoadingHistory && (
             <div className="text-center text-afl-warm-500 mt-8">
               <div className="flex items-center justify-center gap-2">
@@ -101,7 +95,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
           {!isLoadingHistory && messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center px-4 animate-fade-in">
               <h2 className="text-2xl font-semibold text-afl-warm-900 mb-2">
-                {teamName ? `What do you want to know about the ${teamName}?` : 'Ask me about AFL statistics'}
+                Ask me about AFL statistics
               </h2>
               <p className="text-sm text-afl-warm-500 mb-8">
                 Stats, records, player comparisons — ask anything
@@ -114,8 +108,14 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
           {messages.map((message) => (
             <div key={message.id} className="animate-fade-in">
               {message.type === 'user' ? (
-                <QueryEcho text={message.text} />
+                /* User bubble — right-aligned, warm accent */
+                <div className="flex justify-end">
+                  <div className="max-w-[80%] rounded-2xl rounded-br-md px-4 py-3 bg-afl-accent text-white shadow-apple-sm">
+                    <div className="whitespace-pre-wrap text-sm">{message.text}</div>
+                  </div>
+                </div>
               ) : (
+                /* Agent response — full-width card */
                 <ResponseCard
                   text={message.text}
                   visualization={message.visualization}
@@ -155,7 +155,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
         )}
 
         {/* Input Area */}
-        <form onSubmit={handleSubmit} className="flex items-center gap-2 pt-3">
+        <form onSubmit={handleSubmit} className="flex items-center gap-2 pt-3 flex-shrink-0">
           {messages.length > 0 && (
             <button
               type="button"
@@ -175,7 +175,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onFocus={handleInputFocus}
-              placeholder={teamName ? `Ask about ${teamName}...` : 'Ask about AFL statistics...'}
+              placeholder="Ask about AFL statistics..."
               disabled={!isConnected || isThinking}
               className="w-full px-4 py-3 rounded-xl border border-afl-warm-200 bg-white
                          focus:outline-none focus:ring-2 focus:ring-afl-accent/30 focus:border-afl-accent
@@ -195,16 +195,15 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
             </svg>
           </button>
         </form>
-      </div>
 
-      {/* Feedback section */}
-      {messages.length > 0 && (
-        <FeedbackButton
-          conversationId={currentConversationId}
-          messageText={messages.filter(m => m.type === 'agent' && !m.isError).slice(-1)[0]?.text || ''}
-        />
-      )}
-    </>
+        {/* Feedback section */}
+        {messages.length > 0 && (
+          <FeedbackButton
+            conversationId={currentConversationId}
+            messageText={messages.filter(m => m.type === 'agent' && !m.isError).slice(-1)[0]?.text || ''}
+          />
+        )}
+      </div>
   );
 };
 

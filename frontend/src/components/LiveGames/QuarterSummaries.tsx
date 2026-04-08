@@ -52,7 +52,7 @@ const QuarterSummaries: React.FC<QuarterSummariesProps> = ({ quarterSummaries, q
 
   return (
     <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
-      <h3 className="text-xl font-semibold text-apple-gray-900 mb-4">
+      <h3 className="text-xl font-semibold text-afl-warm-900 mb-4">
         Quarter Summaries
       </h3>
       <div className="space-y-3">
@@ -63,25 +63,25 @@ const QuarterSummaries: React.FC<QuarterSummariesProps> = ({ quarterSummaries, q
           return (
             <div
               key={quarter}
-              className="bg-apple-gray-50 rounded-apple overflow-hidden"
+              className="bg-afl-warm-50 rounded-apple overflow-hidden"
             >
               <button
                 onClick={() => toggleQuarter(quarter)}
-                className="w-full flex items-center gap-2 p-4 text-left hover:bg-apple-gray-100 transition-colors"
+                className="w-full flex items-center gap-2 p-4 text-left hover:bg-afl-warm-100 transition-colors"
               >
-                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-apple-blue-500 text-white text-xs font-bold flex-shrink-0">
+                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-afl-accent text-white text-xs font-bold flex-shrink-0">
                   Q{quarter}
                 </span>
-                <span className="text-sm font-semibold text-apple-gray-700">
+                <span className="text-sm font-semibold text-afl-warm-700">
                   Quarter {quarter}
                 </span>
                 {score && (
-                  <span className="text-sm font-medium text-apple-gray-500 ml-1">
+                  <span className="text-sm font-medium text-afl-warm-500 ml-1">
                     ({score})
                   </span>
                 )}
                 <svg
-                  className={`w-4 h-4 text-apple-gray-400 ml-auto transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                  className={`w-4 h-4 text-afl-warm-400 ml-auto transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -91,7 +91,7 @@ const QuarterSummaries: React.FC<QuarterSummariesProps> = ({ quarterSummaries, q
                 </svg>
               </button>
               {isExpanded && (
-                <p className="text-sm text-apple-gray-700 leading-relaxed px-4 pb-4 pl-[3.25rem]">
+                <p className="text-sm text-afl-warm-700 leading-relaxed px-4 pb-4 pl-[3.25rem]">
                   {quarterSummaries[String(quarter)]}
                 </p>
               )}

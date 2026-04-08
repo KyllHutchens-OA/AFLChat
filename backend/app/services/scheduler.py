@@ -127,23 +127,21 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
-        # Job 11: Save preview context for upcoming matches (7 AM and 5 PM AEST)
-        # Fetches Squiggle games + weather + DB context, saves pending rows
-        # for the Claude cloud scheduled task to fill in with preview text.
-        self.scheduler.add_job(
-            func=self._save_preview_context,
-            trigger=CronTrigger(hour=7, minute=0, timezone='Australia/Melbourne'),
-            id="save_preview_context_morning",
-            name="Save preview context (morning)",
-            replace_existing=True,
-        )
-        self.scheduler.add_job(
-            func=self._save_preview_context,
-            trigger=CronTrigger(hour=17, minute=0, timezone='Australia/Melbourne'),
-            id="save_preview_context_evening",
-            name="Save preview context (evening)",
-            replace_existing=True,
-        )
+        # Job 11: Save preview context — DISABLED (now runs on local machine)
+        # self.scheduler.add_job(
+        #     func=self._save_preview_context,
+        #     trigger=CronTrigger(hour=7, minute=0, timezone='Australia/Melbourne'),
+        #     id="save_preview_context_morning",
+        #     name="Save preview context (morning)",
+        #     replace_existing=True,
+        # )
+        # self.scheduler.add_job(
+        #     func=self._save_preview_context,
+        #     trigger=CronTrigger(hour=17, minute=0, timezone='Australia/Melbourne'),
+        #     id="save_preview_context_evening",
+        #     name="Save preview context (evening)",
+        #     replace_existing=True,
+        # )
 
         self.scheduler.start()
         self.is_running = True
@@ -416,12 +414,18 @@ class LiveGameScheduler:
                                 continue
 
                             # Process stats inline (avoid re-fetching game)
-                            home_team_name = api_game.get('teams', {}).get('home', {}).get('name', 'Home')
-                            away_team_name = api_game.get('teams', {}).get('away', {}).get('name', 'Away')
+                            # Build team ID -> name map from the games endpoint
+                            api_teams = api_game.get('teams', {})
+                            team_id_to_name = {
+                                api_teams.get('home', {}).get('id'): api_teams.get('home', {}).get('name', 'Home'),
+                                api_teams.get('away', {}).get('id'): api_teams.get('away', {}).get('name', 'Away'),
+                            }
 
                             all_players = []
-                            for idx, team_data in enumerate(stats_data.get('teams', [])):
-                                team_name = home_team_name if idx == 0 else away_team_name
+                            for team_data in stats_data.get('teams', []):
+                                # Match by team ID, not array index (order may differ between endpoints)
+                                stats_team_id = team_data.get('team', {}).get('id')
+                                team_name = team_id_to_name.get(stats_team_id, team_data.get('team', {}).get('name', 'Unknown'))
                                 for player in team_data.get('players', []):
                                     player_info = player.get('player', {})
                                     player_id = player_info.get('id')

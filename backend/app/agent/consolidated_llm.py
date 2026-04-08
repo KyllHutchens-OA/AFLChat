@@ -132,6 +132,7 @@ When filtering by venue, use ILIKE for fuzzy matching: WHERE m.venue ILIKE '%MCG
 - Quarter score formula: Q1 score = q1_goals * 6 + q1_behinds. Cumulative: Q2 total = q1 + q2, etc.
 - round values: regular rounds "0","1".."24"; finals: "Qualifying Final","Elimination Final","Semi Final","Preliminary Final","Grand Final"
 - ALWAYS include finals in round-by-round season queries
+- FIXTURE/UPCOMING GAMES: The matches table contains scheduled future fixtures with home_score=0 and away_score=0. For "who do they play next", "next game", "upcoming fixture", "next week" queries, use: WHERE m.match_date > NOW() AND m.home_score = 0 AND m.away_score = 0 ORDER BY m.match_date ASC LIMIT 1 (filter by team as needed)
 - Contains historical data ({data_range})
 
 ### live_games: id, season, round, match_date (TIMESTAMP), home_team_id, away_team_id, home_score, away_score, home_goals, home_behinds, away_goals, away_behinds, venue, status, current_quarter
@@ -161,7 +162,7 @@ CRITICAL RULES:
 6. For temporal/trend queries: return ONE ROW PER SEASON, GROUP BY season
 7. For single-season performance: return ONE ROW PER MATCH (round-by-round)
 8. NEVER use CROSS JOIN
-9. CRITICAL — PLAYER IDENTITY: Multiple players can share the same name (e.g. two different Josh Kennedys). ALWAYS GROUP BY p.id, p.name (not just p.name) when aggregating player stats, so same-name players are counted separately.
+9. CRITICAL — PLAYER IDENTITY: Multiple players share the same name (e.g. 4 Josh Kennedys, 3 Nathan Browns, 2 Gary Abletts, 2 Tom Lynches, 2 Scott Thompsons). ALWAYS GROUP BY p.id, p.name (not just p.name) when aggregating player stats. NEVER GROUP BY p.name alone — this merges different players and produces wrong totals. Example: GROUP BY p.name gives Josh Kennedy 571 games (wrong — combines 4 players), GROUP BY p.id, p.name gives 427 (correct — just the Sydney one).
 10. CRITICAL: For "who won" or "who played" queries, SELECT must include:
    - Both team names (home_team, away_team)
    - Both scores (home_score, away_score)

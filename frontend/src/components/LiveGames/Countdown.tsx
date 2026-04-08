@@ -43,7 +43,7 @@ const Countdown: React.FC<CountdownProps> = ({ targetDate }) => {
 
   if (!timeLeft) {
     return (
-      <div className="text-apple-gray-500">
+      <div className="text-afl-warm-500">
         Game starting soon...
       </div>
     );
@@ -53,38 +53,38 @@ const Countdown: React.FC<CountdownProps> = ({ targetDate }) => {
     <div className="flex gap-4 justify-center">
       {timeLeft.days > 0 && (
         <div className="flex flex-col items-center">
-          <div className="text-4xl font-semibold text-apple-blue-500 tabular-nums">
+          <div className="text-4xl font-semibold text-afl-accent tabular-nums">
             {timeLeft.days}
           </div>
-          <div className="text-sm text-apple-gray-500 mt-1">
+          <div className="text-sm text-afl-warm-500 mt-1">
             {timeLeft.days === 1 ? 'Day' : 'Days'}
           </div>
         </div>
       )}
 
       <div className="flex flex-col items-center">
-        <div className="text-4xl font-semibold text-apple-blue-500 tabular-nums">
+        <div className="text-4xl font-semibold text-afl-accent tabular-nums">
           {String(timeLeft.hours).padStart(2, '0')}
         </div>
-        <div className="text-sm text-apple-gray-500 mt-1">Hours</div>
+        <div className="text-sm text-afl-warm-500 mt-1">Hours</div>
       </div>
 
-      <div className="text-4xl text-apple-gray-300 self-center -mt-6">:</div>
+      <div className="text-4xl text-afl-warm-300 self-center -mt-6">:</div>
 
       <div className="flex flex-col items-center">
-        <div className="text-4xl font-semibold text-apple-blue-500 tabular-nums">
+        <div className="text-4xl font-semibold text-afl-accent tabular-nums">
           {String(timeLeft.minutes).padStart(2, '0')}
         </div>
-        <div className="text-sm text-apple-gray-500 mt-1">Minutes</div>
+        <div className="text-sm text-afl-warm-500 mt-1">Minutes</div>
       </div>
 
-      <div className="text-4xl text-apple-gray-300 self-center -mt-6">:</div>
+      <div className="text-4xl text-afl-warm-300 self-center -mt-6">:</div>
 
       <div className="flex flex-col items-center">
-        <div className="text-4xl font-semibold text-apple-blue-500 tabular-nums">
+        <div className="text-4xl font-semibold text-afl-accent tabular-nums">
           {String(timeLeft.seconds).padStart(2, '0')}
         </div>
-        <div className="text-sm text-apple-gray-500 mt-1">Seconds</div>
+        <div className="text-sm text-afl-warm-500 mt-1">Seconds</div>
       </div>
     </div>
   );

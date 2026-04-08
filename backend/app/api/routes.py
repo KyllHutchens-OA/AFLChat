@@ -336,42 +336,110 @@ def get_live_game_detail(game_id):
 
 
 def _attach_predictions(upcoming: list, season: int):
-    """Attach Squiggle predictions to upcoming matches."""
+    """Attach Squiggle predictions to upcoming matches (batched queries)."""
     try:
         from app.data.database import get_session
         from app.data.models import Match, Team, SquigglePrediction
-        from sqlalchemy import desc
+        from sqlalchemy import desc, func
+        from sqlalchemy.orm import joinedload
+
+        # Initialize all predictions to None
+        for match in upcoming:
+            match['prediction'] = None
+
+        if not upcoming:
+            return
+
+        # Collect all unique team names
+        team_names = set()
+        for match in upcoming:
+            team_names.add(match['home_team'])
+            team_names.add(match['away_team'])
 
         with get_session() as session:
+            # 1. Batch fetch all teams in one query
+            teams = session.query(Team).filter(Team.name.in_(team_names)).all()
+            team_by_name = {t.name: t for t in teams}
+
+            # 2. Build lookup keys and batch fetch all matches in one query
+            round_values = set()
+            match_filters = []
             for match in upcoming:
-                match['prediction'] = None
-                home_team = session.query(Team).filter_by(name=match['home_team']).first()
-                away_team = session.query(Team).filter_by(name=match['away_team']).first()
-                if not home_team or not away_team:
-                    continue
+                home = team_by_name.get(match['home_team'])
+                away = team_by_name.get(match['away_team'])
+                if home and away:
+                    round_str = str(match.get('round', ''))
+                    round_values.add(round_str)
+                    match_filters.append((home.id, away.id, round_str))
 
-                db_match = (
-                    session.query(Match)
-                    .filter(
-                        Match.season == season,
-                        Match.home_team_id == home_team.id,
-                        Match.away_team_id == away_team.id,
-                        Match.round == str(match.get('round', '')),
-                    )
-                    .first()
-                )
-                if not db_match:
-                    continue
+            if not match_filters:
+                return
 
-                prediction = (
-                    session.query(SquigglePrediction)
-                    .filter(
-                        SquigglePrediction.match_id == db_match.id,
-                        SquigglePrediction.source_model == 'Squiggle',
-                    )
-                    .order_by(desc(SquigglePrediction.prediction_date))
-                    .first()
+            db_matches = (
+                session.query(Match)
+                .filter(
+                    Match.season == season,
+                    Match.round.in_(round_values),
                 )
+                .all()
+            )
+            # Index by (home_team_id, away_team_id, round)
+            match_by_key = {
+                (m.home_team_id, m.away_team_id, m.round): m
+                for m in db_matches
+            }
+
+            # 3. Collect match IDs and batch fetch all predictions in one query
+            match_id_map = {}  # match_id -> (home_team_id, away_team_id, round)
+            for key in match_filters:
+                db_match = match_by_key.get(key)
+                if db_match:
+                    match_id_map[db_match.id] = key
+
+            if not match_id_map:
+                return
+
+            # Subquery to get the latest prediction per match
+            latest_date = (
+                session.query(
+                    SquigglePrediction.match_id,
+                    func.max(SquigglePrediction.prediction_date).label('max_date'),
+                )
+                .filter(
+                    SquigglePrediction.match_id.in_(match_id_map.keys()),
+                    SquigglePrediction.source_model == 'Squiggle',
+                )
+                .group_by(SquigglePrediction.match_id)
+                .subquery()
+            )
+
+            predictions = (
+                session.query(SquigglePrediction)
+                .join(
+                    latest_date,
+                    (SquigglePrediction.match_id == latest_date.c.match_id)
+                    & (SquigglePrediction.prediction_date == latest_date.c.max_date),
+                )
+                .filter(SquigglePrediction.source_model == 'Squiggle')
+                .options(joinedload(SquigglePrediction.predicted_winner))
+                .all()
+            )
+
+            # Index predictions by (home_team_id, away_team_id, round)
+            pred_by_key = {}
+            for pred in predictions:
+                key = match_id_map.get(pred.match_id)
+                if key:
+                    pred_by_key[key] = pred
+
+            # 4. Attach predictions to upcoming matches
+            for match in upcoming:
+                home = team_by_name.get(match['home_team'])
+                away = team_by_name.get(match['away_team'])
+                if not home or not away:
+                    continue
+                key = (home.id, away.id, str(match.get('round', '')))
+                prediction = pred_by_key.get(key)
                 if prediction and prediction.predicted_winner:
                     winner = prediction.predicted_winner
                     match['prediction'] = {
@@ -467,7 +535,7 @@ def get_upcoming_matches():
 
         result = {'matches': upcoming}
         _upcoming_cache["data"] = result
-        _upcoming_cache["expires"] = _time.time() + 120  # 2 min TTL
+        _upcoming_cache["expires"] = _time.time() + 600  # 10 min TTL
 
         return jsonify(result), 200
 

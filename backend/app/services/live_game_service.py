@@ -1309,33 +1309,17 @@ class LiveGameService:
         """
         Generate an AI summary for a completed game.
 
-        Fetches player stats from API-Sports and uses OpenAI to generate
-        a casual match summary with team nicknames.
+        Uses the pre-fetched stats_cache (same data as Top Performers) to avoid
+        unreliable API-Sports player name lookups at summary time.
         """
         try:
-            from app.services.api_sports_service import APISportsService
             from app.services.game_summary_service import game_summary_service
 
             logger.info(f"Generating AI summary for game {live_game.id}")
 
-            # Get player stats from API-Sports
-            player_stats = None
-            try:
-                home_team_abbr = live_game.home_team.abbreviation
-                away_team_abbr = live_game.away_team.abbreviation
-                date_str = live_game.match_date.strftime("%Y-%m-%d") if live_game.match_date else None
-
-                game = APISportsService.get_game_by_teams(home_team_abbr, away_team_abbr, game_date=date_str)
-                if game:
-                    api_game_id = game.get("game", {}).get("id")
-                    if api_game_id:
-                        stats = APISportsService.get_game_player_stats(api_game_id)
-                        if stats and "teams" in stats:
-                            player_stats = LiveGameService._format_player_stats_for_summary(
-                                stats, live_game, home_team_abbr, away_team_abbr
-                            )
-            except Exception as e:
-                logger.warning(f"Could not fetch player stats for summary: {e}")
+            # Use the pre-fetched stats_cache (populated by the scheduler's prefetch job)
+            # This is the same data shown in Top Performers on the frontend
+            player_stats = live_game.stats_cache if live_game.stats_cache else None
 
             # Generate the summary
             summary = game_summary_service.generate_summary(live_game, player_stats)

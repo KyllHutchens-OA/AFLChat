@@ -162,9 +162,15 @@ def _fetch_team_context(session, home_team: str, away_team: str) -> dict:
         if home_team in teams or away_team in teams:
             if article.injury_details:
                 for injury in article.injury_details:
+                    # Use the injury's own team field if available (from LLM enrichment),
+                    # otherwise infer from the article's related_teams
+                    injury_team = injury.get("team") or (home_team if home_team in teams else away_team)
+                    # Only include if the injured player's team is in this match
+                    if injury_team not in (home_team, away_team):
+                        continue
                     context["injuries"].append({
                         "player": injury.get("player", "Unknown"),
-                        "team": home_team if home_team in teams else away_team,
+                        "team": injury_team,
                         "type": injury.get("type", ""),
                         "severity": injury.get("severity", ""),
                     })
@@ -176,6 +182,7 @@ def _fetch_team_context(session, home_team: str, away_team: str) -> dict:
             NewsArticle.is_afl == True,
             NewsArticle.is_injury_related == False,
             NewsArticle.published_date >= week_ago,
+            NewsArticle.category != "match_result",
         )
         .order_by(NewsArticle.published_date.desc())
         .limit(30)
@@ -351,6 +358,11 @@ def _gather_game_context(session, game: dict) -> Optional[dict]:
         "date": date_str,
         "preview_type": preview_type,
         "context": {
+            "home_team": home_team,
+            "away_team": away_team,
+            "venue": venue,
+            "round": round_num,
+            "date": date_str,
             "weather": weather,
             "injuries": team_context["injuries"][:4],
             "news": team_context["news"][:5],

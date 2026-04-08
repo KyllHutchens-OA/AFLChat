@@ -1,5 +1,5 @@
-import React from 'react';
-import { useGameStats } from '../../hooks/useGameStats';
+import React, { useEffect, useRef } from 'react';
+import { useLiveData } from '../../contexts/LiveDataContext';
 
 // Shorten API-Sports team names (e.g. "Hawthorn Hawks" -> "HAW")
 const shortenTeam = (team: string): string => {
@@ -32,13 +32,30 @@ interface GameStatsProps {
 }
 
 const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
-  const { stats, loading, error } = useGameStats(gameId, gameStatus);
+  const { getGameStats, gameStatsLoading, fetchGameStats } = useLiveData();
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stats = getGameStats(gameId);
+  const loading = gameStatsLoading(gameId) && !stats;
+
+  // Fetch stats on mount, poll for live games
+  useEffect(() => {
+    fetchGameStats(gameId, gameStatus);
+
+    if (gameStatus === 'live') {
+      pollRef.current = setInterval(() => fetchGameStats(gameId, gameStatus), 30000);
+    }
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [gameId, gameStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return null; // Don't show skeleton to avoid layout shift
   }
 
-  if (error || !stats) {
+  if (!stats) {
     return null; // Silently fail - stats aren't critical
   }
 
@@ -53,7 +70,7 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
 
   return (
     <div className="card-apple p-6">
-      <h3 className="text-lg font-semibold text-apple-gray-900 mb-4">
+      <h3 className="text-lg font-semibold text-afl-warm-900 mb-4">
         Top Performers
       </h3>
 
@@ -61,7 +78,7 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
         {/* Top Goal Kickers */}
         {stats.top_goal_kickers?.length > 0 && (
           <div>
-            <h4 className="text-sm font-medium text-apple-gray-500 mb-2">
+            <h4 className="text-sm font-medium text-afl-warm-500 mb-2">
               Goals
             </h4>
             <div className="space-y-1.5">
@@ -71,12 +88,12 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
                   className="flex items-center justify-between text-sm"
                 >
                   <div className="truncate flex-1 mr-2">
-                    <span className="text-apple-gray-700">{player.name}</span>
+                    <span className="text-afl-warm-700">{player.name}</span>
                     {player.team && (
-                      <span className="text-apple-gray-400 text-xs ml-1">{shortenTeam(player.team)}</span>
+                      <span className="text-afl-warm-400 text-xs ml-1">{shortenTeam(player.team)}</span>
                     )}
                   </div>
-                  <span className="font-semibold text-apple-gray-900 tabular-nums">
+                  <span className="font-semibold text-afl-warm-900 tabular-nums">
                     {player.goals}
                   </span>
                 </div>
@@ -88,7 +105,7 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
         {/* Top Disposals */}
         {stats.top_disposals?.length > 0 && (
           <div>
-            <h4 className="text-sm font-medium text-apple-gray-500 mb-2">
+            <h4 className="text-sm font-medium text-afl-warm-500 mb-2">
               Disposals
             </h4>
             <div className="space-y-1.5">
@@ -98,12 +115,12 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
                   className="flex items-center justify-between text-sm"
                 >
                   <div className="truncate flex-1 mr-2">
-                    <span className="text-apple-gray-700">{player.name}</span>
+                    <span className="text-afl-warm-700">{player.name}</span>
                     {player.team && (
-                      <span className="text-apple-gray-400 text-xs ml-1">{shortenTeam(player.team)}</span>
+                      <span className="text-afl-warm-400 text-xs ml-1">{shortenTeam(player.team)}</span>
                     )}
                   </div>
-                  <span className="font-semibold text-apple-gray-900 tabular-nums">
+                  <span className="font-semibold text-afl-warm-900 tabular-nums">
                     {player.disposals}
                   </span>
                 </div>
@@ -115,7 +132,7 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
         {/* Top Fantasy */}
         {stats.top_fantasy?.length > 0 && (
           <div>
-            <h4 className="text-sm font-medium text-apple-gray-500 mb-2">
+            <h4 className="text-sm font-medium text-afl-warm-500 mb-2">
               Fantasy
             </h4>
             <div className="space-y-1.5">
@@ -125,12 +142,12 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
                   className="flex items-center justify-between text-sm"
                 >
                   <div className="truncate flex-1 mr-2">
-                    <span className="text-apple-gray-700">{player.name}</span>
+                    <span className="text-afl-warm-700">{player.name}</span>
                     {player.team && (
-                      <span className="text-apple-gray-400 text-xs ml-1">{shortenTeam(player.team)}</span>
+                      <span className="text-afl-warm-400 text-xs ml-1">{shortenTeam(player.team)}</span>
                     )}
                   </div>
-                  <span className="font-semibold text-apple-gray-900 tabular-nums">
+                  <span className="font-semibold text-afl-warm-900 tabular-nums">
                     {player.points}
                   </span>
                 </div>

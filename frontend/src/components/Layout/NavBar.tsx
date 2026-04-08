@@ -53,6 +53,17 @@ const NavBar = () => {
               </Link>
             ))}
 
+            {/* Change Team */}
+            <Link
+              to="/welcome"
+              className="px-2 py-2 rounded-apple text-sm transition-all duration-200 text-afl-warm-400 hover:text-afl-warm-700 hover:bg-afl-warm-100"
+              title="Change team"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+            </Link>
+
             {/* Spoiler Toggle */}
             <button
               onClick={toggleSpoilerMode}

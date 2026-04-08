@@ -70,8 +70,8 @@ const GamePicker: React.FC<GamePickerProps> = ({ games, selectedGameId, onSelect
                 className={`
                   card-apple p-4 text-left transition-all duration-200 ease-apple
                   ${isSelected
-                    ? 'border-apple-blue-500 bg-apple-blue-50 shadow-apple-md'
-                    : 'border-apple-gray-200 hover:border-apple-blue-300 hover:shadow-apple'
+                    ? 'border-afl-accent bg-afl-accent-50 shadow-apple-md'
+                    : 'border-afl-warm-200 hover:border-afl-accent-300 hover:shadow-apple'
                   }
                   active:scale-95
                 `}
@@ -79,7 +79,7 @@ const GamePicker: React.FC<GamePickerProps> = ({ games, selectedGameId, onSelect
                 {/* Header: Round, Venue, Live Badge */}
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-apple-gray-700">
+                    <p className="text-sm font-medium text-afl-warm-700">
                       Round {game.round} • {game.venue}
                     </p>
                   </div>
@@ -95,27 +95,27 @@ const GamePicker: React.FC<GamePickerProps> = ({ games, selectedGameId, onSelect
                 <div className="space-y-2 mb-3">
                   {/* Home Team */}
                   <div className="flex items-center justify-between">
-                    <span className="text-lg font-semibold text-apple-gray-900">
+                    <span className="text-lg font-semibold text-afl-warm-900">
                       {game.home_team.abbreviation}
                     </span>
-                    <span className={`text-2xl font-bold text-apple-gray-900 ${hideScores ? 'blur-sm select-none' : ''}`}>
+                    <span className={`text-2xl font-bold text-afl-warm-900 ${hideScores ? 'blur-sm select-none' : ''}`}>
                       {displayScore(game.home_score)}
                     </span>
                   </div>
 
                   {/* Away Team */}
                   <div className="flex items-center justify-between">
-                    <span className="text-lg font-semibold text-apple-gray-900">
+                    <span className="text-lg font-semibold text-afl-warm-900">
                       {game.away_team.abbreviation}
                     </span>
-                    <span className={`text-2xl font-bold text-apple-gray-900 ${hideScores ? 'blur-sm select-none' : ''}`}>
+                    <span className={`text-2xl font-bold text-afl-warm-900 ${hideScores ? 'blur-sm select-none' : ''}`}>
                       {displayScore(game.away_score)}
                     </span>
                   </div>
                 </div>
 
                 {/* Time/Status */}
-                <div className="text-sm text-apple-gray-500 font-medium">
+                <div className="text-sm text-afl-warm-500 font-medium">
                   {game.time_str || 'Live'}
                 </div>
               </button>
@@ -128,7 +128,7 @@ const GamePicker: React.FC<GamePickerProps> = ({ games, selectedGameId, onSelect
       {completedGames.length > 0 && (
         <div>
           {liveGames.length > 0 && (
-            <div className="text-sm font-medium text-apple-gray-500 mb-2 px-1">
+            <div className="text-sm font-medium text-afl-warm-500 mb-2 px-1">
               Recent Results
             </div>
           )}
@@ -144,8 +144,8 @@ const GamePicker: React.FC<GamePickerProps> = ({ games, selectedGameId, onSelect
                   className={`
                     w-full card-apple px-3 py-2 text-left transition-all duration-200 ease-apple
                     ${isSelected
-                      ? 'border-apple-blue-500 bg-apple-blue-50 shadow-apple'
-                      : 'border-apple-gray-200 hover:border-apple-gray-300 hover:bg-apple-gray-50'
+                      ? 'border-afl-accent bg-afl-accent-50 shadow-apple'
+                      : 'border-afl-warm-200 hover:border-afl-warm-300 hover:bg-afl-warm-50'
                     }
                     active:scale-[0.99]
                   `}
@@ -154,31 +154,31 @@ const GamePicker: React.FC<GamePickerProps> = ({ games, selectedGameId, onSelect
                     {/* Teams and Scores - Compact */}
                     <div className="flex-1 flex items-center gap-3">
                       <div className="flex items-center gap-2 min-w-[140px]">
-                        <span className={`text-sm font-semibold ${!hideScores && winner === 'home' ? 'text-apple-gray-900' : 'text-apple-gray-500'}`}>
+                        <span className={`text-sm font-semibold ${!hideScores && winner === 'home' ? 'text-afl-warm-900' : 'text-afl-warm-500'}`}>
                           {game.home_team.abbreviation}
                         </span>
-                        <span className={`text-base font-bold ${!hideScores && winner === 'home' ? 'text-apple-gray-900' : 'text-apple-gray-500'} ${hideScores ? 'blur-sm select-none' : ''}`}>
+                        <span className={`text-base font-bold ${!hideScores && winner === 'home' ? 'text-afl-warm-900' : 'text-afl-warm-500'} ${hideScores ? 'blur-sm select-none' : ''}`}>
                           {displayScore(game.home_score)}
                         </span>
                       </div>
-                      <span className="text-apple-gray-400 text-sm">vs</span>
+                      <span className="text-afl-warm-400 text-sm">vs</span>
                       <div className="flex items-center gap-2 min-w-[140px]">
-                        <span className={`text-sm font-semibold ${!hideScores && winner === 'away' ? 'text-apple-gray-900' : 'text-apple-gray-500'}`}>
+                        <span className={`text-sm font-semibold ${!hideScores && winner === 'away' ? 'text-afl-warm-900' : 'text-afl-warm-500'}`}>
                           {game.away_team.abbreviation}
                         </span>
-                        <span className={`text-base font-bold ${!hideScores && winner === 'away' ? 'text-apple-gray-900' : 'text-apple-gray-500'} ${hideScores ? 'blur-sm select-none' : ''}`}>
+                        <span className={`text-base font-bold ${!hideScores && winner === 'away' ? 'text-afl-warm-900' : 'text-afl-warm-500'} ${hideScores ? 'blur-sm select-none' : ''}`}>
                           {displayScore(game.away_score)}
                         </span>
                       </div>
                     </div>
 
                     {/* Venue - Compact */}
-                    <div className="text-xs text-apple-gray-500 hidden sm:block">
+                    <div className="text-xs text-afl-warm-500 hidden sm:block">
                       {game.venue}
                     </div>
 
                     {/* Final badge */}
-                    <div className="text-xs font-medium text-apple-gray-400 px-2 py-0.5 bg-apple-gray-100 rounded">
+                    <div className="text-xs font-medium text-afl-warm-400 px-2 py-0.5 bg-afl-warm-100 rounded">
                       Final
                     </div>
                   </div>

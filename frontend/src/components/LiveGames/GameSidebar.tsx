@@ -82,10 +82,10 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
           w-full text-left transition-all duration-200 ease-apple rounded-apple p-3
           ${isLive ? 'border-l-4 border-l-apple-red' : ''}
           ${isSelected
-            ? 'bg-apple-blue-50 border-apple-blue-500 shadow-apple'
+            ? 'bg-afl-accent-50 border-afl-accent shadow-apple'
             : isLive
               ? 'glass shadow-apple-sm hover:shadow-apple'
-              : 'bg-apple-gray-50 opacity-80 hover:opacity-100 hover:bg-apple-gray-100'
+              : 'bg-afl-warm-50 opacity-80 hover:opacity-100 hover:bg-afl-warm-100'
           }
           ${!isLive && !isSelected ? 'border-l-4 border-l-transparent' : ''}
           active:scale-[0.98]
@@ -93,20 +93,20 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
       >
         {/* Home team row */}
         <div className="flex items-center justify-between mb-1">
-          <span className="text-sm font-semibold text-apple-gray-900 truncate">
+          <span className="text-sm font-semibold text-afl-warm-900 truncate">
             {game.home_team.abbreviation}
           </span>
-          <span className={`text-sm font-bold text-apple-gray-900 tabular-nums ${hideScores ? 'blur-sm select-none' : ''}`}>
+          <span className={`text-sm font-bold text-afl-warm-900 tabular-nums ${hideScores ? 'blur-sm select-none' : ''}`}>
             {displayScore(game.home_score)}
           </span>
         </div>
 
         {/* Away team row */}
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-sm font-semibold text-apple-gray-900 truncate">
+          <span className="text-sm font-semibold text-afl-warm-900 truncate">
             {game.away_team.abbreviation}
           </span>
-          <span className={`text-sm font-bold text-apple-gray-900 tabular-nums ${hideScores ? 'blur-sm select-none' : ''}`}>
+          <span className={`text-sm font-bold text-afl-warm-900 tabular-nums ${hideScores ? 'blur-sm select-none' : ''}`}>
             {displayScore(game.away_score)}
           </span>
         </div>
@@ -116,7 +116,7 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
           {isLive && (
             <div className="w-1.5 h-1.5 bg-apple-red rounded-full animate-pulse" />
           )}
-          <span className={`text-xs font-medium ${isLive ? 'text-apple-red' : 'text-apple-gray-400'}`}>
+          <span className={`text-xs font-medium ${isLive ? 'text-apple-red' : 'text-afl-warm-400'}`}>
             {isLive ? (game.time_str || 'Live') : 'Final'}
           </span>
           {isLive && game.last_updated && (Date.now() - new Date(game.last_updated + 'Z').getTime() > 3 * 60 * 1000) && (
@@ -153,7 +153,7 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
     return (
       <div className="mt-4">
         <div className="mb-2 px-1">
-          <span className="text-xs font-semibold text-apple-gray-400 uppercase tracking-wide">{label}</span>
+          <span className="text-xs font-semibold text-afl-warm-400 uppercase tracking-wide">{label}</span>
         </div>
         <div className="space-y-2">
           {matches.map(match => {
@@ -167,40 +167,40 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
                 className={`
                   w-full text-left rounded-apple p-3 border-l-4 transition-all duration-200 ease-apple
                   ${isSelected
-                    ? 'bg-apple-blue-50 border-l-apple-blue-500 shadow-apple opacity-100'
+                    ? 'bg-afl-accent-50 border-l-afl-accent shadow-apple opacity-100'
                     : hasPreview
-                      ? 'bg-apple-gray-50 border-l-blue-400 opacity-90 hover:opacity-100 hover:bg-apple-gray-100'
-                      : 'bg-apple-gray-50 border-l-apple-gray-200 opacity-70 hover:opacity-100 hover:bg-apple-gray-100'
+                      ? 'bg-afl-warm-50 border-l-afl-accent-300 opacity-90 hover:opacity-100 hover:bg-afl-warm-100'
+                      : 'bg-afl-warm-50 border-l-afl-warm-200 opacity-70 hover:opacity-100 hover:bg-afl-warm-100'
                   }
                   active:scale-[0.98]
                 `}
               >
                 {/* Home team */}
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-semibold text-apple-gray-700 truncate">
+                  <span className="text-sm font-semibold text-afl-warm-700 truncate">
                     {match.home_team}
                   </span>
                 </div>
                 {/* Away team */}
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm font-semibold text-apple-gray-700 truncate">
+                  <span className="text-sm font-semibold text-afl-warm-700 truncate">
                     {match.away_team}
                   </span>
                 </div>
                 {/* Time + preview badge */}
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-apple-gray-400">
+                  <span className="text-xs text-afl-warm-400">
                     {day} • {time}
                   </span>
                   {hasPreview && (
-                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-apple-blue-50 text-[10px] font-semibold text-apple-blue-600 leading-none">
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-afl-accent-50 text-[10px] font-semibold text-afl-accent-600 leading-none">
                       Preview
                     </span>
                   )}
                 </div>
                 {/* Prediction */}
                 {match.prediction && match.prediction.margin != null && (
-                  <div className="mt-1.5 text-[11px] text-apple-gray-500">
+                  <div className="mt-1.5 text-[11px] text-afl-warm-500">
                     Tipping {match.prediction.winner} by {Math.round(match.prediction.margin)}
                   </div>
                 )}
@@ -225,32 +225,32 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
               className={`
                 w-full text-left rounded-apple p-3 border-l-4 h-full transition-all duration-200 ease-apple
                 ${isSelected
-                  ? 'bg-apple-blue-50 border-l-apple-blue-500 shadow-apple opacity-100'
+                  ? 'bg-afl-accent-50 border-l-afl-accent shadow-apple opacity-100'
                   : hasPreview
-                    ? 'bg-apple-gray-50 border-l-blue-400 opacity-90'
-                    : 'bg-apple-gray-50 border-l-apple-gray-200 opacity-70'
+                    ? 'bg-afl-warm-50 border-l-afl-accent-300 opacity-90'
+                    : 'bg-afl-warm-50 border-l-afl-warm-200 opacity-70'
                 }
                 active:scale-[0.98]
               `}
             >
-              <div className="text-sm font-semibold text-apple-gray-700 truncate mb-1">
+              <div className="text-sm font-semibold text-afl-warm-700 truncate mb-1">
                 {match.home_team}
               </div>
-              <div className="text-sm font-semibold text-apple-gray-700 truncate mb-1.5">
+              <div className="text-sm font-semibold text-afl-warm-700 truncate mb-1.5">
                 {match.away_team}
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-apple-gray-400">
+                <span className="text-xs text-afl-warm-400">
                   {day} • {time}
                 </span>
                 {hasPreview && (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-apple-blue-50 text-[10px] font-semibold text-apple-blue-600 leading-none">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-afl-accent-50 text-[10px] font-semibold text-afl-accent-600 leading-none">
                     Preview
                   </span>
                 )}
               </div>
               {match.prediction && match.prediction.margin != null && (
-                <div className="mt-1.5 text-[11px] text-apple-gray-500 truncate">
+                <div className="mt-1.5 text-[11px] text-afl-warm-500 truncate">
                   Tipping {match.prediction.winner} by {Math.round(match.prediction.margin)}
                 </div>
               )}
@@ -290,7 +290,7 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
           {completedGames.length > 0 && (
             <div className={liveGames.length > 0 || upcomingWithPreview.length > 0 ? 'mt-4' : ''}>
               <div className="mb-2 px-1">
-                <span className="text-xs font-semibold text-apple-gray-400 uppercase tracking-wide">Results</span>
+                <span className="text-xs font-semibold text-afl-warm-400 uppercase tracking-wide">Results</span>
               </div>
               <div className="space-y-2">
                 {completedGames.map(game => (

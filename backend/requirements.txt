@@ -27,7 +27,7 @@ requests==2.31.0
 # lxml removed - incompatible with Python 3.14, using html.parser instead
 
 # Visualization
-plotly==5.18.0
+# (Recharts on frontend — no Python charting library needed)
 
 # Utilities
 python-dotenv==1.0.0

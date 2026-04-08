@@ -17,10 +17,10 @@ from app.analytics.query_builder import QueryBuilder
 from app.analytics.entity_resolver import EntityResolver, MetricResolver
 from app.analytics.context_enrichment import ContextEnricher
 from app.analytics.statistics import EfficiencyCalculator
-from app.visualization import PlotlyBuilder
-from app.visualization.plotly_builder import ChartHelper
+from app.visualization import RechartsBuilder
+from app.visualization.recharts_builder import ChartHelper
 from app.visualization.chart_selector import ChartSelector
-from app.visualization.layout_optimizer import LayoutOptimizer
+from app.visualization.layout_config import LayoutConfig
 from app.visualization.data_preprocessor import DataPreprocessor
 
 # Load environment variables
@@ -1082,7 +1082,7 @@ class AFLAnalyticsAgent:
 
                 # PHASE 2: OPTIMIZE LAYOUT - Calculate optimal layout parameters
                 logger.info("Calculating optimal layout parameters")
-                layout_config = LayoutOptimizer.optimize_layout(
+                layout_config = LayoutConfig.calculate(
                     data=data,
                     chart_type=chart_type,
                     x_col=x_col,
@@ -1090,7 +1090,7 @@ class AFLAnalyticsAgent:
                     metadata=metadata
                 )
 
-                # Add preprocessing results to params for PlotlyBuilder
+                # Add preprocessing results to params for RechartsBuilder
                 params["metadata"] = metadata
                 params["recommendations"] = recommendations
                 params["annotations"] = annotations
@@ -1121,7 +1121,7 @@ class AFLAnalyticsAgent:
             )
 
             # Generate chart
-            chart_spec = PlotlyBuilder.generate_chart(data, chart_type, params)
+            chart_spec = RechartsBuilder.generate_chart(data, chart_type, params)
 
             state["visualization_spec"] = chart_spec
 
@@ -1221,107 +1221,94 @@ class AFLAnalyticsAgent:
 
     @staticmethod
     def _build_error_response(state: Dict[str, Any]) -> str:
-        """Build a helpful error response based on context."""
-        intent = state.get("intent")
-        entities = state.get("entities", {})
+        """Build a helpful, conversational error response using gpt-5-nano."""
         error_detail = state.get("execution_error", "")
-        players = entities.get("players", [])
-        teams = entities.get("teams", [])
 
-        from app.data.database import get_data_recency
-        recency = get_data_recency()
-        earliest = recency["earliest_season"]
-        hist_season = recency["historical_latest_season"]
-
-        # Tailor the message to the error type
-        if "connection" in error_detail.lower() or "timeout" in error_detail.lower():
+        # Connection/timeout errors don't need an LLM call
+        if error_detail and ("connection" in error_detail.lower() or "timeout" in error_detail.lower()):
             return (
                 "I'm having trouble reaching the database right now. "
                 "Please try again in a moment."
             )
 
-        parts = ["I wasn't able to answer that query."]
-
-        if players:
-            parts.append(
-                f"Check that \"{players[0]}\" is spelled correctly — "
-                f"I match player names from AFL Tables data ({earliest}–{hist_season})."
-            )
-        elif teams:
-            parts.append(
-                f"I have data for all 18 AFL teams from {earliest} to {hist_season}. "
-                f"Make sure the team name is correct."
-            )
-        else:
-            parts.append(
-                f"I have AFL data from {earliest} to {hist_season}. "
-                f"Try being more specific about the team, player, or season."
-            )
-
-        examples = AFLAnalyticsAgent._get_example_queries(intent, entities)
-        parts.append(examples)
-
-        parts.append(
-            "\nIf you think this data should be available, "
-            "raise a request using the report button and I'll look into it."
-        )
-
-        return " ".join(parts[:2]) + "".join(parts[2:])
+        return AFLAnalyticsAgent._generate_llm_error_response(state, error_type="execution_error")
 
     @staticmethod
     def _build_empty_results_response(state: Dict[str, Any]) -> str:
-        """Build a helpful response when the query returned no results."""
-        entities = state.get("entities", {})
-        intent = state.get("intent")
-        players = entities.get("players", [])
-        teams = entities.get("teams", [])
-        seasons = entities.get("seasons", [])
+        """Build a helpful, conversational response when no results found using gpt-5-nano."""
+        return AFLAnalyticsAgent._generate_llm_error_response(state, error_type="no_results")
 
-        from app.data.database import get_data_recency
-        recency = get_data_recency()
-        earliest = recency["earliest_season"]
-        hist_season = recency["historical_latest_season"]
-        hist_round = recency["historical_latest_round"]
+    @staticmethod
+    def _generate_llm_error_response(state: Dict[str, Any], error_type: str = "no_results") -> str:
+        """Generate a conversational error response via gpt-5-nano.
 
-        parts = ["I couldn't find any data matching your query."]
+        Cheap and fast — provides context-aware suggestions based on what the user asked.
+        """
+        try:
+            from app.data.database import get_data_recency
+            recency = get_data_recency()
+            earliest = recency["earliest_season"]
+            hist_season = recency["historical_latest_season"]
+            hist_round = recency["historical_latest_round"]
 
-        if players and seasons:
-            parts.append(
-                f"I don't have stats for {players[0]} in {seasons[0]}. "
-                f"Player data covers {earliest} through Round {hist_round} of {hist_season}. "
-                f"The player may not have played that season, or the name could be misspelled."
+            user_query = state.get("user_query", "")
+            entities = state.get("entities", {})
+            players = entities.get("players", [])
+            teams = entities.get("teams", [])
+            seasons = entities.get("seasons", [])
+            error_detail = state.get("execution_error", "") if error_type == "execution_error" else ""
+
+            context_parts = []
+            if players:
+                context_parts.append(f"Players mentioned: {', '.join(players)}")
+            if teams:
+                context_parts.append(f"Teams mentioned: {', '.join(teams)}")
+            if seasons:
+                context_parts.append(f"Seasons mentioned: {', '.join(str(s) for s in seasons)}")
+            if error_detail:
+                # Sanitise — don't leak SQL or stack traces
+                clean_error = error_detail.split('\n')[0][:200]
+                context_parts.append(f"Error: {clean_error}")
+
+            context_str = "\n".join(context_parts) if context_parts else "No specific entities detected."
+
+            prompt = f"""The user asked an AFL statistics question but we couldn't find results. Write a helpful, casual response.
+
+User's question: "{user_query}"
+
+Detected context:
+{context_str}
+
+Our database covers: {earliest} to Round {hist_round} of {hist_season} (match results, player stats, team stats).
+We also have: upcoming fixtures, betting odds, Squiggle tipping predictions, and AFL news.
+
+{'The query failed to execute — likely a spelling issue, wrong season, or the data doesnt exist.' if error_type == 'execution_error' else 'The query ran but returned zero rows — the data may not exist for this specific filter.'}
+
+Rules:
+- Be conversational and brief (2-4 sentences max)
+- Explain WHY it might have failed based on what they asked (wrong spelling? season out of range? player didn't play that year?)
+- Suggest 2-3 alternative queries they could try that ARE answerable — make them specific to what the user was asking about, not generic examples
+- Format suggestions naturally, not as a bulleted list of raw queries
+- End with a note that they can report an issue if they think the data should exist"""
+
+            response = client.chat.completions.create(
+                model=os.getenv("NEWS_ENRICHMENT_MODEL", "gpt-5-nano"),
+                messages=[{"role": "user", "content": prompt}],
+                max_completion_tokens=300,
             )
-        elif players:
-            parts.append(
-                f"Check that \"{players[0]}\" is spelled correctly. "
-                f"I have player stats from {earliest} to {hist_season}."
+
+            return (response.choices[0].message.content or "").strip()
+
+        except Exception as e:
+            logger.warning(f"LLM error response generation failed: {e}")
+            # Fallback to basic static message
+            from app.data.database import get_data_recency
+            recency = get_data_recency()
+            return (
+                f"I couldn't find results for that query. "
+                f"I have AFL data from {recency['earliest_season']} to {recency['historical_latest_season']}. "
+                f"Try checking spelling or adjusting the season."
             )
-        elif teams and seasons:
-            parts.append(
-                f"No results for {teams[0]} in {seasons[0]}. "
-                f"Match data covers {earliest} to {hist_season}."
-            )
-        else:
-            # Check if user asked about remaining/upcoming games
-            query_lower = state.get("user_query", "").lower()
-            remaining_keywords = ["left", "remaining", "upcoming", "scheduled", "still to play"]
-            if any(kw in query_lower for kw in remaining_keywords):
-                parts = ["All games this round have been completed — no remaining games to play."]
-            else:
-                parts.append(
-                    f"I have AFL data from {earliest} to {hist_season}. "
-                    f"Try checking the team/player name or adjusting the season."
-                )
-
-        examples = AFLAnalyticsAgent._get_example_queries(intent, entities)
-        parts.append(examples)
-
-        parts.append(
-            "\nIf you think this data should be available, "
-            "raise a request using the report button and I'll look into it."
-        )
-
-        return " ".join(parts[:2]) + "".join(parts[2:])
 
     @staticmethod
     def _llm_retry_sql(original_sql: str, error_message: str, user_query: str) -> Optional[str]:
@@ -2042,32 +2029,7 @@ If you cannot fix it, return the string UNFIXABLE."""
                 logger.info(f"NULL check (DataFrame): len(data)={len(data)}, all_null={all_null}, data=\n{data}")
 
             if all_null:
-                entities = state.get("entities", {})
-                players = entities.get("players", [])
-                seasons = entities.get("seasons", [])
-
-                if players and seasons:
-                    player_name = players[0] if players else "this player"
-                    season = seasons[0] if seasons else "this season"
-
-                    from app.data.database import get_data_recency
-                    recency = get_data_recency()
-                    earliest = recency["earliest_season"]
-                    hist_season = recency["historical_latest_season"]
-                    hist_round = recency["historical_latest_round"]
-                    state["natural_language_summary"] = (
-                        f"I couldn't find any data for {player_name} in {season}. "
-                        f"I have match and player data from {earliest} through Round {hist_round} of {hist_season}. "
-                        f"Try a different season or player."
-                        "\n\nIf you think this data should be available, raise a request using the report button and I'll look into it."
-                    )
-                else:
-                    state["natural_language_summary"] = (
-                        "I found matching records but they don't contain any data values. "
-                        "Try asking about a different time period or entity."
-                        "\n\nIf you think this data should be available, raise a request using the report button and I'll look into it."
-                    )
-
+                state["natural_language_summary"] = self._build_empty_results_response(state)
                 state["confidence"] = 0.4
                 return state
 
@@ -2200,6 +2162,9 @@ CRITICAL RULES:
 - DO NOT mention limitations or missing data unless the query CANNOT be answered
 - After answering, you may suggest 1 brief follow-up the user might find interesting. Keep it casual and conversational — NOT "Try: 'query'" format. Instead, something like "I can also show you X if you're interested." or "Want to see how that compares to Y?"
 - When presenting multiple rows of data, format as a markdown table
+- ONLY present data from the query results below as your primary answer. Our database covers {_earliest}-present.
+- If the results seem incomplete for historical/all-time questions, you MAY add well-known historical context from your own knowledge BUT you MUST clearly separate it. Present database results first, then add a clearly labelled section like "**For historical context:**" or "**Beyond our database:**" so the user knows what came from data vs general knowledge. Never mix the two together.
+- NEVER invent, calculate, or fabricate metrics/ratings that are not in the query results. If the user asks about a metric that doesn't appear in the results (e.g. "pressure factor", "rating", "index"), say you don't have that specific metric and show what related data you DO have instead.
 
 {conversation_context_text}User asked: {state['user_query']}
 
@@ -2220,6 +2185,8 @@ CRITICAL: Keep your response VERY SHORT (2-3 sentences max).
 - Briefly state what the chart shows
 - Mention 1-2 key insights or standout data points
 - Do NOT describe every data point - the chart shows that
+- ONLY reference data from the query results as your primary answer. Our database covers {_earliest}-present. If adding historical context from your own knowledge, clearly label it as separate from the data.
+- NEVER invent, calculate, or fabricate metrics/ratings that are not in the query results.
 
 {conversation_context_text}User query: {state['user_query']}
 
@@ -2240,6 +2207,9 @@ Guidelines:
 - Use Australian football terminology correctly
 - Never mention SQL, databases, or technical details
 - When presenting multiple rows of data, format as a markdown table
+- ONLY present data from the query results below as your primary answer. Our database covers {_earliest}-present.
+- If the results seem incomplete for historical/all-time questions, you MAY add well-known historical context from your own knowledge BUT you MUST clearly separate it. Present database results first, then add a clearly labelled section like "**For historical context:**" or "**Beyond our database:**" so the user knows what came from data vs general knowledge. Never mix the two together.
+- NEVER invent, calculate, or fabricate metrics/ratings that are not in the query results. If the user asks about a metric that doesn't appear in the results (e.g. "pressure factor", "rating", "index"), say you don't have that specific metric and show what related data you DO have instead.
 
 {conversation_context_text}Current user query: {state['user_query']}
 

@@ -1,4 +1,4 @@
 """AFL Visualization module."""
-from app.visualization.plotly_builder import PlotlyBuilder
+from app.visualization.recharts_builder import RechartsBuilder
 
-__all__ = ["PlotlyBuilder"]
+__all__ = ["RechartsBuilder"]
