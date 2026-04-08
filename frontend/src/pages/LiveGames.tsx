@@ -107,9 +107,9 @@ const LiveGames = () => {
           <div className="card-apple p-8 text-center">
             <div className="text-6xl mb-4">⚠️</div>
             <h2 className="text-2xl font-semibold text-apple-gray-900 mb-2">
-              Unable to Load Games
+              The umpire's called a delay...
             </h2>
-            <p className="text-apple-gray-500">{error}</p>
+            <p className="text-apple-gray-500">We're having trouble loading the games right now. Try again in a moment.</p>
           </div>
         </div>
       </div>
@@ -132,10 +132,10 @@ const LiveGames = () => {
           {/* No live games message */}
           <div className="card-apple p-8 text-center">
             <h2 className="text-3xl font-semibold text-apple-gray-900 mb-2">
-              No Live Games
+              No games on right now
             </h2>
             <p className="text-lg text-apple-gray-500">
-              Check back when games are in progress
+              The next bounce is coming soon
             </p>
           </div>
 

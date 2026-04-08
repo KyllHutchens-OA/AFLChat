@@ -22,15 +22,15 @@ const NavBar = () => {
   };
 
   return (
-    <nav className="glass sticky top-0 z-30 border-b border-apple-gray-200/50">
+    <nav className="glass sticky top-0 z-30 border-b border-afl-warm-200/50">
       <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10">
         <div className="flex items-center justify-between h-16">
           {/* Logo/Brand */}
           <Link to="/" className="flex items-center gap-2">
-            <span className="text-xl font-semibold text-apple-gray-900">
+            <span className="text-xl font-semibold text-afl-warm-900">
               Footy-NAC
             </span>
-            <span className="hidden sm:inline text-sm text-apple-gray-500">
+            <span className="hidden sm:inline text-sm text-afl-warm-500">
               Not Another Commentator
             </span>
           </Link>
@@ -44,8 +44,8 @@ const NavBar = () => {
                 className={`
                   px-3 sm:px-4 py-2 rounded-apple text-sm font-medium transition-all duration-200
                   ${isActive(link)
-                    ? 'bg-apple-blue-500 text-white shadow-apple-sm'
-                    : 'text-apple-gray-700 hover:bg-apple-gray-100'
+                    ? 'bg-afl-accent text-white shadow-apple-sm'
+                    : 'text-afl-warm-700 hover:bg-afl-warm-100'
                   }
                 `}
               >
@@ -59,8 +59,8 @@ const NavBar = () => {
               className={`
                 ml-2 sm:ml-4 p-2 rounded-apple transition-all duration-200
                 ${hideScores
-                  ? 'bg-apple-blue-500 text-white'
-                  : 'text-apple-gray-500 hover:bg-apple-gray-100'
+                  ? 'bg-afl-accent text-white'
+                  : 'text-afl-warm-500 hover:bg-afl-warm-100'
                 }
               `}
               title={hideScores ? 'Scores hidden - click to show' : 'Scores visible - click to hide'}
