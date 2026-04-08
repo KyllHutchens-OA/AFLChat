@@ -7,7 +7,7 @@ interface LayoutProps {
 
 const Layout = ({ children }: LayoutProps) => {
   return (
-    <div className="min-h-screen bg-apple-gray-50">
+    <div className="min-h-screen">
       <NavBar />
       <main>{children}</main>
     </div>

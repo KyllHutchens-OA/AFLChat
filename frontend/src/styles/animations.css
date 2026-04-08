@@ -45,9 +45,9 @@
 .animate-shimmer {
   background: linear-gradient(
     90deg,
-    #F5F5F7 0%,
-    #E8E8ED 50%,
-    #F5F5F7 100%
+    #FAF7F2 0%,
+    #F0EBE3 50%,
+    #FAF7F2 100%
   );
   background-size: 1000px 100%;
   animation: shimmer 2s infinite;
@@ -65,4 +65,46 @@
 
 .animate-breathe {
   animation: breathe 2s ease-in-out infinite;
+}
+
+/* Slide in from right */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* Simple fade in */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Count up number animation helper */
+@keyframes countUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-count-up {
+  animation: countUp 0.5s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
