@@ -95,6 +95,10 @@ def create_app(config=None):
     from app.api import reports
     app.register_blueprint(reports.bp)
 
+    # Register teams API (team list + fun stats)
+    from app.api import teams_api
+    app.register_blueprint(teams_api.bp)
+
     # Register WebSocket handlers
     from app.api import websocket
 
