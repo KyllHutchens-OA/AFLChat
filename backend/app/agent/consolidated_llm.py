@@ -184,6 +184,7 @@ For the CURRENT ROUND of the current season (where match data may not yet be in 
 - DO NOT GROUP BY p.name alone for player stats — always include p.id to distinguish same-name players (e.g. Josh Kennedy played for both Sydney and West Coast)
 - DO NOT filter by player position (`p.position`) — this column is not populated. If asked for 'midfielders' or 'forwards', suggest filtering by relevant stats instead (high disposals for mids, high goals for forwards).
 - DO NOT reference tables that don't exist. Awards, draft picks, and ladder tables do NOT exist. Brownlow votes per game are in `player_stats.brownlow_votes`.
+- LADDER POSITION / WOODEN SPOON: There is no ladder table — you MUST calculate final ladder positions from match results. Use wins (4 pts), draws (2 pts), losses (0 pts), then percentage (points_for / points_against) as tiebreaker. Use RANK() OVER to assign position. See the few-shot examples below.
 
 ## Few-shot SQL examples (error-prone patterns):
 
@@ -262,6 +263,43 @@ Common patterns:
          COUNT(*) AS home_games
   FROM matches m JOIN teams t ON t.name = 'Collingwood'
   WHERE m.season = 2023 AND m.home_team_id = t.id
+
+- LADDER POSITION / STANDINGS: Calculate from match results using window functions.
+  Q: "Where did Carlton finish on the ladder each year since 2015?"
+  SQL: WITH season_records AS (
+    SELECT m.season, t.name,
+      SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score) OR (m.away_team_id = t.id AND m.away_score > m.home_score) THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score < m.away_score) OR (m.away_team_id = t.id AND m.away_score < m.home_score) THEN 1 ELSE 0 END) AS losses,
+      SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score = m.away_score) OR (m.away_team_id = t.id AND m.away_score = m.home_score) THEN 1 ELSE 0 END) AS draws,
+      SUM(CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END) AS points_for,
+      SUM(CASE WHEN m.home_team_id = t.id THEN m.away_score ELSE m.home_score END) AS points_against
+    FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id)
+    WHERE m.round NOT IN ('Qualifying Final','Elimination Final','Semi Final','Preliminary Final','Grand Final')
+    GROUP BY m.season, t.name
+  ), ranked AS (
+    SELECT *, wins * 4 + draws * 2 AS premiership_points,
+      ROUND(CASE WHEN points_against > 0 THEN points_for * 100.0 / points_against ELSE 0 END, 1) AS percentage,
+      RANK() OVER (PARTITION BY season ORDER BY wins * 4 + draws * 2 DESC, CASE WHEN points_against > 0 THEN points_for * 1.0 / points_against ELSE 0 END DESC) AS position
+    FROM season_records
+  )
+  SELECT season, position, wins, losses, draws, premiership_points, percentage FROM ranked WHERE name = 'Carlton' AND season >= 2015 ORDER BY season
+
+  Q: "Which team has won the most wooden spoons since 2000?" (team that finished last)
+  SQL: WITH season_records AS (
+    SELECT m.season, t.name,
+      SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score) OR (m.away_team_id = t.id AND m.away_score > m.home_score) THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score < m.away_score) OR (m.away_team_id = t.id AND m.away_score < m.home_score) THEN 1 ELSE 0 END) AS losses,
+      SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score = m.away_score) OR (m.away_team_id = t.id AND m.away_score = m.home_score) THEN 1 ELSE 0 END) AS draws,
+      SUM(CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END) AS points_for,
+      SUM(CASE WHEN m.home_team_id = t.id THEN m.away_score ELSE m.home_score END) AS points_against
+    FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id)
+    WHERE m.season >= 2000 AND m.round NOT IN ('Qualifying Final','Elimination Final','Semi Final','Preliminary Final','Grand Final')
+    GROUP BY m.season, t.name
+  ), ranked AS (
+    SELECT *, RANK() OVER (PARTITION BY season ORDER BY wins * 4 + draws * 2 ASC, CASE WHEN points_against > 0 THEN points_for * 1.0 / points_against ELSE 0 END ASC) AS spoon_rank
+    FROM season_records
+  )
+  SELECT name, COUNT(*) AS spoon_count FROM ranked WHERE spoon_rank = 1 GROUP BY name ORDER BY spoon_count DESC
 
 {conversation_context}
 

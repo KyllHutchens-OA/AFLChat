@@ -1297,17 +1297,32 @@ Rules:
                 max_completion_tokens=300,
             )
 
-            return (response.choices[0].message.content or "").strip()
+            result = (response.choices[0].message.content or "").strip()
+            if result:
+                return result
+
+            # LLM returned empty — fall through to static fallback
+            logger.warning("LLM error response was empty, using static fallback")
 
         except Exception as e:
             logger.warning(f"LLM error response generation failed: {e}")
-            # Fallback to basic static message
-            from app.data.database import get_data_recency
+
+        # Fallback to basic static message
+        from app.data.database import get_data_recency
+        try:
             recency = get_data_recency()
+            user_query = state.get("user_query", "your question")
             return (
-                f"I couldn't find results for that query. "
-                f"I have AFL data from {recency['earliest_season']} to {recency['historical_latest_season']}. "
-                f"Try checking spelling or adjusting the season."
+                f"I had trouble finding an answer for \"{user_query[:80]}\". "
+                f"I have AFL data from {recency['earliest_season']} to {recency['historical_latest_season']} "
+                f"covering match results, player stats, and team performance. "
+                f"Try rephrasing or being more specific — and if you think this should work, "
+                f"hit the report button so we can look into it."
+            )
+        except Exception:
+            return (
+                "I had trouble answering that one. Try rephrasing your question, "
+                "or hit the report button if you think this should work."
             )
 
     @staticmethod
@@ -1849,7 +1864,7 @@ If you cannot fix it, return the string UNFIXABLE."""
 
         # --- PATTERN 3: Chart accompaniment (very brief text) ---
         if has_chart:
-            subject = players[0] if players else teams[0] if teams else "the data"
+            subject = players[0] if players else teams[0] if teams else None
             intent_str = str(intent).upper() if intent else ""
             chart_data = state.get("query_results")
 
@@ -1872,24 +1887,33 @@ If you cannot fix it, return the string UNFIXABLE."""
             if "TREND" in intent_str:
                 has_round_col = chart_data is not None and "round" in chart_data.columns
                 season_count = chart_data["season"].nunique() if (chart_data is not None and "season" in chart_data.columns) else 0
-                if has_round_col and season_count <= 1:
-                    return f"Here's {subject}'s game-by-game performance{time_range}."
-                return f"Here's how {subject}'s numbers have changed{time_range}."
+                if subject:
+                    if has_round_col and season_count <= 1:
+                        return f"Here's {subject}'s game-by-game performance{time_range}."
+                    return f"Here's how {subject}'s numbers have changed{time_range}."
+                else:
+                    return f"Here's the trend{time_range}."
             elif "COMPARISON" in intent_str:
                 compared = " and ".join(players[:3]) if players else "the players"
                 return f"Here's a head-to-head comparison of {compared}{time_range}."
             elif "TEAM" in intent_str:
-                return f"Here's {subject}'s performance breakdown{time_range}."
+                if subject:
+                    return f"Here's {subject}'s performance breakdown{time_range}."
+                return f"Here's the performance breakdown{time_range}."
             elif chart_type_name == "pie":
-                # Describe what the pie chart shows
                 numeric_cols = chart_data.select_dtypes(include=['number']).columns.tolist() if chart_data is not None else []
                 metric = AFLAnalyticsAgent._humanize_value_label(numeric_cols[0]) if numeric_cols else "breakdown"
-                return f"Here's {subject}'s {metric} breakdown{time_range}."
+                if subject:
+                    return f"Here's {subject}'s {metric} breakdown{time_range}."
+                return f"Here's the {metric} breakdown{time_range}."
             elif chart_type_name == "box":
-                return f"Here's the distribution of {subject}'s stats{time_range}."
+                if subject:
+                    return f"Here's the distribution of {subject}'s stats{time_range}."
+                return f"Here's the stat distribution{time_range}."
             else:
-                # Generic but still descriptive
-                return f"Here's {subject}'s data{time_range}."
+                if subject:
+                    return f"Here's {subject}'s data{time_range}."
+                return f"Here's what I found{time_range}."
 
         return None
 

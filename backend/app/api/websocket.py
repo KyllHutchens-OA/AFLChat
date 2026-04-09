@@ -175,7 +175,7 @@ def handle_chat_message(data):
         # Send response
         response_text = ""
         logger.info(f"WebSocket: Checking final_state for response - errors={final_state.get('errors')}, execution_error={final_state.get('execution_error')}")
-        if final_state.get('natural_language_summary'):
+        if final_state.get('natural_language_summary') not in (None, ''):
             response_text = final_state['natural_language_summary']
             logger.info(f"Emitting 'response' event with text length={len(response_text)}")
             logger.info(f"Response preview: {response_text[:200]}...")
@@ -221,8 +221,33 @@ def handle_chat_message(data):
         # Save assistant response to conversation (in background, after sending complete)
         # Sanitize metadata to ensure JSON serializability (remove Timestamp objects, etc.)
         logger.info(f"Preparing to save assistant response to conversation {conversation_id}")
+        # Enrich entities with team/player names from query results so follow-up
+        # questions ("which teams are these?", "show me their stats") have context
+        entities = make_json_serializable(final_state.get("entities", {}))
+        query_results = final_state.get("query_results")
+        try:
+            if query_results is not None and hasattr(query_results, 'columns'):
+                if not entities.get("teams"):
+                    for col in ("name", "team", "team_name"):
+                        if col in query_results.columns:
+                            result_teams = query_results[col].dropna().unique().tolist()
+                            if result_teams and len(result_teams) <= 20:
+                                entities["teams"] = [str(t) for t in result_teams]
+                                logger.info(f"Enriched entities with {len(result_teams)} teams from results")
+                            break
+                if not entities.get("players"):
+                    for col in ("player", "player_name"):
+                        if col in query_results.columns:
+                            result_players = query_results[col].dropna().unique().tolist()
+                            if result_players and len(result_players) <= 20:
+                                entities["players"] = [str(p) for p in result_players]
+                                logger.info(f"Enriched entities with {len(result_players)} players from results")
+                            break
+        except Exception as e:
+            logger.warning(f"Entity enrichment from results failed: {e}")
+
         metadata = {
-            "entities": make_json_serializable(final_state.get("entities", {})),
+            "entities": entities,
             "intent": str(final_state.get("intent", "")),
             "confidence": final_state.get("confidence", 0.0),
             "needs_clarification": final_state.get("needs_clarification", False),

@@ -182,7 +182,7 @@ IMPORTANT - "TEAM PERFORMANCE" Definition:
 When a user asks about a team's "performance", they want these key metrics:
 - Margin (points difference per game)
 - Win/loss ratio or record (wins, losses, win percentage)
-- Ladder position (if asking about final standings)
+- Ladder position (if asking about final standings — calculate from wins/losses using RANK() OVER, exclude finals rounds)
 
 For "team performance by round" or "performance in [season]" queries:
 - Return ROUND-BY-ROUND data (one row per match), NOT season aggregates
