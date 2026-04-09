@@ -66,6 +66,9 @@ You are an AFL analytics expert. In ONE step:
   - After discussing 2023 stats: "Exclude finals" → same query but for 2023 excluding finals
 - ALWAYS use conversation context to identify the subject of follow-up questions
 - CRITICAL: If user asks to modify a previous query (e.g., "just regular season", "exclude finals"), KEEP the season from context!
+- AFFIRMATION HANDLING: If the user's message is a short affirmation ("yes", "yes please", "sure", "go ahead", "yeah", "yep", "do it") AND the previous assistant message suggested or offered something specific (e.g., "I can also show you X" or "Want to see Y?"), treat the user's query as requesting that specific suggestion. Extract the suggested action and generate SQL for it.
+  - Example: Assistant said "Want to see Adelaide's 2024 results for comparison?" → User says "yes please" → Generate SQL for Adelaide's 2024 results
+  - Example: Assistant said "I can show you their scoring trend over time" → User says "sure" → Generate SQL for the team's scoring trend
 
 ## Intent Classification
 ⚠️ NEVER classify AFL follow-up questions as off_topic!
@@ -201,6 +204,15 @@ SQL: SELECT p.name, SUM(ps.disposals) AS total_disposals, t.name AS team FROM pl
 
 Q: "Geelong's scoring trend from 2018 to 2024"
 SQL: SELECT m.season, ROUND(AVG(CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END), 1) AS avg_score FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id) WHERE t.name = 'Geelong' AND m.season BETWEEN 2018 AND 2024 GROUP BY m.season ORDER BY m.season
+
+Q: "Adelaide's scores at the MCG in 2025"
+SQL: SELECT m.round, CASE WHEN m.home_team_id = t.id THEN t_opp.name ELSE t_home.name END AS opponent, CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END AS adelaide_score, CASE WHEN m.home_team_id = t.id THEN m.away_score ELSE m.home_score END AS opponent_score, CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score) OR (m.away_team_id = t.id AND m.away_score > m.home_score) THEN 'Win' WHEN m.home_score = m.away_score THEN 'Draw' ELSE 'Loss' END AS result FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id) JOIN teams t_home ON m.home_team_id = t_home.id JOIN teams t_opp ON m.away_team_id = t_opp.id WHERE t.name = 'Adelaide' AND m.season = 2025 AND m.venue = 'MCG' ORDER BY m.match_date
+
+CRITICAL — TEAM-SPECIFIC SCORES: When a query is about a specific team's scores/points, NEVER select raw home_score or away_score — the team could be on either side. ALWAYS use CASE:
+  - Team's score: CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END AS team_score
+  - Opponent's score: CASE WHEN m.home_team_id = t.id THEN m.away_score ELSE m.home_score END AS opponent_score
+  - Opponent's name: Join both teams and use CASE to pick the other one
+  This applies to ALL team queries — scores, margins, averages, trends. Never assume a team is always home or always away.
 
 Common patterns:
 - Team season record: JOIN teams t, filter (home_team_id=t.id OR away_team_id=t.id), CASE for wins/losses
