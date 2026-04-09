@@ -113,19 +113,21 @@ Database Schema:
 ### teams: id, name, abbreviation, stadium
 Use EXACT team names: Adelaide (NOT "Adelaide Crows"), Geelong (NOT "Geelong Cats"), Greater Western Sydney (NOT "GWS Giants"), Sydney (NOT "Sydney Swans"), West Coast (NOT "West Coast Eagles")
 
-Common venue aliases (use the DB canonical name in SQL):
-- MCG / Melbourne Cricket Ground → 'M.C.G.'
-- Marvel Stadium / Docklands / Etihad Stadium / Colonial Stadium / Telstra Dome → 'Marvel Stadium'
-- GMHBA Stadium / Kardinia Park / Simonds Stadium / Skilled Stadium → 'GMHBA Stadium'
-- The Gabba / Woolloongabba / Brisbane Cricket Ground → 'Gabba'
-- SCG / Sydney Cricket Ground → 'S.C.G.'
-- Optus Stadium / Perth Stadium → 'Optus Stadium'
-- Adelaide Oval → 'Adelaide Oval'
-- People First Stadium / Metricon Stadium / Carrara → 'People First Stadium'
-- Blundstone Arena / Bellerive Oval → 'Blundstone Arena'
-- UNSW Canberra Oval / Manuka Oval → 'UNSW Canberra Oval'
-- TIO Traeger Park / Traeger Park → 'TIO Traeger Park'
-When filtering by venue, use ILIKE for fuzzy matching: WHERE m.venue ILIKE '%MCG%' or WHERE m.venue ILIKE '%Marvel%'
+Venue names are NORMALIZED in the database. Use EXACT canonical names in WHERE clauses:
+- 'MCG' (was M.C.G., Melbourne Cricket Ground)
+- 'Marvel Stadium' (was Docklands, Etihad Stadium, Colonial Stadium, Telstra Dome)
+- 'GMHBA Stadium' (was Kardinia Park, Simonds Stadium, Skilled Stadium)
+- 'The Gabba' (was Gabba, Woolloongabba, Brisbane Cricket Ground)
+- 'SCG' (was S.C.G., Sydney Cricket Ground)
+- 'Optus Stadium' (was Perth Stadium)
+- 'Adelaide Oval'
+- 'People First Stadium' (was Metricon Stadium, Carrara)
+- 'Blundstone Arena' (was Bellerive Oval)
+- 'Manuka Oval' (was UNSW Canberra Oval — Canberra games)
+- 'TIO Traeger Park' (was Traeger Park)
+- 'Engie Stadium' (was Sydney Showground, Giants Stadium — GWS home ground in Sydney)
+- 'TIO Stadium' (was Marrara Oval)
+Use exact match: WHERE m.venue = 'MCG' or WHERE m.venue = 'Marvel Stadium'. For user input that might be an alias, use ILIKE: WHERE m.venue ILIKE '%marvel%'
 
 ### matches: id, season (INTEGER), round (VARCHAR), match_date (TIMESTAMP), home_team_id, away_team_id, home_score, away_score, venue, attendance, home_q1_goals, home_q1_behinds, home_q2_goals, home_q2_behinds, home_q3_goals, home_q3_behinds, home_q4_goals, home_q4_behinds, away_q1_goals, away_q1_behinds, away_q2_goals, away_q2_behinds, away_q3_goals, away_q3_behinds, away_q4_goals, away_q4_behinds
 - Quarter scores are stored IN this table. Do NOT look for a separate `quarter_scores` table.

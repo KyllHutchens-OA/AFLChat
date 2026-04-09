@@ -1155,6 +1155,17 @@ class FastPathRouter:
                 if has_round_ref or has_match_ref:
                     logger.info(f"FAST-PATH: Skipping season-aggregate pattern '{pattern.name}' — query references specific round/match")
                     continue
+                # Skip when query mentions a specific venue — fast-path patterns
+                # don't filter by venue, so the LLM pipeline needs to handle these
+                _VENUE_KEYWORDS = [
+                    "at the", "at mcg", "at marvel", "at the gabba", "at scg",
+                    "at optus", "at adelaide oval", "at gmhba", "at blundstone",
+                    "at engie", "at york park", "at people first",
+                    "venue", "stadium", "ground", "oval", "park",
+                ]
+                if any(kw in query_lower for kw in _VENUE_KEYWORDS):
+                    logger.info(f"FAST-PATH: Skipping season-aggregate pattern '{pattern.name}' — query references a venue")
+                    continue
 
             # Skip match-level patterns (round_results, match_result, head_to_head) when
             # query asks for player-level stats — these patterns only return team scores

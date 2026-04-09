@@ -13,6 +13,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.data.database import get_session
 from app.data.models import LiveGame, LiveGameEvent, Team, Match, QuarterSnapshot
+from app.analytics.entity_resolver import VenueResolver
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +201,7 @@ class LiveGameService:
             round=str(game_data.get("round", "")),
             home_team_id=home_team.id,
             away_team_id=away_team.id,
-            venue=game_data.get("venue"),
+            venue=VenueResolver.normalize_venue(game_data.get("venue", "") or ""),
             match_date=match_date,
             status="scheduled",
         )

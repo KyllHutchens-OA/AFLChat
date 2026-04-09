@@ -451,8 +451,9 @@ class EntityResolver:
 class VenueResolver:
     """Resolves venue aliases to canonical database names."""
 
+    # Canonical names = current commercial/common names that fans know
     VENUE_ALIASES = {
-        "M.C.G.": [
+        "MCG": [
             "mcg", "m.c.g.", "melbourne cricket ground", "the mcg", "the g"
         ],
         "Marvel Stadium": [
@@ -463,10 +464,10 @@ class VenueResolver:
             "gmhba stadium", "gmhba", "kardinia park", "simonds stadium",
             "skilled stadium", "geelong", "kardinia"
         ],
-        "Gabba": [
+        "The Gabba": [
             "gabba", "the gabba", "woolloongabba", "brisbane cricket ground"
         ],
-        "S.C.G.": [
+        "SCG": [
             "scg", "s.c.g.", "sydney cricket ground", "the scg"
         ],
         "Optus Stadium": [
@@ -482,18 +483,38 @@ class VenueResolver:
         "Blundstone Arena": [
             "blundstone arena", "blundstone", "bellerive oval", "bellerive"
         ],
-        "UNSW Canberra Oval": [
-            "unsw canberra oval", "manuka oval", "manuka", "canberra"
+        "Manuka Oval": [
+            "manuka oval", "manuka", "unsw canberra oval", "canberra"
         ],
         "TIO Traeger Park": [
             "tio traeger park", "traeger park", "alice springs"
         ],
-        "Sydney Showground Stadium": [
-            "sydney showground", "showground", "giants stadium", "engie stadium"
+        "Engie Stadium": [
+            "engie stadium", "sydney showground", "showground", "giants stadium",
+            "sydney showground stadium", "engie stadium sydney"
         ],
         "TIO Stadium": [
             "tio stadium", "marrara oval", "darwin"
         ],
+    }
+
+    # Maps raw DB venue strings (from AFL Tables / Squiggle) to canonical names.
+    # Used during ingestion and for normalizing query results.
+    _DB_VENUE_MAP = {
+        "M.C.G.": "MCG",
+        "Melbourne Cricket Ground": "MCG",
+        "Docklands": "Marvel Stadium",
+        "Kardinia Park": "GMHBA Stadium",
+        "Gabba": "The Gabba",
+        "S.C.G.": "SCG",
+        "Sydney Cricket Ground": "SCG",
+        "Perth Stadium": "Optus Stadium",
+        "Carrara": "People First Stadium",
+        "Bellerive Oval": "Blundstone Arena",
+        "UNSW Canberra Oval": "Manuka Oval",
+        "Marrara Oval": "TIO Stadium",
+        "Sydney Showground": "Engie Stadium",
+        "Barossa Oval": "Barossa Park",
     }
 
     _ALIAS_LOOKUP = None
@@ -520,6 +541,17 @@ class VenueResolver:
             if alias in normalized or normalized in alias:
                 return canonical
         return None
+
+    @classmethod
+    def normalize_venue(cls, raw_venue: str) -> str:
+        """Normalize a raw venue name from any data source to canonical name.
+
+        Used during data ingestion to ensure consistent venue names in the DB.
+        Returns the original name if no mapping exists (for smaller/one-off venues).
+        """
+        if not raw_venue:
+            return raw_venue
+        return cls._DB_VENUE_MAP.get(raw_venue, raw_venue)
 
 
 # Metric normalization

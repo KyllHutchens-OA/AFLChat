@@ -450,7 +450,8 @@ class _AFLTablesFetcher:
             if 'Venue:' in text:
                 m = re.search(r'Venue:\s*([^←→\n]+)', text)
                 if m:
-                    result['venue'] = m.group(1).strip()
+                    from app.analytics.entity_resolver import VenueResolver
+                    result['venue'] = VenueResolver.normalize_venue(m.group(1).strip())
             if 'Att:' in text or 'Attendance:' in text:
                 m = re.search(r'(?:Att|Attendance):\s*([\d,]+)', text)
                 if m:
