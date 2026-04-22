@@ -336,13 +336,19 @@ Keep it brief and engaging."""
 
 
     @staticmethod
-    def generate_post_game_analysis(home_team: str, away_team: str) -> Optional[str]:
+    def generate_post_game_analysis_from_stats(
+        home_team: str,
+        away_team: str,
+        stats: dict,
+    ) -> Optional[str]:
         """
-        Generate a post-game stats analysis using web search to find Footywire stats.
+        Generate a 2-paragraph post-game analysis from real Footywire stats.
 
         Args:
             home_team: Home team full name
             away_team: Away team full name
+            stats: Dict from FootywireScraper.get_top_performers() containing
+                   top_goal_kickers, top_disposals, top_fantasy, all_players
 
         Returns:
             Two-paragraph analysis string, or None if generation fails
@@ -351,36 +357,45 @@ Keep it brief and engaging."""
             home_nick = GameSummaryService.get_nickname(home_team)
             away_nick = GameSummaryService.get_nickname(away_team)
 
+            top_goals = stats.get('top_goal_kickers', [])
+            top_disp = stats.get('top_disposals', [])
+            top_fantasy = stats.get('top_fantasy', [])
+
+            goals_str = ', '.join(
+                f"{p['name']} ({p['goals']} goals)" for p in top_goals[:4] if p.get('goals', 0) > 0
+            ) or 'None recorded'
+            disp_str = ', '.join(
+                f"{p['name']} ({p['disposals']} disposals)" for p in top_disp[:4]
+            ) or 'None recorded'
+            fantasy_str = ', '.join(
+                f"{p['name']} ({p['points']} pts)" for p in top_fantasy[:3]
+            ) or 'None recorded'
+
             prompt = (
-                f"Find the Footywire match stats for the recent AFL game between "
-                f"{home_team} ({home_nick}) and {away_team} ({away_nick}). "
-                f"Write exactly 2 paragraphs:\n\n"
-                f"Paragraph 1: Team stats analysis — compare disposals, contested possessions, "
-                f"inside 50s, clearances, and tackle counts between the two teams. "
-                f"Identify which team dominated the key stat categories and how that translated to the result.\n\n"
-                f"Paragraph 2: Individual highlights — name the top 3-4 performers from the game "
-                f"with specific stats (e.g. '32 disposals', '3 goals'). Use last names naturally. "
-                f"Highlight any standout individual performances.\n\n"
-                f"Be casual and engaging. Use team nicknames ({home_nick}, {away_nick}). "
-                f"Do NOT include any headings or labels — just two plain paragraphs."
+                f"Write exactly 2 short paragraphs about this AFL match between "
+                f"{home_team} ({home_nick}) and {away_team} ({away_nick}).\n\n"
+                f"Paragraph 1: Highlight the individual standout performers. "
+                f"Top goal kickers: {goals_str}. "
+                f"Top disposals: {disp_str}. "
+                f"Use last names naturally, be casual and engaging.\n\n"
+                f"Paragraph 2: Brief overall narrative — mention which team's players "
+                f"dominated statistically and what that meant for the game. "
+                f"Top fantasy scores: {fantasy_str}.\n\n"
+                f"Use team nicknames ({home_nick}, {away_nick}). "
+                f"Do NOT include headings or labels. Two plain paragraphs only."
             )
 
-            response = client.responses.create(
+            response = client.chat.completions.create(
                 model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
-                tools=[{"type": "web_search_preview", "search_context_size": "medium"}],
-                input=prompt,
-                max_output_tokens=500,
-                temperature=0.7,
+                messages=[
+                    {"role": "system", "content": "You are an AFL commentator writing brief post-game analysis."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.8,
+                max_completion_tokens=400,
             )
 
-            # Extract text from response output blocks
-            analysis_parts = []
-            for block in response.output:
-                if hasattr(block, 'text'):
-                    analysis_parts.append(block.text)
-
-            analysis = "\n\n".join(analysis_parts).strip()
-
+            analysis = response.choices[0].message.content.strip()
             if analysis:
                 logger.info(f"Generated post-game analysis for {home_nick} vs {away_nick}: {analysis[:60]}...")
                 return analysis

@@ -33,7 +33,13 @@ engine = create_engine(
     pool_recycle=1800,  # Recycle connections every 30 min
     echo=config.DEBUG,  # Log SQL queries in debug mode
     connect_args={
-        "prepare_threshold": None  # Disable prepared statements for Supabase pooler
+        "prepare_threshold": None,  # Disable prepared statements for Supabase pooler
+        # TCP keepalives — prevent Railway from silently dropping idle connections
+        "keepalives": 1,
+        "keepalives_idle": 30,       # send keepalive after 30s idle
+        "keepalives_interval": 10,   # retry every 10s
+        "keepalives_count": 5,       # give up after 5 missed keepalives (50s)
+        "options": "-c statement_timeout=60000",  # 60s max per statement
     }
 )
 

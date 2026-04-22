@@ -60,6 +60,7 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
   const { hideScores } = useSpoilerMode();
   const liveGames = games.filter(g => g.status === 'live');
   const completedGames = games.filter(g => g.status === 'completed');
+  const scheduledGames = games.filter(g => g.status === 'scheduled');
 
   const displayScore = (score: number) => hideScores ? '?' : score;
 
@@ -122,6 +123,35 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
           {isLive && game.last_updated && (Date.now() - new Date(game.last_updated + 'Z').getTime() > 3 * 60 * 1000) && (
             <span className="text-[10px] text-amber-500 ml-auto">Delayed</span>
           )}
+        </div>
+      </button>
+    );
+  };
+
+  const ScheduledTile: React.FC<{ game: LiveGame }> = ({ game }) => {
+    const isSelected = game.id === selectedGameId;
+    const { day, time } = formatMatchTime(game.match_date);
+    return (
+      <button
+        onClick={() => onSelectGame(game.id)}
+        className={`
+          w-full text-left transition-all duration-200 ease-apple rounded-apple p-3
+          border-l-4 border-l-afl-warm-200
+          ${isSelected
+            ? 'bg-afl-accent-50 border-l-afl-accent shadow-apple'
+            : 'bg-afl-warm-50 opacity-70 hover:opacity-100 hover:bg-afl-warm-100'
+          }
+          active:scale-[0.98]
+        `}
+      >
+        <div className="text-sm font-semibold text-afl-warm-700 truncate mb-1">
+          {game.home_team.abbreviation}
+        </div>
+        <div className="text-sm font-semibold text-afl-warm-700 truncate mb-1.5">
+          {game.away_team.abbreviation}
+        </div>
+        <div className="text-xs text-afl-warm-400">
+          {day} · {time}
         </div>
       </button>
     );
@@ -300,6 +330,20 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
             </div>
           )}
 
+          {/* Scheduled games this round (not yet started) */}
+          {scheduledGames.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 px-1">
+                <span className="text-xs font-semibold text-afl-warm-400 uppercase tracking-wide">This Round</span>
+              </div>
+              <div className="space-y-2">
+                {scheduledGames.map(game => (
+                  <ScheduledTile key={game.id} game={game} />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Upcoming without preview */}
           {upcomingWithoutPreview.length > 0 && (
             <UpcomingList matches={upcomingWithoutPreview} label="Upcoming" />
@@ -331,6 +375,12 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
             {completedGames.map(game => (
               <div key={game.id} className="w-36 flex-shrink-0">
                 <GameTile game={game} />
+              </div>
+            ))}
+            {/* Scheduled (not yet started) games this round */}
+            {scheduledGames.map(game => (
+              <div key={game.id} className="w-36 flex-shrink-0">
+                <ScheduledTile game={game} />
               </div>
             ))}
             {/* Then upcoming without preview */}

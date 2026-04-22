@@ -566,22 +566,9 @@ def get_game_stats(game_id):
             if not game:
                 return jsonify({'error': 'Game not found'}), 404
 
-            # Serve from cache if available
+            # Serve from stats_cache if available (populated by Footywire scrape at quarter breaks)
             if game.stats_cache:
                 return jsonify(game.stats_cache), 200
-
-            # Cache miss — fetch live and cache the result
-            from app.services.api_sports_service import APISportsService
-            from sqlalchemy.orm.attributes import flag_modified
-
-            stats = APISportsService.fetch_game_stats(game)
-
-            if stats:
-                game.stats_cache = stats
-                game.stats_cache_updated_at = datetime.utcnow()
-                flag_modified(game, 'stats_cache')
-                session.commit()
-                return jsonify(stats), 200
 
             # Fallback: build stats from the most recent QuarterSnapshot
             latest_snapshot = session.query(QuarterSnapshot).filter_by(

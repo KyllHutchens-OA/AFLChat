@@ -1,9 +1,8 @@
 """
 Automated Player Stats Ingestion Pipeline.
 
-Two-stage pipeline that runs on a schedule:
-1. API-Sports stage (11:15 PM AEST) — basic stats available immediately after games
-2. AFL Tables stage (6 AM AEST) — comprehensive stats available next morning
+Runs daily at 6 AM AEST via AFL Tables (afltables.com).
+AFL Tables typically publishes comprehensive stats 1-3 days after each round.
 
 Only processes completed matches that are missing player stats.
 Idempotent — safe to re-run without duplicating data.
@@ -128,10 +127,6 @@ def _get_matches_needing_advanced_stats(session, season: int = None, days_back: 
     return matches
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Stage 1: API-Sports basic stats ingestion
-# ──────────────────────────────────────────────────────────────────────────────
-
 def _find_or_create_player(session, name: str, team_id: int) -> Optional[int]:
     """Find a player by name + team, or create if not found.
 
@@ -213,157 +208,8 @@ def _calculate_fantasy_points(stats: Dict) -> int:
     )
 
 
-def ingest_from_api_sports(season: int = None, days_back: int = 14) -> Dict:
-    """Stage 1: Ingest basic player stats from API-Sports for completed matches.
-
-    Runs at 11:15 PM AEST — basic stats available immediately after games.
-    Only processes matches with no existing player_stats rows.
-
-    Returns:
-        Dict with stats about the ingestion run.
-    """
-    import os
-    api_key = os.getenv("API_SPORTS_KEY")
-    if not api_key:
-        logger.warning("API_SPORTS_KEY not configured — skipping API-Sports ingestion")
-        return {"skipped": True, "reason": "no_api_key"}
-
-    from app.services.api_sports_service import APISportsService, API_SPORTS_TEAM_MAP
-
-    result = {
-        "matches_processed": 0,
-        "players_created": 0,
-        "stats_created": 0,
-        "matches_skipped": 0,
-        "errors": 0,
-    }
-
-    abbr_to_api_id = {v: k for k, v in API_SPORTS_TEAM_MAP.items()}
-
-    with get_session() as session:
-        matches = _get_matches_needing_stats(session, season, days_back)
-
-        if not matches:
-            logger.info("API-Sports ingestion: no matches need stats")
-            return result
-
-        logger.info(f"API-Sports ingestion: {len(matches)} matches need player stats")
-
-        for match in matches:
-            try:
-                home_abbr = match.home_team.abbreviation
-                away_abbr = match.away_team.abbreviation
-                game_date = match.match_date.strftime('%Y-%m-%d') if match.match_date else None
-
-                if not game_date:
-                    result["matches_skipped"] += 1
-                    continue
-
-                # Find game in API-Sports
-                api_game = APISportsService.get_game_by_teams(home_abbr, away_abbr, game_date)
-                if not api_game:
-                    logger.debug(f"No API-Sports game found for {home_abbr} vs {away_abbr} on {game_date}")
-                    result["matches_skipped"] += 1
-                    continue
-
-                api_game_id = api_game.get('game', {}).get('id') or api_game.get('id')
-                stats_data = APISportsService.get_game_player_stats(api_game_id)
-
-                if not stats_data or 'teams' not in stats_data:
-                    result["matches_skipped"] += 1
-                    continue
-
-                # Process each team's players
-                home_api_id = abbr_to_api_id.get(home_abbr)
-                away_api_id = abbr_to_api_id.get(away_abbr)
-
-                for team_data in stats_data.get('teams', []):
-                    team_api_id = team_data.get('team', {}).get('id')
-
-                    if team_api_id == home_api_id:
-                        team_id = match.home_team_id
-                    elif team_api_id == away_api_id:
-                        team_id = match.away_team_id
-                    else:
-                        continue
-
-                    for player_entry in team_data.get('players', []):
-                        player_info = player_entry.get('player', {})
-                        api_player_id = player_info.get('id')
-
-                        # Get player name from API-Sports cache
-                        player_name = "Unknown"
-                        if api_player_id:
-                            cached = APISportsService.get_cached_player(api_player_id)
-                            if cached:
-                                player_name = cached.get('name', 'Unknown')
-
-                        if player_name == "Unknown":
-                            continue
-
-                        player_id = _find_or_create_player(session, player_name, team_id)
-                        if not player_id:
-                            continue
-
-                        # Check if stat already exists
-                        existing = session.query(PlayerStat).filter_by(
-                            match_id=match.id, player_id=player_id
-                        ).first()
-                        if existing:
-                            continue
-
-                        # Extract stats
-                        goals = player_entry.get('goals', {}).get('total', 0) or 0
-                        behinds = player_entry.get('behinds', 0) or 0
-                        kicks = player_entry.get('kicks', 0) or 0
-                        handballs = player_entry.get('handballs', 0) or 0
-                        marks = player_entry.get('marks', 0) or 0
-                        tackles = player_entry.get('tackles', 0) or 0
-                        hitouts = player_entry.get('hitouts', 0) or 0
-                        free_kicks = player_entry.get('free_kicks', {})
-                        free_for = free_kicks.get('for', 0) or 0
-                        free_against = free_kicks.get('against', 0) or 0
-                        disposals = kicks + handballs
-
-                        stats = {
-                            'kicks': kicks, 'handballs': handballs, 'disposals': disposals,
-                            'marks': marks, 'tackles': tackles, 'goals': goals, 'behinds': behinds,
-                            'hitouts': hitouts, 'free_kicks_for': free_for, 'free_kicks_against': free_against,
-                        }
-
-                        player_stat = PlayerStat(
-                            match_id=match.id,
-                            player_id=player_id,
-                            team_id=team_id,
-                            **stats,
-                            fantasy_points=_calculate_fantasy_points(stats),
-                        )
-                        session.add(player_stat)
-                        result["stats_created"] += 1
-
-                result["matches_processed"] += 1
-                logger.info(
-                    f"API-Sports: ingested stats for {home_abbr} vs {away_abbr} "
-                    f"(R{match.round}, {game_date})"
-                )
-
-            except Exception as e:
-                logger.error(f"API-Sports ingestion error for match {match.id}: {e}")
-                result["errors"] += 1
-
-        # Commit is handled by get_session context manager
-
-    logger.info(
-        f"API-Sports ingestion complete: "
-        f"{result['matches_processed']} matches, "
-        f"{result['stats_created']} player stats created, "
-        f"{result['errors']} errors"
-    )
-    return result
-
-
 # ──────────────────────────────────────────────────────────────────────────────
-# Stage 2: AFL Tables comprehensive stats ingestion
+# AFL Tables comprehensive stats ingestion (daily at 6 AM AEST)
 # ──────────────────────────────────────────────────────────────────────────────
 
 class _AFLTablesFetcher:
@@ -378,7 +224,8 @@ class _AFLTablesFetcher:
     def _fetch_page(self, url: str) -> Optional[BeautifulSoup]:
         time.sleep(AFL_TABLES_REQUEST_DELAY)
         try:
-            response = self.http.get(url, timeout=30)
+            # connect=10s, read=45s — prevents indefinite hangs on stalled connections
+            response = self.http.get(url, timeout=(10, 45))
             response.raise_for_status()
             return BeautifulSoup(response.text, 'html.parser')
         except requests.RequestException as e:
@@ -676,7 +523,7 @@ def ingest_from_afl_tables(season: int = None, days_back: int = 14) -> Dict:
 
     Runs at 6 AM AEST — AFL Tables typically updates overnight after games.
     Fills in advanced stats (contested possessions, inside 50s, etc.) and also
-    creates stats from scratch for any matches missed by API-Sports.
+    creates stats from scratch for any recent completed matches missing player stats.
 
     Args:
         season: Season year, defaults to current
@@ -729,8 +576,22 @@ def ingest_from_afl_tables(season: int = None, days_back: int = 14) -> Dict:
         # Load a player name cache for faster lookups
         player_cache: Dict[str, int] = {}  # "name_lower_teamid" -> player_id
 
+        cutoff_date = (datetime.now() - timedelta(days=days_back)).date()
+
         for url in match_urls:
             try:
+                # AFL Tables URLs contain the date: stats/games/YYYY/YYYYMMDD-...
+                # Skip pages clearly outside the days_back window without fetching them.
+                url_date = None
+                date_match = re.search(r'/(\d{8})-', url)
+                if date_match:
+                    try:
+                        url_date = datetime.strptime(date_match.group(1), "%Y%m%d").date()
+                    except ValueError:
+                        pass
+                if url_date and url_date < cutoff_date:
+                    continue
+
                 data = fetcher.scrape_match_page(url)
                 if not data or not data['home_team'] or not data['away_team']:
                     continue
