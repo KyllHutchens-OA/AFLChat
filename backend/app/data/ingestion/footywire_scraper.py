@@ -23,27 +23,50 @@ _HEADERS = {
 }
 _REQUEST_DELAY = 2.0  # seconds between requests — be a good citizen
 
-# Map our DB team names to Footywire display name fragments.
-# Footywire uses slightly different names in some cases.
+# Maps the URL slug from Footywire team profile links (href="/afl/footy/th-<slug>")
+# to our canonical DB team names. Using slugs is unambiguous — no substring conflicts
+# like 'adelaide' matching inside 'port adelaide'.
+_SLUG_TO_DB_TEAM: Dict[str, str] = {
+    'th-adelaide-crows': 'Adelaide',
+    'th-brisbane-lions': 'Brisbane Lions',
+    'th-carlton-blues': 'Carlton',
+    'th-collingwood-magpies': 'Collingwood',
+    'th-essendon-bombers': 'Essendon',
+    'th-fremantle-dockers': 'Fremantle',
+    'th-geelong-cats': 'Geelong',
+    'th-gold-coast-suns': 'Gold Coast',
+    'th-gws-giants': 'Greater Western Sydney',
+    'th-hawthorn-hawks': 'Hawthorn',
+    'th-melbourne-demons': 'Melbourne',
+    'th-north-melbourne-kangaroos': 'North Melbourne',
+    'th-port-adelaide-power': 'Port Adelaide',
+    'th-richmond-tigers': 'Richmond',
+    'th-st-kilda-saints': 'St Kilda',
+    'th-sydney-swans': 'Sydney',
+    'th-west-coast-eagles': 'West Coast',
+    'th-western-bulldogs': 'Western Bulldogs',
+}
+
+# Fallback keyword map for when href-slug matching fails.
 _TEAM_KEYWORDS: Dict[str, List[str]] = {
-    'Adelaide': ['adelaide'],
-    'Brisbane Lions': ['brisbane'],
+    'Adelaide': ['adelaide crows'],
+    'Brisbane Lions': ['brisbane lions', 'brisbane'],
     'Carlton': ['carlton'],
     'Collingwood': ['collingwood'],
     'Essendon': ['essendon'],
     'Fremantle': ['fremantle'],
     'Geelong': ['geelong'],
-    'Gold Coast': ['gold coast', 'suns'],
-    'Greater Western Sydney': ['gws', 'greater western', 'giants'],
+    'Gold Coast': ['gold coast suns', 'gold coast'],
+    'Greater Western Sydney': ['gws giants', 'greater western sydney', 'gws'],
     'Hawthorn': ['hawthorn'],
     'Melbourne': ['melbourne'],
-    'North Melbourne': ['north melbourne', 'north'],
-    'Port Adelaide': ['port adelaide', 'port'],
+    'North Melbourne': ['north melbourne'],
+    'Port Adelaide': ['port adelaide'],
     'Richmond': ['richmond'],
     'St Kilda': ['st kilda'],
     'Sydney': ['sydney'],
     'West Coast': ['west coast'],
-    'Western Bulldogs': ['western bulldogs', 'bulldogs'],
+    'Western Bulldogs': ['western bulldogs'],
 }
 
 
@@ -114,15 +137,26 @@ class FootywireScraper:
             except (ValueError, IndexError):
                 continue
 
-            # Find the containing <tr> — team names are in a sibling <td> in the same row
+            # Find the containing <tr> — team profile links are in a sibling <td>
             row = link.find_parent('tr')
             if not row:
                 continue
 
-            row_text = row.get_text(' ', strip=True)
+            # Primary: match via team profile href slugs (unambiguous, no substring issues)
+            # Footywire uses relative hrefs like 'th-adelaide-crows' (no leading slash)
+            team_links = row.find_all('a', href=lambda h: h and h.startswith('th-'))
+            if len(team_links) >= 2:
+                slugs = [a.get('href', '').split('/')[-1] for a in team_links[:2]]
+                db_teams = {_SLUG_TO_DB_TEAM.get(s) for s in slugs}
+                if home_team in db_teams and away_team in db_teams:
+                    logger.info(f"Footywire match ID {mid} found for {home_team} vs {away_team} ({season})")
+                    return mid
+                continue  # Row has team links but they don't match — don't fall through
 
+            # Fallback: full-keyword match on row text (for pages without /th- links)
+            row_text = row.get_text(' ', strip=True)
             if self._team_matches(row_text, home_team) and self._team_matches(row_text, away_team):
-                logger.info(f"Footywire match ID {mid} found for {home_team} vs {away_team} ({season})")
+                logger.info(f"Footywire match ID {mid} (keyword fallback) found for {home_team} vs {away_team} ({season})")
                 return mid
 
         logger.warning(f"No Footywire match found for {home_team} vs {away_team} ({season})")
@@ -149,7 +183,9 @@ class FootywireScraper:
         # Footywire stats page: two per-team tables, each preceded by a team heading.
         # We identify player stat tables by looking for header rows containing
         # recognisable AFL stat abbreviations.
+        # Extra tables (advanced stats, supercoach) may share the same heading — deduplicate.
         tables = soup.find_all('table')
+        seen_headings: set = set()
 
         for table in tables:
             rows = table.find_all('tr')
@@ -194,11 +230,19 @@ class FootywireScraper:
             idx_ho = resolve(['HO'])
             idx_af = resolve(['AF'])  # Actual AFL Fantasy points column
 
-            # Identify the team from the heading immediately before the table
+            # Identify the team from the heading immediately before the table.
+            # Footywire formats these as "<Team> Match Statistics (Sorted by Disposals)".
+            # Skip any table whose heading doesn't follow this pattern — e.g. the
+            # "View Advanced Stats" button also triggers a table parse but has wrong columns.
             team_name = 'Unknown'
             prev = table.find_previous(['h2', 'h3', 'h4', 'strong', 'b'])
             if prev:
                 team_name = prev.get_text(strip=True)
+            if 'match statistics' not in team_name.lower():
+                continue
+            if team_name in seen_headings:
+                continue  # Skip duplicate tables with same heading (e.g. supercoach view)
+            seen_headings.add(team_name)
 
             def cell_int(cells: list, idx: Optional[int]) -> int:
                 if idx is None or idx >= len(cells):
