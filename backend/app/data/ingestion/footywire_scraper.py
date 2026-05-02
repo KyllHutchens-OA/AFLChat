@@ -88,6 +88,13 @@ class FootywireScraper:
         """
         Scan the season match list page to find the Footywire match ID (mid).
 
+        Each match row on ft_match_list has the structure:
+          <tr><td>date</td><td>Team1 v Team2</td><td>venue</td>...<td><a href="ft_match_statistics?mid=NNN">score</a></td>...</tr>
+
+        We find each ft_match_statistics link, walk up to the parent <tr>, and check
+        that row's text for both team names. This avoids the false-positive of walking
+        up to a <tbody> which contains all rows.
+
         Returns the integer mid or None if the game cannot be found.
         """
         html = self._get(f'{self.BASE_URL}/ft_match_list?year={season}')
@@ -107,18 +114,14 @@ class FootywireScraper:
             except (ValueError, IndexError):
                 continue
 
-            # Walk up the DOM to gather surrounding text (up to 5 levels)
-            context = ''
-            node = link
-            for _ in range(5):
-                node = node.find_parent()
-                if node is None:
-                    break
-                context += node.get_text(' ', strip=True)
-                if len(context) > 600:
-                    break
+            # Find the containing <tr> — team names are in a sibling <td> in the same row
+            row = link.find_parent('tr')
+            if not row:
+                continue
 
-            if self._team_matches(context, home_team) and self._team_matches(context, away_team):
+            row_text = row.get_text(' ', strip=True)
+
+            if self._team_matches(row_text, home_team) and self._team_matches(row_text, away_team):
                 logger.info(f"Footywire match ID {mid} found for {home_team} vs {away_team} ({season})")
                 return mid
 
@@ -189,6 +192,7 @@ class FootywireScraper:
             idx_g  = resolve(['G', 'GL'])
             idx_b  = resolve(['B', 'BH'])
             idx_ho = resolve(['HO'])
+            idx_af = resolve(['AF'])  # Actual AFL Fantasy points column
 
             # Identify the team from the heading immediately before the table
             team_name = 'Unknown'
@@ -227,15 +231,16 @@ class FootywireScraper:
                 goals    = cell_int(cells, idx_g)
                 behinds  = cell_int(cells, idx_b)
                 hitouts  = cell_int(cells, idx_ho)
+                # Prefer Footywire's actual AF column; fall back to manual calculation
+                af_raw = cell_int(cells, idx_af)
+                fantasy = af_raw if af_raw > 0 else (
+                    kicks * 3 + handballs * 2 + marks * 3 +
+                    tackles * 4 + goals * 6 + behinds * 1 + hitouts * 1
+                )
 
                 # Skip completely empty rows
                 if kicks == 0 and handballs == 0 and goals == 0:
                     continue
-
-                fantasy = (
-                    kicks * 3 + handballs * 2 + marks * 3 +
-                    tackles * 4 + goals * 6 + behinds * 1 + hitouts * 1
-                )
 
                 all_players.append({
                     'name': player_name,
