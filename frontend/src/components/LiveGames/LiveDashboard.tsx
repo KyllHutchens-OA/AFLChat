@@ -5,6 +5,7 @@ import type { GameEvent } from '../../contexts/LiveDataContext';
 import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 import ProgressBar from './ProgressBar';
 import GameStats from './GameStats';
+import Countdown from './Countdown';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
@@ -157,6 +158,38 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
     return null;
   }
 
+  // Scheduled game: show countdown instead of scoreboard
+  if (game.status === 'scheduled') {
+    return (
+      <div className="space-y-6">
+        <div className="glass rounded-apple-xl p-8 shadow-apple-lg">
+          <div className="text-center mb-6">
+            <p className="text-sm font-medium text-afl-warm-500 uppercase tracking-wide">
+              Round {game.round} • {game.venue}
+            </p>
+          </div>
+          <div className="text-center mb-8">
+            <h2 className="text-3xl font-semibold text-afl-warm-900">
+              {game.home_team.name} vs {game.away_team.name}
+            </h2>
+            <p className="text-lg text-afl-warm-500 mt-2">
+              {new Date(game.match_date).toLocaleString('en-AU', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </p>
+          </div>
+          <div className="border-t border-afl-warm-200 pt-6">
+            <Countdown targetDate={game.match_date} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Scoreboard */}
@@ -202,9 +235,7 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
           <p className="text-xl font-semibold text-afl-warm-700">
             {game.status === 'live' && game.time_str
               ? game.time_str
-              : game.status === 'completed'
-              ? 'Final'
-              : 'Scheduled'}
+              : 'Final'}
           </p>
           {game.status === 'live' && game.last_updated && (() => {
             const ageMs = Date.now() - new Date(game.last_updated + 'Z').getTime();
