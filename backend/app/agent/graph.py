@@ -142,14 +142,19 @@ class AFLAnalyticsAgent:
     @staticmethod
     def _route_after_execute_v2(state: AgentState) -> str:
         """
-        v2-only routing after `execute` (Milestone 3c).
+        v2-only routing after `execute` (Milestone 3c, extended in 3d).
 
         - `sql_error` set (by execute_node, only when under SQL_ATTEMPT_CAP) →
           self-correct: loop back to generate_sql with the exact failed SQL +
           DB error baked into the retry prompt.
         - 0 rows, no error, and a DB-backed intent (not a news/odds/tips tool
           call) → diagnose_empty (deterministic, no LLM) figures out why.
-        - Otherwise falls through to the same visualize/respond decision v1 uses.
+        - Non-empty rows from a SQL-backed intent → review (Milestone 3d): a
+          cheap LLM sanity-check that the rows actually answer the question.
+          Tool intents (news/odds/tips) have no SQL to review, so they skip
+          straight through to the same visualize/respond decision v1 uses.
+        - Otherwise (tool intents, or anything else) falls through to the
+          same visualize/respond decision v1 uses.
         """
         if state.get("sql_error"):
             return "generate_sql"
@@ -161,13 +166,14 @@ class AFLAnalyticsAgent:
             QueryIntent.BETTING_ODDS,
             QueryIntent.TIPPING_ADVICE,
         }
-        if (
-            not state.get("execution_error")
-            and results is not None
-            and len(results) == 0
-            and state.get("intent") not in no_sql_intents
-        ):
+        no_error = not state.get("execution_error")
+        intent_is_sql_backed = state.get("intent") not in no_sql_intents
+
+        if no_error and results is not None and len(results) == 0 and intent_is_sql_backed:
             return "diagnose_empty"
+
+        if no_error and results is not None and len(results) > 0 and intent_is_sql_backed:
+            return "review"
 
         return AFLAnalyticsAgent._route_after_execute(state)
 
@@ -183,6 +189,22 @@ class AFLAnalyticsAgent:
         reads that decision.
         """
         return "generate_sql" if state.get("diagnose_should_regenerate") else "respond"
+
+    @staticmethod
+    def _route_after_review(state: AgentState) -> str:
+        """
+        v2-only routing after `review` (Milestone 3d).
+
+        review_node itself decides (and records in `review_should_regenerate`)
+        whether the verdict is NO AND we haven't already used our one
+        review-triggered regen this turn AND we're still under
+        SQL_ATTEMPT_CAP — this router just reads that decision. Otherwise
+        falls through to the same visualize/respond decision v1 uses (rows
+        are guaranteed present — review only runs when execute returned rows).
+        """
+        if state.get("review_should_regenerate"):
+            return "generate_sql"
+        return AFLAnalyticsAgent._route_after_execute(state)
 
     @staticmethod
     def _route_after_classify(state: AgentState) -> str:
@@ -253,13 +275,19 @@ class AFLAnalyticsAgent:
         `understand_node` used to, so nothing downstream needed to change.
 
         classify_resolve → retrieve_context → generate_sql → analyze_depth →
-        plan → execute → (visualize) → respond, with two Milestone 3c
+        plan → execute → (review) → (visualize) → respond, with three
         self-correct loops feeding back into generate_sql:
-          - execute hits a DB error → generate_sql (max 2 retries, global cap
-            of 3 total generate_sql calls this turn via sql_attempts).
-          - execute returns 0 rows → diagnose_empty (deterministic, no LLM)
-            → generate_sql ONCE if obviously fixable, else respond.
-        Milestone 3d adds a review node between execute and visualize.
+          - Milestone 3c: execute hits a DB error → generate_sql (max 2
+            retries, global cap of 3 total generate_sql calls this turn via
+            sql_attempts).
+          - Milestone 3c: execute returns 0 rows → diagnose_empty
+            (deterministic, no LLM) → generate_sql ONCE if obviously fixable,
+            else respond.
+          - Milestone 3d: execute returns non-empty rows for a SQL-backed
+            intent → review (cheap LLM sanity-check, skipped for trivial
+            template answers) → generate_sql ONCE if the verdict is NO, else
+            visualize/respond. All three loops share the same
+            SQL_ATTEMPT_CAP.
         """
         workflow = StateGraph(AgentState)
 
@@ -270,6 +298,7 @@ class AFLAnalyticsAgent:
         workflow.add_node("plan", self.plan_node)
         workflow.add_node("execute", self.execute_node)
         workflow.add_node("diagnose_empty", self.diagnose_empty_node)
+        workflow.add_node("review", self.review_node)
         workflow.add_node("visualize", self.visualize_node)
         workflow.add_node("respond", self.respond_node)
 
@@ -303,6 +332,7 @@ class AFLAnalyticsAgent:
             {
                 "generate_sql": "generate_sql",
                 "diagnose_empty": "diagnose_empty",
+                "review": "review",
                 "visualize": "visualize",
                 "respond": "respond"
             }
@@ -313,6 +343,16 @@ class AFLAnalyticsAgent:
             self._route_after_diagnose_empty,
             {
                 "generate_sql": "generate_sql",
+                "respond": "respond"
+            }
+        )
+
+        workflow.add_conditional_edges(
+            "review",
+            self._route_after_review,
+            {
+                "generate_sql": "generate_sql",
+                "visualize": "visualize",
                 "respond": "respond"
             }
         )
@@ -408,6 +448,8 @@ class AFLAnalyticsAgent:
             complaint_summary=None,
             diagnosis=None,
             review_verdict=None,
+            review_regenerated=False,
+            review_should_regenerate=False,
             # Milestone 3b fields (v2 pipeline only — no-ops under v1)
             retrieved_schema_docs=None,
             retrieved_examples=[],
@@ -529,6 +571,15 @@ class AFLAnalyticsAgent:
 
         from app.agent.generate_sql import generate_sql
 
+        diagnosis = state.get("diagnosis")
+        # Milestone 3d: review-driven retry context, if this call was routed
+        # here from review (verdict NO). review_verdict is only meaningful as
+        # a retry signal when its verdict is actually "NO" — a lingering YES
+        # verdict from an earlier hop must never be replayed into a later,
+        # unrelated retry.
+        review_verdict = state.get("review_verdict") or {}
+        review_critique = review_verdict.get("reason") if review_verdict.get("verdict") == "NO" else None
+
         updates = generate_sql(
             user_query=state["user_query"],
             entities=state.get("entities", {}),
@@ -545,15 +596,17 @@ class AFLAnalyticsAgent:
             # here from execute (DB error) or diagnose_empty (fixable 0-row diagnosis).
             failed_sql=state.get("failed_sql"),
             sql_error=state.get("sql_error"),
-            diagnosis=state.get("diagnosis"),
+            diagnosis=diagnosis,
+            review_critique=review_critique,
         )
+        was_retry = bool(state.get("failed_sql") or state.get("sql_error") or diagnosis or review_critique)
         state.update(updates)
 
         logger.info(
             f"GENERATE_SQL: intent={state.get('intent')}, "
             f"sql_attempts={state.get('sql_attempts')}, "
             f"needs_clarification={state.get('needs_clarification')}, "
-            f"was_retry={bool(state.get('failed_sql') or state.get('sql_error'))}"
+            f"was_retry={was_retry}"
         )
 
         return state
@@ -602,6 +655,71 @@ class AFLAnalyticsAgent:
         logger.info(
             f"DIAGNOSE_EMPTY: reason_code={diagnosis.get('reason_code')}, "
             f"fixable={diagnosis.get('fixable')}, should_regenerate={should_regenerate}"
+        )
+
+        return state
+
+    async def review_node(self, state: AgentState) -> AgentState:
+        """
+        REVIEW node (v2 pipeline only, Milestone 3d).
+
+        Runs when `execute` returns NON-EMPTY rows for a SQL-backed intent —
+        the sibling case to diagnose_empty's 0-row check. A cheap LLM call
+        (see app/agent/review.py) sample-checks whether those rows actually
+        answer the user's question, catching a query that ran successfully
+        but grouped/filtered/joined on the wrong thing.
+
+        Skips the LLM call entirely for trivial template answers (a
+        single-row simple_stat result in summary mode — see
+        `should_skip_review` in app/agent/review.py) and records a
+        pass-through YES verdict directly.
+
+        Also decides (and records via review_should_regenerate) whether the
+        verdict is NO AND we haven't already used our one review-triggered
+        regen this turn AND we're still under SQL_ATTEMPT_CAP —
+        _route_after_review just reads that decision.
+
+        Updates:
+        - review_verdict: {"verdict": "YES"|"NO", "reason": str}
+        - review_should_regenerate (ephemeral, read by the router)
+        - review_regenerated (sticky, set once we decide to regenerate)
+        """
+        state["current_step"] = WorkflowStep.REVIEW
+        state["thinking_message"] = "Double-checking the results..."
+        self._emit_progress(state, "review", "Double-checking the results...")
+
+        from app.agent.review import review_results, should_skip_review
+
+        query_results = state.get("query_results")
+        row_count = len(query_results) if query_results is not None else 0
+
+        if should_skip_review(state.get("intent"), state.get("analysis_mode"), row_count):
+            logger.info("REVIEW: Skipped — trivial single-row template answer")
+            state["review_verdict"] = {
+                "verdict": "YES",
+                "reason": "Skipped review — trivial single-row result.",
+            }
+            state["review_should_regenerate"] = False
+            return state
+
+        verdict = review_results(
+            user_query=state["user_query"],
+            sql_query=state.get("sql_query"),
+            query_results=query_results,
+            state=state,
+        )
+        state["review_verdict"] = verdict
+
+        attempts = state.get("sql_attempts") or 0
+        already_used = state.get("review_regenerated", False)
+        should_regenerate = verdict.get("verdict") == "NO" and not already_used and attempts < SQL_ATTEMPT_CAP
+        state["review_should_regenerate"] = should_regenerate
+        if should_regenerate:
+            state["review_regenerated"] = True
+
+        logger.info(
+            f"REVIEW: verdict={verdict.get('verdict')}, reason={verdict.get('reason')!r}, "
+            f"should_regenerate={should_regenerate}"
         )
 
         return state

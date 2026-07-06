@@ -64,6 +64,7 @@ in the examples above — never assume the team is always home or always away.
 {correction_section}
 {error_retry_section}
 {diagnosis_retry_section}
+{review_critique_section}
 ## User's current question
 {user_query}
 
@@ -162,3 +163,25 @@ def build_diagnosis_retry_section(diagnosis: dict = None) -> str:
         human_reason=diagnosis.get("human_reason") or "",
         suggestion=diagnosis.get("suggestion") or "Produce corrected SQL that returns rows.",
     )
+
+
+# ── Milestone 3d: review-driven retry (SQL ran, returned rows, but the ──────
+# review node judged those rows don't actually answer the question) ─────────
+
+REVIEW_CRITIQUE_SECTION_TEMPLATE = """\
+## Previous query returned data that did NOT answer the question
+The previous SQL ran successfully and returned rows, but a review pass \
+judged that those rows do not answer the user's question, because: \
+{reason}
+
+Produce corrected SQL that actually answers the user's question — do not \
+just repeat the same query.
+
+"""
+
+
+def build_review_critique_section(review_critique: str = None) -> str:
+    """Review-driven retry section (Milestone 3d). Empty unless a critique reason is present."""
+    if not review_critique:
+        return ""
+    return REVIEW_CRITIQUE_SECTION_TEMPLATE.format(reason=review_critique)

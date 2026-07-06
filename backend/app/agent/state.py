@@ -13,6 +13,7 @@ class WorkflowStep(str, Enum):
     RETRIEVE_CONTEXT = "retrieve_context"  # v2 pipeline only (Milestone 3b+)
     GENERATE_SQL = "generate_sql"  # v2 pipeline only (Milestone 3b+)
     DIAGNOSE_EMPTY = "diagnose_empty"  # v2 pipeline only (Milestone 3c+)
+    REVIEW = "review"  # v2 pipeline only (Milestone 3d+)
     UNDERSTAND = "understand"
     ANALYZE_DEPTH = "analyze_depth"
     PLAN = "plan"
@@ -105,7 +106,9 @@ class AgentState(TypedDict, total=False):
     prior_answer: Optional[str]  # Previous turn's assistant response text, loaded alongside prior_sql
     complaint_summary: Optional[str]  # One-sentence summary of what the user says was wrong (turn_type == "correction")
     diagnosis: Optional[Dict[str, Any]]  # Output of diagnose_empty node (M3c+): why a query returned 0 rows, and whether it's fixable
-    review_verdict: Optional[str]  # Output of review node (M3d+): "pass" | "fail" verdict on query results before visualize/respond
+    review_verdict: Optional[Dict[str, Any]]  # Output of review node (M3d+): {"verdict": "YES"|"NO", "reason": str} — sanity check that non-empty query_results actually answer user_query. Self-clears (set back to None) once consumed by a review-driven generate_sql retry.
+    review_regenerated: bool  # True once `review` has triggered ONE generate_sql regen this turn — prevents review from looping back more than once (mirrors diagnose_regenerated).
+    review_should_regenerate: bool  # Ephemeral flag set by review_node and read immediately by the post-review router (not meaningful outside that single hop) — mirrors diagnose_should_regenerate.
 
     # ── Milestone 3b: retrieve_context → generate_sql ──
     retrieved_schema_docs: Optional[str]  # Pruned per-table schema docs for this query (app/agent/schema_docs.py), set by retrieve_context

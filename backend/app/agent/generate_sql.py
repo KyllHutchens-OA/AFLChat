@@ -39,6 +39,7 @@ from app.agent.prompts.generate_sql import (
     build_correction_section,
     build_error_retry_section,
     build_diagnosis_retry_section,
+    build_review_critique_section,
 )
 from app.agent.state import QueryIntent
 
@@ -162,6 +163,7 @@ def generate_sql(
     failed_sql: Optional[str] = None,
     sql_error: Optional[str] = None,
     diagnosis: Optional[Dict[str, Any]] = None,
+    review_critique: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run the generate_sql LLM call.
@@ -177,6 +179,10 @@ def generate_sql(
             retry (execute returned 0 rows and diagnose_empty judged it
             obviously fixable) — the diagnosis facts are fed back into the
             prompt. Consumed (cleared) via the returned updates.
+        review_critique: Set when this call is a Milestone 3d review-driven
+            retry (execute returned rows, but the review node judged they
+            don't answer the question) — the one-line critique reason is fed
+            back into the prompt. Consumed (cleared) via the returned updates.
 
     Returns:
         Dict of state updates: intent, requires_visualization, pre_generated_sql,
@@ -191,9 +197,13 @@ def generate_sql(
         # Consumed by this call — clear so a later retry in the same turn
         # (e.g. a subsequent DB-error self-correct) doesn't re-send stale facts.
         updates["diagnosis"] = None
+    if review_critique:
+        # Consumed by this call — clear so a later retry in the same turn
+        # doesn't re-send a stale critique.
+        updates["review_verdict"] = None
 
     is_correction = turn_type == "correction"
-    is_retry = is_correction or bool(failed_sql and sql_error) or bool(diagnosis)
+    is_retry = is_correction or bool(failed_sql and sql_error) or bool(diagnosis) or bool(review_critique)
     reasoning_effort = "medium" if is_retry else "low"
 
     try:
@@ -206,6 +216,7 @@ def generate_sql(
         )
         error_retry_section = build_error_retry_section(failed_sql, sql_error)
         diagnosis_retry_section = build_diagnosis_retry_section(diagnosis)
+        review_critique_section = build_review_critique_section(review_critique)
 
         prompt = GENERATE_SQL_PROMPT.format(
             entities_json=entities_json,
@@ -215,6 +226,7 @@ def generate_sql(
             correction_section=correction_section,
             error_retry_section=error_retry_section,
             diagnosis_retry_section=diagnosis_retry_section,
+            review_critique_section=review_critique_section,
             user_query=user_query,
         )
 

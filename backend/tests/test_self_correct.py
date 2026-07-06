@@ -84,7 +84,10 @@ class TestRouteAfterExecuteV2:
         }
         assert AFLAnalyticsAgent._route_after_execute_v2(state) == "respond"
 
-    def test_nonempty_results_with_viz_routes_to_visualize(self):
+    def test_nonempty_results_for_sql_backed_intent_routes_to_review(self):
+        # Milestone 3d: non-empty rows from a SQL-backed intent go through
+        # `review` (a cheap LLM sanity-check) before visualize/respond — this
+        # replaces the old direct-to-visualize routing tested here pre-3d.
         import pandas as pd
         state = {
             "sql_error": None,
@@ -93,7 +96,19 @@ class TestRouteAfterExecuteV2:
             "intent": QueryIntent.TREND_ANALYSIS,
             "requires_visualization": True,
         }
-        assert AFLAnalyticsAgent._route_after_execute_v2(state) == "visualize"
+        assert AFLAnalyticsAgent._route_after_execute_v2(state) == "review"
+
+    def test_nonempty_results_for_tool_intent_skips_review(self):
+        # Tool intents (news/odds/tips) have no SQL to review — they fall
+        # straight through to the same visualize/respond decision v1 uses.
+        state = {
+            "sql_error": None,
+            "execution_error": None,
+            "query_results": [{"headline": "AFL news"}],
+            "intent": QueryIntent.AFL_NEWS,
+            "requires_visualization": False,
+        }
+        assert AFLAnalyticsAgent._route_after_execute_v2(state) == "respond"
 
 
 class TestRouteAfterDiagnoseEmpty:
