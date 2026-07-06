@@ -33,8 +33,9 @@ class TestExampleLibraryShape:
             assert sql_upper.startswith("SELECT") or sql_upper.startswith("WITH"), ex["id"]
 
     def test_at_least_15_examples_harvested(self):
-        # Plan calls for ~16 fast_path templates plus a handful of consolidated_llm
-        # few-shot examples merged/deduped in.
+        # Plan called for ~16 templates harvested from the old fast_path plus a
+        # handful of consolidated_llm few-shot examples merged/deduped in (both
+        # source files removed in Milestone 3e — the SQL lives on here).
         assert get_example_count() >= 15
 
 

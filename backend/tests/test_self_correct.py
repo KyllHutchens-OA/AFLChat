@@ -1,10 +1,9 @@
 """
 Unit tests for the Milestone 3c self-correct loop and diagnose_empty wiring in
 app/agent/graph.py:
-  - execute -> generate_sql on DB error (self-correct, v2 only)
-  - execute -> diagnose_empty on 0 rows (v2 only) -> generate_sql once if fixable, else respond
+  - execute -> generate_sql on DB error (self-correct)
+  - execute -> diagnose_empty on 0 rows -> generate_sql once if fixable, else respond
   - the shared SQL_ATTEMPT_CAP (3 total generate_sql calls/turn) enforced across both loops
-  - v1 is completely unaffected (still uses QueryBuilder fallback + inline _llm_retry_sql)
   - respond_node consumes diagnose_empty's facts instead of guessing via LLM
 
 Uses mocked OpenAI/DB calls throughout — no live API or DB access.
@@ -32,10 +31,8 @@ def _base_state(**overrides):
         "analysis_mode": "summary",
         "analysis_types": ["average"],
         "conversation_history": [],
-        "is_correction": False,
         "bypass_cache": True,  # skip real cache reads in tests
         "sql_attempts": 1,
-        "pipeline_version": "v2",
         "errors": [],
         "token_usage": {"input_tokens": 0, "output_tokens": 0},
         "warnings": [],
@@ -147,80 +144,45 @@ class TestSignalV2SqlFailureCapEnforcement:
         assert result["sql_error"] == "boom"
 
 
-class TestExecuteNodeV2NoQueryBuilderFallback:
-    """Milestone 3c: v2 must NEVER call QueryBuilder — the self-correct loop replaces it."""
+class TestExecuteNodeMissingSql:
+    """Milestone 3c: a missing pre_generated_sql is a retryable self-correct signal."""
 
-    def test_v2_missing_pre_generated_sql_signals_retry_not_query_builder(self):
-        state = _base_state(pipeline_version="v2", pre_generated_sql=None)
+    def test_missing_pre_generated_sql_signals_retry(self):
+        state = _base_state(pre_generated_sql=None)
         agent = AFLAnalyticsAgent()
 
-        with patch("app.agent.graph.QueryBuilder.generate_sql") as mock_qb:
-            result = _run(agent.execute_node(state))
+        result = _run(agent.execute_node(state))
 
-        mock_qb.assert_not_called()
         assert result["sql_error"] is not None
         assert result.get("query_results") is None
 
-    def test_v1_missing_pre_generated_sql_still_uses_query_builder(self):
-        state = _base_state(pipeline_version="v1", pre_generated_sql=None)
-        agent = AFLAnalyticsAgent()
 
-        with patch(
-            "app.agent.graph.QueryBuilder.generate_sql",
-            return_value={"success": True, "sql": "SELECT 1", "error": None, "usage": None},
-        ) as mock_qb, patch(
-            "app.agent.graph.DatabaseTool.query_database",
-            return_value={"success": True, "data": __import__("pandas").DataFrame({"a": [1]}), "error": None, "rows_returned": 1},
-        ):
-            result = _run(agent.execute_node(state))
-
-        mock_qb.assert_called_once()
-        assert result.get("sql_query") == "SELECT 1"
-
-
-class TestExecuteNodeV2DbErrorSelfCorrect:
-    def test_v2_db_error_sets_sql_error_and_skips_llm_retry(self):
-        state = _base_state(pipeline_version="v2", pre_generated_sql="SELECT * FROM bad_table", sql_attempts=1)
+class TestExecuteNodeDbErrorSelfCorrect:
+    def test_db_error_sets_sql_error(self):
+        state = _base_state(pre_generated_sql="SELECT * FROM bad_table", sql_attempts=1)
         agent = AFLAnalyticsAgent()
 
         with patch(
             "app.agent.graph.DatabaseTool.query_database",
             return_value={"success": False, "error": "safe message", "raw_error": 'relation "bad_table" does not exist', "data": None, "rows_returned": 0},
-        ), patch("app.agent.graph.AFLAnalyticsAgent._llm_retry_sql") as mock_retry:
+        ):
             result = _run(agent.execute_node(state))
 
-        mock_retry.assert_not_called()
         assert result["sql_error"] == 'relation "bad_table" does not exist'
         assert result["failed_sql"] == "SELECT * FROM bad_table"
 
-    def test_v2_db_error_at_cap_produces_honest_failure(self):
-        state = _base_state(pipeline_version="v2", pre_generated_sql="SELECT * FROM bad_table", sql_attempts=SQL_ATTEMPT_CAP)
+    def test_db_error_at_cap_produces_honest_failure(self):
+        state = _base_state(pre_generated_sql="SELECT * FROM bad_table", sql_attempts=SQL_ATTEMPT_CAP)
         agent = AFLAnalyticsAgent()
 
         with patch(
             "app.agent.graph.DatabaseTool.query_database",
             return_value={"success": False, "error": "safe message", "raw_error": "still broken", "data": None, "rows_returned": 0},
-        ), patch("app.agent.graph.AFLAnalyticsAgent._llm_retry_sql") as mock_retry:
+        ):
             result = _run(agent.execute_node(state))
 
-        mock_retry.assert_not_called()
         assert result["sql_error"] is None
         assert result["execution_error"] is not None
-
-    def test_v1_db_error_still_uses_inline_llm_retry(self):
-        state = _base_state(pipeline_version="v1", pre_generated_sql="SELECT * FROM bad_table", sql_attempts=1)
-        agent = AFLAnalyticsAgent()
-
-        with patch(
-            "app.agent.graph.DatabaseTool.query_database",
-            return_value={"success": False, "error": "safe message", "raw_error": "still broken", "data": None, "rows_returned": 0},
-        ), patch("app.agent.graph.AFLAnalyticsAgent._llm_retry_sql", return_value=None) as mock_retry:
-            result = _run(agent.execute_node(state))
-
-        mock_retry.assert_called_once()
-        # v1 path never touches the v2-only sql_error signal field.
-        assert result.get("sql_error") is None
-        assert result.get("execution_error") is not None
 
 
 class TestDiagnoseEmptyNode:

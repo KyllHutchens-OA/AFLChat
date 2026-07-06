@@ -1,7 +1,7 @@
 """
 AFL Analytics Agent - Classify & Resolve Prompt (Milestone 3a)
 
-Small, cheap LLM call that runs FIRST in the v2 pipeline (AGENT_PIPELINE=v2),
+Small, cheap LLM call that runs FIRST in the pipeline,
 before any SQL generation. Classifies the conversational "shape" of the turn
 and does a light, best-effort entity extraction pass (teams/players/seasons/
 metrics). Deterministic resolution to canonical DB values happens afterwards

@@ -2,7 +2,7 @@
 AFL Analytics Agent - Verified SQL Example Library (Milestone 3b)
 
 Harvested from two sources:
-  1. The ~16 SQL templates in `backend/app/agent/fast_path.py` (team wins,
+  1. The ~16 SQL templates in the old (removed) `fast_path.py` (team wins,
      grand final winners, top-N lists, head-to-head, etc.) — these encode
      correct query *shapes* for the fast-path's own use, parameterized with
      `{year}`/`{team}`/etc. placeholders.
@@ -131,7 +131,7 @@ SQL_EXAMPLES: List[Dict[str, Any]] = [
             "HAVING COUNT(*) >= 5 ORDER BY avg_fantasy DESC NULLS LAST LIMIT 5"
         ),
         "tags": ["player_ranking", "fantasy", "top_n", "leaderboard"],
-        # NOTE: fast_path.py recomputes fantasy points from raw stat columns by hand —
+        # NOTE: the old fast_path.py recomputed fantasy points from raw stat columns by hand —
         # unnecessary and a source of drift. player_stats.fantasy_points is PRE-COMPUTED
         # in the DB using official AFL Fantasy scoring; SELECT it directly (see
         # schema_docs.py player_stats gotchas).

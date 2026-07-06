@@ -1,7 +1,7 @@
 """
 AFL Analytics Agent - Classify & Resolve Node (Milestone 3a)
 
-First stage of the v2 pipeline (AGENT_PIPELINE=v2). Runs BEFORE any SQL/DB
+First stage of the pipeline. Runs BEFORE any SQL/DB
 work:
   1. One small LLM call classifies the turn (turn_type) and does a best-effort
      entity extraction pass.

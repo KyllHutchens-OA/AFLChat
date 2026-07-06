@@ -1,21 +1,22 @@
 """
 AFL Analytics Agent - LangGraph Workflow
 
-Defines the agent workflow: UNDERSTAND → ANALYZE_DEPTH → PLAN → EXECUTE → VISUALIZE → RESPOND
+Defines the agent workflow (Milestone 3):
+CLASSIFY_RESOLVE → RETRIEVE_CONTEXT → GENERATE_SQL → ANALYZE_DEPTH → PLAN →
+EXECUTE → (DIAGNOSE_EMPTY | REVIEW) → VISUALIZE → RESPOND,
+with self-correct loops (DB error / fixable empty result / review NO verdict)
+feeding back into GENERATE_SQL under a shared per-turn attempt cap.
 """
 from typing import Dict, Any, List, Optional
 from langgraph.graph import StateGraph, END
 from openai import OpenAI
 import httpx
 import os
-import re
 import logging
 from dotenv import load_dotenv
 
 from app.agent.state import AgentState, WorkflowStep, QueryIntent
 from app.agent.tools import DatabaseTool, StatisticsTool
-from app.analytics.query_builder import QueryBuilder
-from app.analytics.entity_resolver import EntityResolver, MetricResolver
 from app.analytics.context_enrichment import ContextEnricher
 from app.analytics.statistics import EfficiencyCalculator
 from app.visualization import RechartsBuilder
@@ -29,7 +30,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Milestone 3c: global cap on total generate_sql invocations per turn (v2 only),
+# Milestone 3c: global cap on total generate_sql invocations per turn,
 # shared across ALL retry sources — the initial call, DB-error self-correct
 # retries, and the diagnose_empty-driven regen (review-driven regen joins this
 # same cap in M3d). Keyed off state["sql_attempts"], incremented inside
@@ -47,31 +48,13 @@ client = OpenAI(
     timeout=httpx.Timeout(60.0, connect=10.0)
 )
 
-# ── Interim correction detector (stopgap — replaced in M3) ──────────────────
-# Detects messages like "no", "wrong", "actually I meant X" that indicate the
-# user is correcting a previous answer. When detected, we bypass READING the
-# SQL result cache and the consolidated-LLM cache for this turn (we still
-# WRITE to both caches as normal) so the correction isn't served a stale
-# cached answer from before the correction.
-_CORRECTION_PATTERN = re.compile(
-    r"^(no|nope|wrong|that's not|actually|i meant)\b", re.IGNORECASE
-)
-
-
-def _is_correction_query(user_query: str) -> bool:
-    """Return True if the query looks like a correction of a previous answer."""
-    if not user_query:
-        return False
-    return bool(_CORRECTION_PATTERN.match(user_query.strip()))
-
-
 def _accumulate_usage(state: "AgentState", usage: Optional[Any]) -> None:
     """
     Merge real OpenAI token usage into the per-request state accumulator.
 
     Accepts either an OpenAI `response.usage` object (with prompt_tokens /
     completion_tokens attributes) or a plain dict with input_tokens/output_tokens
-    (used by helper functions that return usage explicitly, e.g. consolidated_llm).
+    (used by helper functions that return usage explicitly).
     """
     if not usage:
         return
@@ -92,17 +75,19 @@ class AFLAnalyticsAgent:
     LangGraph-based agent for AFL analytics queries.
 
     Workflow:
-    1. UNDERSTAND - Parse user query, extract intent and entities
-    2. ANALYZE_DEPTH - Determine summary vs in-depth analysis mode
-    3. PLAN - Determine analysis steps required
-    4. EXECUTE - Run SQL queries and compute statistics
-    5. VISUALIZE - Generate chart specifications (if needed)
-    6. RESPOND - Format natural language response
+    1. CLASSIFY_RESOLVE - Cheap LLM turn-type classification + deterministic entity resolution
+    2. RETRIEVE_CONTEXT - Deterministic pruning of schema docs + verified SQL examples
+    3. GENERATE_SQL - One focused LLM call: final intent + SQL (with retry loops feeding back here)
+    4. ANALYZE_DEPTH - Determine summary vs in-depth analysis mode
+    5. PLAN - Determine analysis steps required
+    6. EXECUTE - Run SQL queries (or news/odds/tips tools) and compute statistics
+    7. DIAGNOSE_EMPTY / REVIEW - Explain 0-row results / sanity-check non-empty results
+    8. VISUALIZE - Generate chart specifications (if needed)
+    9. RESPOND - Format natural language response
     """
 
     def __init__(self):
         self.graph = self._build_graph()
-        self.graph_v2 = self._build_graph_v2()
 
     @staticmethod
     def _emit_progress(state: AgentState, step: str, message: str):
@@ -111,7 +96,7 @@ class AFLAnalyticsAgent:
 
         Args:
             state: Current agent state
-            step: Step identifier (e.g., "understand", "execute")
+            step: Step identifier (e.g., "classify_resolve", "execute")
             message: User-facing progress message
         """
         if state.get("socketio_emit"):
@@ -124,13 +109,13 @@ class AFLAnalyticsAgent:
                 logger.warning(f"Failed to emit WebSocket progress: {e}")
 
     @staticmethod
-    def _route_after_understand(state: AgentState) -> str:
-        """Shared routing decision after `understand` (used by both v1 and v2 graphs)."""
+    def _route_after_generate_sql(state: AgentState) -> str:
+        """Routing decision after `generate_sql`: clarification short-circuits to respond."""
         return "respond" if state.get("needs_clarification") else "analyze_depth"
 
     @staticmethod
     def _route_after_execute(state: AgentState) -> str:
-        """Shared routing decision after `execute` (used by both v1 and v2 graphs)."""
+        """Base visualize-vs-respond decision (final fallthrough of _route_after_execute_v2)."""
         return (
             "visualize"
             if state.get("requires_visualization")
@@ -142,7 +127,7 @@ class AFLAnalyticsAgent:
     @staticmethod
     def _route_after_execute_v2(state: AgentState) -> str:
         """
-        v2-only routing after `execute` (Milestone 3c, extended in 3d).
+        Routing after `execute` (Milestone 3c, extended in 3d).
 
         - `sql_error` set (by execute_node, only when under SQL_ATTEMPT_CAP) →
           self-correct: loop back to generate_sql with the exact failed SQL +
@@ -152,9 +137,9 @@ class AFLAnalyticsAgent:
         - Non-empty rows from a SQL-backed intent → review (Milestone 3d): a
           cheap LLM sanity-check that the rows actually answer the question.
           Tool intents (news/odds/tips) have no SQL to review, so they skip
-          straight through to the same visualize/respond decision v1 uses.
+          straight through to the base visualize/respond decision.
         - Otherwise (tool intents, or anything else) falls through to the
-          same visualize/respond decision v1 uses.
+          base visualize/respond decision (_route_after_execute).
         """
         if state.get("sql_error"):
             return "generate_sql"
@@ -180,7 +165,7 @@ class AFLAnalyticsAgent:
     @staticmethod
     def _route_after_diagnose_empty(state: AgentState) -> str:
         """
-        v2-only routing after `diagnose_empty` (Milestone 3c).
+        Routing after `diagnose_empty` (Milestone 3c).
 
         diagnose_empty_node itself decides (and records in
         `diagnose_should_regenerate`) whether the diagnosis is obviously
@@ -193,14 +178,14 @@ class AFLAnalyticsAgent:
     @staticmethod
     def _route_after_review(state: AgentState) -> str:
         """
-        v2-only routing after `review` (Milestone 3d).
+        Routing after `review` (Milestone 3d).
 
         review_node itself decides (and records in `review_should_regenerate`)
         whether the verdict is NO AND we haven't already used our one
         review-triggered regen this turn AND we're still under
         SQL_ATTEMPT_CAP — this router just reads that decision. Otherwise
-        falls through to the same visualize/respond decision v1 uses (rows
-        are guaranteed present — review only runs when execute returned rows).
+        falls through to the base visualize/respond decision (rows are
+        guaranteed present — review only runs when execute returned rows).
         """
         if state.get("review_should_regenerate"):
             return "generate_sql"
@@ -209,74 +194,21 @@ class AFLAnalyticsAgent:
     @staticmethod
     def _route_after_classify(state: AgentState) -> str:
         """
-        Routing decision after `classify_resolve` (v2 only).
+        Routing decision after `classify_resolve`.
 
         chitchat → straight to respond (classify_resolve already produced the
         reply text). Everything else → retrieve_context (Milestone 3b+):
-        classify_resolve → retrieve_context → generate_sql replaces the old
-        understand-mega-prompt entry point for v2.
+        classify_resolve → retrieve_context → generate_sql.
         """
         return "respond" if state.get("turn_type") == "chitchat" else "retrieve_context"
 
     def _build_graph(self) -> StateGraph:
-        """Build the v1 (default) LangGraph workflow — unchanged from pre-M3."""
-        workflow = StateGraph(AgentState)
-
-        # Add nodes
-        workflow.add_node("understand", self.understand_node)
-        workflow.add_node("analyze_depth", self.analyze_depth_node)
-        workflow.add_node("plan", self.plan_node)
-        workflow.add_node("execute", self.execute_node)
-        workflow.add_node("visualize", self.visualize_node)
-        workflow.add_node("respond", self.respond_node)
-
-        # Add edges with conditional routing
-        # After understand: if needs clarification, skip to respond
-        workflow.add_conditional_edges(
-            "understand",
-            self._route_after_understand,
-            {
-                "respond": "respond",
-                "analyze_depth": "analyze_depth"
-            }
-        )
-        workflow.add_edge("analyze_depth", "plan")
-        workflow.add_edge("plan", "execute")
-
-        # Conditional edge: visualize if needed, otherwise go to respond
-        workflow.add_conditional_edges(
-            "execute",
-            self._route_after_execute,
-            {
-                "visualize": "visualize",
-                "respond": "respond"
-            }
-        )
-
-        workflow.add_edge("visualize", "respond")
-        workflow.add_edge("respond", END)
-
-        # Set entry point
-        workflow.set_entry_point("understand")
-
-        return workflow.compile()
-
-    def _build_graph_v2(self) -> StateGraph:
         """
-        Build the v2 LangGraph workflow (AGENT_PIPELINE=v2, Milestone 3+).
-
-        Milestone 3b replaces the `understand` node (the old consolidated
-        mega-prompt call) with `retrieve_context` (deterministic, no LLM —
-        prunes schema docs + SQL examples) followed by `generate_sql` (one
-        focused LLM call using that retrieved context). `analyze_depth`,
-        `plan`, `execute`, `visualize`, `respond` are unchanged from v1/3a —
-        `generate_sql` populates the same state keys (`intent`,
-        `pre_generated_sql`, `requires_visualization`, chart hints) that
-        `understand_node` used to, so nothing downstream needed to change.
+        Build the LangGraph workflow (Milestone 3 pipeline).
 
         classify_resolve → retrieve_context → generate_sql → analyze_depth →
-        plan → execute → (review) → (visualize) → respond, with three
-        self-correct loops feeding back into generate_sql:
+        plan → execute → (diagnose_empty | review) → (visualize) → respond,
+        with three self-correct loops feeding back into generate_sql:
           - Milestone 3c: execute hits a DB error → generate_sql (max 2
             retries, global cap of 3 total generate_sql calls this turn via
             sql_attempts).
@@ -313,11 +245,9 @@ class AFLAnalyticsAgent:
 
         workflow.add_edge("retrieve_context", "generate_sql")
 
-        # Reuses the same routing predicate as v1's post-understand check
-        # (both just look at state["needs_clarification"]).
         workflow.add_conditional_edges(
             "generate_sql",
-            self._route_after_understand,
+            self._route_after_generate_sql,
             {
                 "respond": "respond",
                 "analyze_depth": "analyze_depth"
@@ -383,41 +313,6 @@ class AFLAnalyticsAgent:
         Returns:
             Final agent state with response
         """
-        from typing import List, Any
-
-        # ── Fast-path: answer simple queries without any LLM calls ──────────
-        # FAST_PATH=off skips this interception entirely so benchmarks can exercise
-        # the full v2 pipeline (retrieve_context/generate_sql) end-to-end instead of
-        # having most queries answered before the graph ever runs. fast_path.py
-        # itself is untouched — this is purely a bypass switch for measurement
-        # (fast_path's actual removal/integration is Milestone 3e).
-        fast_path_enabled = os.getenv("FAST_PATH", "on").strip().lower() != "off"
-        if fast_path_enabled:
-            from app.agent.fast_path import FastPathRouter
-            fast_result = FastPathRouter.try_fast_path(
-                user_query=user_query,
-                conversation_history=conversation_history,
-                socketio_emit=socketio_emit,
-            )
-            if fast_result is not None:
-                fast_result["conversation_id"] = conversation_id
-                logger.info(f"FAST-PATH answered: {user_query[:60]}")
-                return fast_result
-        # ────────────────────────────────────────────────────────────────────
-
-        is_correction = _is_correction_query(user_query)
-        if is_correction:
-            logger.info(f"Detected correction-style query (cache reads bypassed this turn): {user_query[:60]}")
-
-        # ── Pipeline selection (Milestone 3a) ────────────────────────────────
-        # AGENT_PIPELINE=v2 prepends classify_resolve (LLM turn-type + entity
-        # classification) ahead of the existing understand→...→respond flow.
-        # Default (unset, or any other value) keeps the old v1 behaviour
-        # unchanged — this flag is the risk-mitigation switch for M3.
-        pipeline_version = os.getenv("AGENT_PIPELINE", "v1").strip().lower()
-        active_graph = self.graph_v2 if pipeline_version == "v2" else self.graph
-        entry_step = WorkflowStep.CLASSIFY_RESOLVE if pipeline_version == "v2" else WorkflowStep.UNDERSTAND
-
         initial_state = AgentState(
             user_query=user_query,
             conversation_id=conversation_id,
@@ -429,16 +324,15 @@ class AFLAnalyticsAgent:
             sql_validated=False,
             statistical_analysis={},
             errors=[],
-            current_step=entry_step,
+            current_step=WorkflowStep.CLASSIFY_RESOLVE,
             analysis_types=[],
             context_insights={},
             data_quality={},
             stats_summary={},
             socketio_emit=socketio_emit,
             conversation_history=conversation_history or [],
-            is_correction=is_correction,
             token_usage={"input_tokens": 0, "output_tokens": 0},
-            # Milestone 3+ fields (v2 pipeline only — no-ops under v1)
+            # Milestone 3a fields
             turn_type=None,
             bypass_cache=False,
             sql_attempts=0,
@@ -450,28 +344,27 @@ class AFLAnalyticsAgent:
             review_verdict=None,
             review_regenerated=False,
             review_should_regenerate=False,
-            # Milestone 3b fields (v2 pipeline only — no-ops under v1)
+            # Milestone 3b fields
             retrieved_schema_docs=None,
             retrieved_examples=[],
             conversation_snippet=None,
-            # Milestone 3c fields (v2 pipeline only — no-ops under v1)
-            pipeline_version=pipeline_version,
+            # Milestone 3c fields
             sql_error=None,
             failed_sql=None,
             diagnose_regenerated=False,
             diagnose_should_regenerate=False,
         )
 
-        final_state = await active_graph.ainvoke(initial_state)
+        final_state = await self.graph.ainvoke(initial_state)
         return final_state
 
     # ==================== WORKFLOW NODES ====================
 
     async def classify_resolve_node(self, state: AgentState) -> AgentState:
         """
-        CLASSIFY_RESOLVE node (v2 pipeline only, Milestone 3a).
+        CLASSIFY_RESOLVE node (Milestone 3a).
 
-        First node in the v2 graph. Runs a small LLM call to classify the
+        First node in the graph. Runs a small LLM call to classify the
         turn (turn_type) and extract entities, then resolves those entities
         deterministically via EntityResolver. For turn_type == "correction",
         also sets bypass_cache and loads the prior turn's persisted
@@ -510,9 +403,9 @@ class AFLAnalyticsAgent:
 
     async def retrieve_context_node(self, state: AgentState) -> AgentState:
         """
-        RETRIEVE_CONTEXT node (v2 pipeline only, Milestone 3b).
+        RETRIEVE_CONTEXT node (Milestone 3b).
 
-        Second node in the v2 graph, runs immediately after classify_resolve.
+        Second node in the graph, runs immediately after classify_resolve.
         Deterministic — makes NO LLM calls and NO database calls: prunes the
         curated schema docs (app/agent/schema_docs.py) and picks the top few
         verified SQL examples (app/agent/sql_examples.py) relevant to this
@@ -543,15 +436,14 @@ class AFLAnalyticsAgent:
 
     async def generate_sql_node(self, state: AgentState) -> AgentState:
         """
-        GENERATE_SQL node (v2 pipeline only, Milestone 3b).
+        GENERATE_SQL node (Milestone 3b).
 
-        Third node in the v2 graph. Makes ONE LLM call — using the schema docs
+        Third node in the graph. Makes ONE LLM call — using the schema docs
         + examples retrieved by retrieve_context, plus the entities/turn_type
         already resolved by classify_resolve — that classifies the final
         intent (including non-SQL tool intents, so execute_node's existing
-        routing is untouched) and generates focused SQL. Replaces the old
-        consolidated mega-prompt call (`understand_node` → `consolidated_llm.py`)
-        for v2. For turn_type == "correction", the prompt is augmented with
+        routing is untouched) and generates focused SQL. For turn_type ==
+        "correction", the prompt is augmented with
         prior_sql/prior_answer/complaint_summary and asked to produce different
         SQL addressing the complaint.
 
@@ -613,7 +505,7 @@ class AFLAnalyticsAgent:
 
     async def diagnose_empty_node(self, state: AgentState) -> AgentState:
         """
-        DIAGNOSE_EMPTY node (v2 pipeline only, Milestone 3c).
+        DIAGNOSE_EMPTY node (Milestone 3c).
 
         Runs when `execute` returned 0 rows for a DB-backed intent. Purely
         deterministic — no LLM call. Delegates to app/agent/diagnose_empty.py,
@@ -661,7 +553,7 @@ class AFLAnalyticsAgent:
 
     async def review_node(self, state: AgentState) -> AgentState:
         """
-        REVIEW node (v2 pipeline only, Milestone 3d).
+        REVIEW node (Milestone 3d).
 
         Runs when `execute` returns NON-EMPTY rows for a SQL-backed intent —
         the sibling case to diagnose_empty's 0-row check. A cheap LLM call
@@ -721,342 +613,6 @@ class AFLAnalyticsAgent:
             f"REVIEW: verdict={verdict.get('verdict')}, reason={verdict.get('reason')!r}, "
             f"should_regenerate={should_regenerate}"
         )
-
-        return state
-
-    async def understand_node(self, state: AgentState) -> AgentState:
-        """
-        UNDERSTAND node: Parse user query and extract intent/entities.
-
-        Updates:
-        - intent
-        - entities
-        - thinking_message
-        """
-        state["current_step"] = WorkflowStep.UNDERSTAND
-        state["thinking_message"] = "Understanding your question..."
-        self._emit_progress(state, "understand", "Understanding your question...")
-
-        logger.info(f"UNDERSTAND: Processing query: {state['user_query']}")
-
-        try:
-            # Check if this is a response to a clarification question
-            conversation_history = state.get("conversation_history", [])
-            logger.info(f"UNDERSTAND: conversation_history length = {len(conversation_history) if conversation_history else 0}")
-
-            # Debug: Log all messages in history
-            if conversation_history:
-                for i, msg in enumerate(conversation_history):
-                    role = msg.get("role")
-                    content = msg.get("content", "")[:50]
-                    has_clarification = msg.get("needs_clarification", False)
-                    candidates = msg.get("clarification_candidates")
-                    logger.info(f"  Message {i}: {role} - '{content}...' needs_clarification={has_clarification}, candidates={candidates}")
-
-            if conversation_history and len(conversation_history) >= 2:
-                # Get the last assistant message (most recent)
-                last_assistant_msg = None
-                for msg in reversed(conversation_history):
-                    if msg.get("role") == "assistant":
-                        last_assistant_msg = msg
-                        break
-
-                # Check if last message was a clarification question
-                if last_assistant_msg:
-                    content = last_assistant_msg.get("content", "")
-                    was_clarification = last_assistant_msg.get("needs_clarification", False)
-                    candidates = last_assistant_msg.get("clarification_candidates")
-
-                    logger.info(f"UNDERSTAND: Last assistant message: {content[:100]}...")
-                    logger.info(f"UNDERSTAND: was_clarification={was_clarification}, candidates={candidates}")
-
-                    # Check if this was a clarification question
-                    if was_clarification and candidates:
-                        logger.info(f"UNDERSTAND: Detected clarification question with candidates: {candidates}")
-
-                        # Try to match user's response against candidates
-                        user_response = state['user_query'].lower().strip()
-
-                        # Remove common filler words
-                        user_response_cleaned = user_response
-                        for filler in [' please', ' thanks', ' pls', ' thx', ',', '.', ' ?']:
-                            user_response_cleaned = user_response_cleaned.replace(filler, '')
-                        user_response_cleaned = user_response_cleaned.strip()
-
-                        # Try to find matches
-                        potential_matches = []
-                        for candidate in candidates:
-                            candidate_lower = candidate.lower()
-
-                            # Check exact match
-                            if user_response_cleaned == candidate_lower:
-                                potential_matches.append(candidate)
-                                continue
-
-                            # Check if all words in user response are in candidate
-                            user_words = user_response_cleaned.split()
-                            candidate_words = candidate_lower.split()
-
-                            # If user response is a single word, check if it matches any part of candidate name
-                            if len(user_words) == 1:
-                                if user_words[0] in candidate_words:
-                                    potential_matches.append(candidate)
-                            else:
-                                # Multiple words: check if all are in candidate
-                                if all(word in candidate_words for word in user_words):
-                                    potential_matches.append(candidate)
-
-                        # Only use match if exactly one candidate matches
-                        logger.info(f"UNDERSTAND: Potential matches for '{user_response_cleaned}': {potential_matches}")
-                        matched_candidate = None
-                        if len(potential_matches) == 1:
-                            matched_candidate = potential_matches[0]
-                            logger.info(f"UNDERSTAND: Successfully matched to '{matched_candidate}'")
-                        elif len(potential_matches) > 1:
-                            logger.warning(f"Ambiguous clarification response: '{user_response}' matches multiple candidates: {potential_matches}")
-                        else:
-                            logger.warning(f"No matches found for clarification response: '{user_response}' among candidates: {candidates}")
-
-                        if matched_candidate:
-                            logger.info(f"Matched clarification response '{user_response}' to '{matched_candidate}'")
-
-                            # Get the original query intent from conversation history
-                            # Find the user message before the clarification
-                            original_user_msg = None
-                            found_clarification = False
-                            for msg in reversed(conversation_history):
-                                if msg.get("role") == "assistant" and msg.get("needs_clarification"):
-                                    found_clarification = True
-                                elif found_clarification and msg.get("role") == "user":
-                                    original_user_msg = msg
-                                    break
-
-                            # Set entities directly without GPT call
-                            state["entities"] = {
-                                "players": [matched_candidate],
-                                "teams": [],
-                                "seasons": [],
-                                "metrics": [],
-                                "rounds": []
-                            }
-
-                            # Copy season/metric from original query if available
-                            if original_user_msg:
-                                original_entities = original_user_msg.get("entities", {})
-                                if original_entities.get("seasons"):
-                                    state["entities"]["seasons"] = original_entities["seasons"]
-                                if original_entities.get("metrics"):
-                                    state["entities"]["metrics"] = original_entities["metrics"]
-
-                            # Set intent to simple_stat (most common for player stats)
-                            state["intent"] = QueryIntent.SIMPLE_STAT
-                            state["requires_visualization"] = False
-                            state["needs_clarification"] = False
-
-                            logger.info(f"Resolved clarification: entities={state['entities']}")
-
-                            # Skip the rest of entity extraction and return
-                            return state
-
-            # Build conversation context for follow-up questions
-            conversation_context = ""
-
-            if conversation_history and len(conversation_history) > 0:
-                # Get last few exchanges for context
-                recent_messages = conversation_history[-6:]  # Last 3 exchanges (user + assistant)
-
-                conversation_context = "\n## Previous Conversation Context\n"
-                for msg in recent_messages:
-                    role = msg.get("role", "unknown")
-                    content = msg.get("content", "")
-
-                    if role == "user":
-                        conversation_context += f"User: {content}\n"
-                    elif role == "assistant":
-                        # Include assistant entities if available
-                        entities = msg.get("entities", {})
-                        if entities:
-                            teams = entities.get("teams", [])
-                            players = entities.get("players", [])
-                            if teams:
-                                conversation_context += f"Assistant discussed: Teams: {', '.join(teams)}\n"
-                            if players:
-                                conversation_context += f"Assistant discussed: Players: {', '.join(players)}\n"
-
-                conversation_context += "\nUse this context to resolve ambiguous references (e.g., 'What about 2023?' or 'Compare them').\n---\n\n"
-
-            # ── Consolidated single LLM call: intent + entities + SQL ──────────
-            # This replaces both the old standalone intent call here AND the
-            # QueryBuilder.generate_sql() call in execute_node, saving one
-            # full OpenAI round-trip per query.
-            from app.agent.consolidated_llm import ConsolidatedQueryUnderstanding
-            logger.info("UNDERSTAND: Calling consolidated LLM (intent + SQL in one call)...")
-
-            consolidated = ConsolidatedQueryUnderstanding.understand_and_generate_sql(
-                user_query=state["user_query"],
-                conversation_history=conversation_history,
-                # v1: regex-based is_correction stopgap. v2: turn_type=="correction"
-                # (classify_resolve) sets bypass_cache — see Milestone 3a plan.
-                skip_cache_read=state.get("is_correction", False) or state.get("bypass_cache", False),
-            )
-            _accumulate_usage(state, consolidated.get("usage"))
-
-            if consolidated["success"]:
-                # Off-topic detection — LLM classified as non-AFL query
-                # But check if this is a follow-up to a previous tool-based query
-                if consolidated["intent"] == "off_topic":
-                    # Tool-based intents that support follow-up questions
-                    TOOL_INTENTS = {"injury_news", "afl_news", "tipping_advice", "betting_odds"}
-
-                    # Check conversation history for context
-                    previous_tool_intent = None
-                    if conversation_history:
-                        for msg in reversed(conversation_history[-4:]):
-                            if msg.get("role") == "assistant":
-                                prev_intent = msg.get("intent", "")
-                                # Check if previous intent was a tool-based intent
-                                if prev_intent in TOOL_INTENTS:
-                                    previous_tool_intent = prev_intent
-                                    break
-
-                    if previous_tool_intent:
-                        # This looks like a follow-up - use the same intent type
-                        logger.info(f"UNDERSTAND: Detected follow-up to {previous_tool_intent}, overriding off_topic")
-                        consolidated["intent"] = previous_tool_intent
-                        consolidated["sql"] = None
-                    else:
-                        logger.info("UNDERSTAND: LLM flagged query as off-topic")
-                        from app.data.database import get_data_recency
-                        recency = get_data_recency()
-                        earliest = recency["earliest_season"]
-                        hist_season = recency["historical_latest_season"]
-                        state["needs_clarification"] = True
-                        state["clarification_question"] = (
-                            f"That doesn't seem to be an AFL question. I can help with Australian Football League "
-                            f"statistics and data from {earliest} to {hist_season}, including match results, player stats, "
-                            f"team performance, betting odds, and tipping predictions.\n\n"
-                            f"Try something like: \"How many goals did Hawkins kick in 2024?\" or "
-                            f"\"What are the odds for this week's games?\""
-                        )
-                        return state
-
-                understanding = {
-                    "intent": consolidated["intent"],
-                    "entities": consolidated["entities"],
-                    "requires_visualization": consolidated["requires_visualization"],
-                }
-                # Store the pre-generated SQL so execute_node skips its own SQL call
-                state["pre_generated_sql"] = consolidated["sql"]
-                # Store chart hints for visualize_node (avoids separate chart LLM call)
-                state["llm_chart_type_hint"] = consolidated.get("chart_type")
-                state["llm_chart_config_hint"] = consolidated.get("chart_config", {})
-                sql_preview = consolidated['sql'][:60] if consolidated['sql'] else "(no SQL needed)"
-                logger.info(
-                    f"UNDERSTAND: Consolidated call OK — intent={consolidated['intent']}, "
-                    f"chart_hint={consolidated.get('chart_type')}, "
-                    f"sql_preview={sql_preview}..."
-                )
-            else:
-                # Consolidated call failed — use lightweight heuristic intent instead of another LLM call
-                logger.warning(
-                    f"UNDERSTAND: Consolidated call failed ({consolidated['error']}), "
-                    f"using heuristic intent classification"
-                )
-
-                query_lower = state["user_query"].lower()
-                import re as _re
-
-                # Heuristic intent classification
-                # Check tool-based intents first (no SQL needed)
-                if any(kw in query_lower for kw in ["tip", "predict", "who will win", "who's going to win", "who should i"]):
-                    heuristic_intent = "tipping_advice"
-                    heuristic_viz = False
-                elif any(kw in query_lower for kw in ["odds", "betting", "bet on", "favourite", "favorite"]):
-                    heuristic_intent = "betting_odds"
-                    heuristic_viz = False
-                elif any(kw in query_lower for kw in ["injur", "out this week", "ruled out", "hamstring", "knee"]):
-                    heuristic_intent = "injury_news"
-                    heuristic_viz = False
-                elif any(kw in query_lower for kw in ["news", "latest", "headlines", "article"]):
-                    heuristic_intent = "afl_news"
-                    heuristic_viz = False
-                # Database query intents
-                elif any(kw in query_lower for kw in ["over time", "across time", "trend", "historical", "evolution", "year by year", "since"]):
-                    heuristic_intent = "trend_analysis"
-                    heuristic_viz = True
-                elif any(kw in query_lower for kw in ["compare", " vs ", "versus", "against"]):
-                    heuristic_intent = "player_comparison"
-                    heuristic_viz = True
-                elif any(kw in query_lower for kw in ["performance", "record", "season", "how did"]):
-                    heuristic_intent = "team_analysis"
-                    heuristic_viz = True
-                else:
-                    heuristic_intent = "simple_stat"
-                    heuristic_viz = False
-
-                # Extract years with regex
-                years = _re.findall(r'\b((?:19|20)\d{2})\b', state["user_query"])
-
-                understanding = {
-                    "intent": heuristic_intent,
-                    "entities": {
-                        "teams": [],
-                        "players": [],
-                        "seasons": years,
-                        "metrics": [],
-                        "rounds": []
-                    },
-                    "requires_visualization": heuristic_viz,
-                }
-                # No pre_generated_sql — execute_node will call QueryBuilder as before
-
-            logger.info(f"UNDERSTAND: Parsed understanding: intent={understanding.get('intent')}, entities={understanding.get('entities')}")
-
-            state["intent"] = QueryIntent(understanding.get("intent", "unknown"))
-            raw_entities = understanding.get("entities", {})
-
-            # VALIDATE AND NORMALIZE ENTITIES using EntityResolver
-            validation_result = EntityResolver.validate_entities(raw_entities)
-
-            # Use corrected entities
-            state["entities"] = validation_result["corrected_entities"]
-
-            # Surface warnings about entity resolution into state so downstream
-            # nodes (e.g. RESPOND) can inform the user, not just the logs.
-            if validation_result["warnings"]:
-                for warning in validation_result["warnings"]:
-                    logger.warning(f"Entity resolution: {warning}")
-                state.setdefault("warnings", []).extend(validation_result["warnings"])
-
-            # If validation failed completely, set clarification flag
-            if not validation_result["is_valid"] and validation_result["suggestions"]:
-                state["needs_clarification"] = True
-                state["clarification_question"] = validation_result["suggestions"][0]
-
-            state["requires_visualization"] = understanding.get("requires_visualization", False)
-
-            # Force visualization if user explicitly requested a chart type
-            from app.visualization.chart_selector import ChartSelector
-            explicit_chart = ChartSelector._detect_explicit_chart_type(state["user_query"])
-            if explicit_chart:
-                state["requires_visualization"] = True
-                state["llm_chart_type_hint"] = explicit_chart
-                logger.info(f"UNDERSTAND: User explicitly requested '{explicit_chart}' chart — forcing visualization")
-
-            logger.info(f"Intent: {state['intent']}, Raw entities: {raw_entities}, Resolved entities: {state['entities']}")
-
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            logger.error(f"UNDERSTAND: Exception caught: {type(e).__name__}: {str(e)}")
-            logger.error(f"UNDERSTAND: Exception details: {repr(e)}")
-            logger.error(f"UNDERSTAND: Full traceback:\n{tb}")
-            # Check for specific OpenAI errors
-            if hasattr(e, 'status_code'):
-                logger.error(f"UNDERSTAND: OpenAI status_code: {e.status_code}")
-            if hasattr(e, 'response'):
-                logger.error(f"UNDERSTAND: OpenAI response: {e.response}")
-            state["errors"].append(f"Understanding error: {type(e).__name__}")
 
         return state
 
@@ -1219,7 +775,7 @@ class AFLAnalyticsAgent:
         self, state: AgentState, raw_error: str, failed_sql: Optional[str]
     ) -> AgentState:
         """
-        v2-only (Milestone 3c): record a retryable SQL failure.
+        Milestone 3c: record a retryable SQL failure.
 
         If still under SQL_ATTEMPT_CAP, sets sql_error/failed_sql so
         `_route_after_execute_v2` sends this turn back to generate_sql with the
@@ -1236,7 +792,7 @@ class AFLAnalyticsAgent:
             self._emit_progress(state, "execute", "Query failed, retrying with a corrected query...")
         else:
             error_msg = f"Database query failed after {attempts} attempts: {raw_error}"
-            logger.error(f"EXECUTE (v2): {error_msg}")
+            logger.error(f"EXECUTE: {error_msg}")
             state["execution_error"] = error_msg
             state["errors"].append(error_msg)
             state["sql_error"] = None
@@ -1326,54 +882,30 @@ class AFLAnalyticsAgent:
 
         logger.info("EXECUTE: Generating and running SQL query")
 
-        # Milestone 3c: v2 branches away from v1's QueryBuilder-fallback/inline-retry
-        # behaviour below in two spots — see is_v2 checks. Reset the self-correct
-        # signal fields at the start of every fresh attempt so a successful retry
-        # doesn't leave a stale sql_error lying around and loop forever.
-        is_v2 = state.get("pipeline_version") == "v2"
-        if is_v2:
-            state["sql_error"] = None
-            state["failed_sql"] = None
+        # Milestone 3c: reset the self-correct signal fields at the start of
+        # every fresh attempt so a successful retry doesn't leave a stale
+        # sql_error lying around and loop forever.
+        state["sql_error"] = None
+        state["failed_sql"] = None
 
         try:
-            # Step 1: Get SQL — use pre-generated SQL from generate_sql/consolidated LLM
-            # call if available, otherwise generate via QueryBuilder (v1 fallback to a
-            # separate LLM call — NOT used in v2, where the self-correct loop below
-            # replaces this fallback: a missing pre_generated_sql becomes a retryable
-            # signal that routes back to generate_sql instead).
+            # Step 1: Get SQL — generate_sql already produced it. A missing
+            # pre_generated_sql is a retryable signal that routes back to
+            # generate_sql (Milestone 3c self-correct loop).
             pre_sql = state.get("pre_generated_sql")
-            if pre_sql:
-                logger.info(f"EXECUTE: Using pre-generated SQL from consolidated call: {pre_sql[:80]}...")
-                sql_result = {"success": True, "sql": pre_sql, "error": None}
-            elif is_v2:
+            if not pre_sql:
                 logger.warning(
-                    "EXECUTE (v2): no pre_generated_sql available (generate_sql produced none) — "
-                    "signalling self-correct retry instead of falling back to QueryBuilder"
+                    "EXECUTE: no pre_generated_sql available (generate_sql produced none) — "
+                    "signalling self-correct retry"
                 )
                 return self._signal_v2_sql_failure(
                     state,
                     raw_error="SQL generation failed to produce a query for this question.",
                     failed_sql=None,
                 )
-            else:
-                logger.info(f"EXECUTE: Calling QueryBuilder.generate_sql with query='{state['user_query'][:100]}', entities={state.get('entities')}")
-                sql_result = QueryBuilder.generate_sql(
-                    state["user_query"],
-                    context=state["entities"],  # These are now validated/normalized
-                    conversation_history=state.get("conversation_history", [])
-                )
-                _accumulate_usage(state, sql_result.get("usage"))
-                logger.info(f"EXECUTE: SQL generation result: success={sql_result.get('success')}, error={sql_result.get('error')}")
 
-            if not sql_result["success"]:
-                error_msg = f"SQL generation failed: {sql_result['error']}"
-                logger.error(f"EXECUTE: {error_msg}")
-                state["execution_error"] = error_msg
-                state["errors"].append(error_msg)
-                state["thinking_message"] = "Couldn't process that query, retrying..."
-                return state
-
-            state["sql_query"] = sql_result["sql"]
+            logger.info(f"EXECUTE: Using pre-generated SQL from generate_sql: {pre_sql[:80]}...")
+            state["sql_query"] = pre_sql
 
             # Fix common LLM SQL mistake: ILIKE 'Name%' should be ILIKE '%Name%'
             # because player names are stored as "First Last"
@@ -1387,14 +919,11 @@ class AFLAnalyticsAgent:
             logger.info(f"Generated SQL: {state['sql_query']}")
 
             # Step 2: Execute query (check cache first)
-            # Interim correction stopgap: if this turn looks like a correction of a
-            # previous answer ("no", "wrong", "actually...", etc.), skip READING the
-            # cache so we don't re-serve a stale cached result — but still WRITE the
-            # fresh result to cache below as normal.
+            # Corrections (turn_type == "correction" → bypass_cache, set by
+            # classify_resolve) skip READING the cache so we don't re-serve a
+            # stale cached result — but still WRITE the fresh result below.
             from app.utils.cache import get_cached_result, set_cached_result
-            # v1: regex-based is_correction stopgap. v2: turn_type=="correction" sets bypass_cache.
-            _skip_cache_read = state.get("is_correction") or state.get("bypass_cache")
-            cached = None if _skip_cache_read else get_cached_result(state["sql_query"])
+            cached = None if state.get("bypass_cache") else get_cached_result(state["sql_query"])
             if cached is not None:
                 logger.info("EXECUTE: Returning cached query result")
                 state["sql_validated"] = True
@@ -1410,48 +939,10 @@ class AFLAnalyticsAgent:
 
                 if not db_result["success"]:
                     raw_error = db_result.get("raw_error", db_result["error"])
-
-                    if is_v2:
-                        # Milestone 3c self-correct loop: route back to generate_sql
-                        # with the exact failed SQL + DB error instead of v1's inline
-                        # single-shot _llm_retry_sql call — replaces that fallback in v2.
-                        logger.warning(f"EXECUTE (v2): SQL failed, signalling self-correct retry. Error: {raw_error}")
-                        return self._signal_v2_sql_failure(state, raw_error, state["sql_query"])
-
-                    # --- v1: LLM SQL retry (max 1 attempt), unchanged ---
-                    logger.warning(f"EXECUTE: SQL failed, attempting LLM retry. Error: {raw_error}")
-                    state["thinking_message"] = "Query failed, retrying with fix..."
-                    self._emit_progress(state, "execute", "Query failed, retrying with fix...")
-
-                    retried_sql = self._llm_retry_sql(
-                        original_sql=state["sql_query"],
-                        error_message=raw_error,
-                        user_query=state["user_query"],
-                        state=state,
-                    )
-                    if retried_sql and retried_sql != state["sql_query"]:
-                        logger.info(f"EXECUTE: Retrying with LLM-corrected SQL: {retried_sql[:200]}...")
-                        db_result2 = DatabaseTool.query_database(retried_sql)
-                        if db_result2["success"]:
-                            logger.info(f"EXECUTE: LLM retry succeeded with {db_result2['rows_returned']} rows")
-                            state["sql_query"] = retried_sql
-                            state["sql_validated"] = True
-                            state["query_results"] = db_result2["data"]
-                            set_cached_result(retried_sql, db_result2["data"])
-                            # Skip the error path — jump to stats
-                            db_result = db_result2
-                        else:
-                            logger.error(f"EXECUTE: LLM retry also failed: {db_result2.get('error')}")
-                            error_msg = f"Database query failed: {db_result['error']}"
-                            state["execution_error"] = error_msg
-                            state["errors"].append(error_msg)
-                            return state
-                    else:
-                        error_msg = f"Database query failed: {db_result['error']}"
-                        logger.error(f"{error_msg} | SQL: {state.get('sql_query', 'N/A')}")
-                        state["execution_error"] = error_msg
-                        state["errors"].append(error_msg)
-                        return state
+                    # Milestone 3c self-correct loop: route back to generate_sql
+                    # with the exact failed SQL + DB error.
+                    logger.warning(f"EXECUTE: SQL failed, signalling self-correct retry. Error: {raw_error}")
+                    return self._signal_v2_sql_failure(state, raw_error, state["sql_query"])
 
                 state["sql_validated"] = True
                 state["query_results"] = db_result["data"]
@@ -1814,33 +1305,6 @@ class AFLAnalyticsAgent:
         return chart_type, x_col, y_col
 
     @staticmethod
-    def _get_example_queries(intent: Optional[str] = None, entities: Optional[Dict] = None) -> str:
-        """Return 2-3 example queries relevant to the user's intent."""
-        examples_by_intent = {
-            "simple_stat": [
-                "How many goals did Hawkins kick in 2024?",
-                "Who won the 2024 grand final?",
-                "What was Carlton's record in 2023?",
-            ],
-            "player_comparison": [
-                "Compare Cripps and Oliver in 2024",
-                "Top 5 disposal getters in 2024",
-            ],
-            "team_analysis": [
-                "How did Collingwood perform in 2023?",
-                "Show Carlton's scoring trend from 2018 to 2024",
-            ],
-            "trend_analysis": [
-                "Show Geelong's win count per season from 2018 to 2024",
-                "Cripps disposal average over time",
-            ],
-        }
-        intent_key = str(intent).lower().replace("queryintent.", "") if intent else ""
-        examples = examples_by_intent.get(intent_key, examples_by_intent["simple_stat"])
-        formatted = "\n".join(f'- "{e}"' for e in examples[:2])
-        return f"\n\nHere are some example queries:\n{formatted}"
-
-    @staticmethod
     def _build_error_response(state: Dict[str, Any]) -> str:
         """Build a helpful, conversational error response using gpt-5-nano."""
         error_detail = state.get("execution_error", "")
@@ -1869,8 +1333,8 @@ class AFLAnalyticsAgent:
         2022-2026") rather than a plausible-sounding hallucinated guess.
 
         Falls back to the generic LLM-based guess if diagnose_empty didn't
-        produce a usable human_reason for some reason (defensive only — v2
-        always runs diagnose_empty before reaching this branch).
+        produce a usable human_reason for some reason (defensive only — the
+        pipeline always runs diagnose_empty before reaching this branch).
         """
         diagnosis = state.get("diagnosis") or {}
         human_reason = diagnosis.get("human_reason")
@@ -1984,54 +1448,6 @@ Rules:
                 "I had trouble answering that one. Try rephrasing your question, "
                 "or hit the report button if you think this should work."
             )
-
-    @staticmethod
-    def _llm_retry_sql(original_sql: str, error_message: str, user_query: str, state: Optional["AgentState"] = None) -> Optional[str]:
-        """
-        Ask the LLM to fix a failed SQL query based on the Postgres error.
-
-        Returns corrected SQL string, or None if unable to fix.
-        """
-        try:
-            prompt = f"""Fix this PostgreSQL query that failed with an error.
-
-Original SQL:
-{original_sql}
-
-Postgres error:
-{error_message}
-
-User's question: {user_query}
-
-Return ONLY the corrected SQL query, nothing else. No markdown, no explanation.
-If you cannot fix it, return the string UNFIXABLE."""
-
-            response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
-                messages=[{"role": "user", "content": prompt}],
-            )
-            if state is not None:
-                _accumulate_usage(state, response.usage)
-            fixed = (response.choices[0].message.content or "").strip()
-
-            # Clean up response
-            if "```sql" in fixed:
-                fixed = fixed.split("```sql")[1].split("```")[0].strip()
-            elif "```" in fixed:
-                fixed = fixed.split("```")[1].split("```")[0].strip()
-
-            if fixed.upper().startswith("UNFIXABLE") or not fixed.upper().startswith(("SELECT", "WITH")):
-                logger.info("LLM SQL retry: could not fix the query")
-                return None
-
-            # Normalize whitespace
-            fixed = " ".join(fixed.split())
-            logger.info(f"LLM SQL retry: generated fix ({len(fixed)} chars)")
-            return fixed
-
-        except Exception as e:
-            logger.error(f"LLM SQL retry failed: {e}")
-            return None
 
     def _format_stats_for_gpt(self, stats: Dict[str, Any]) -> str:
         """
@@ -2678,7 +2094,7 @@ If you cannot fix it, return the string UNFIXABLE."""
         logger.info("RESPOND: Generating natural language response")
 
         try:
-            # v2 only: chitchat turns already have their reply generated by
+            # Chitchat turns already have their reply generated by
             # classify_resolve (single LLM call, no DB/SQL work needed) — just
             # pass it through.
             if state.get("turn_type") == "chitchat" and state.get("natural_language_summary"):
@@ -2708,9 +2124,9 @@ If you cannot fix it, return the string UNFIXABLE."""
 
             # Check if we have results
             if state.get("query_results") is None or len(state["query_results"]) == 0:
-                # v2: diagnose_empty already ran and worked out WHY — use its facts
-                # directly instead of asking an LLM to guess (M3c). v1 never sets
-                # state["diagnosis"], so this is a no-op there.
+                # diagnose_empty already ran and worked out WHY for DB-backed
+                # intents — use its facts directly instead of asking an LLM to
+                # guess (M3c). Tool intents never set state["diagnosis"].
                 if state.get("diagnosis"):
                     state["natural_language_summary"] = self._build_diagnosis_response(state)
                 else:

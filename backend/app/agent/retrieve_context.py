@@ -1,7 +1,7 @@
 """
 AFL Analytics Agent - Retrieve Context Node (Milestone 3b)
 
-Second stage of the v2 pipeline (AGENT_PIPELINE=v2), runs immediately after
+Second stage of the pipeline, runs immediately after
 `classify_resolve` and before `generate_sql`. Pure/deterministic — makes NO
 LLM calls and NO database calls: it just prunes the curated schema docs
 (app/agent/schema_docs.py) and picks the top few verified SQL examples

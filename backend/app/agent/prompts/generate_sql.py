@@ -1,7 +1,8 @@
 """
 AFL Analytics Agent - Generate SQL Prompt (Milestone 3b)
 
-Replaces the ~300-line embedded mega-prompt in `consolidated_llm.py` with a
+Replaces the ~300-line embedded mega-prompt in the old (removed)
+`consolidated_llm.py` with a
 much smaller prompt built from RETRIEVED context: pruned schema docs
 (app/agent/schema_docs.py) + a handful of verified SQL examples
 (app/agent/sql_examples.py) relevant to this specific question, instead of

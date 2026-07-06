@@ -1,13 +1,11 @@
 """
 AFL Analytics Agent - Generate SQL Node (Milestone 3b)
 
-Third stage of the v2 pipeline (AGENT_PIPELINE=v2): takes the pruned schema
+Third stage of the pipeline: takes the pruned schema
 docs + verified examples from `retrieve_context` and the resolved
 entities/turn_type from `classify_resolve`, and makes ONE LLM call that
 classifies the final intent (including non-SQL tool intents, so
-`execute_node`'s existing routing is untouched) and generates focused SQL —
-replacing the ~300-line embedded mega-prompt call in `consolidated_llm.py`
-that v2 used to fall through to via `understand_node`.
+`execute_node`'s existing routing is untouched) and generates focused SQL.
 
 For turn_type == "correction", the prompt is augmented with the prior turn's
 SQL/answer + the user's complaint (see classify_resolve.py, which loaded
@@ -317,14 +315,11 @@ def generate_sql(
         )
 
     except Exception as e:
-        # Mirrors understand_node's consolidated-call-failure fallback in graph.py:
-        # do NOT set state["execution_error"] here — that field is scoped to
+        # Do NOT set state["execution_error"] here — that field is scoped to
         # execute_node's own DB/SQL failures and respond_node treats its mere
-        # presence as "show an error response", even if execute_node goes on to
-        # succeed via its QueryBuilder fallback (pre_generated_sql=None). Falling
-        # back to a plain simple_stat guess with no pre-generated SQL lets
-        # execute_node's existing QueryBuilder fallback path take over, exactly as
-        # it already does today when the v1 consolidated call fails.
+        # presence as "show an error response". Returning with
+        # pre_generated_sql=None lets execute_node signal a self-correct retry
+        # (Milestone 3c loop) back into this node, bounded by SQL_ATTEMPT_CAP.
         logger.error(f"GENERATE_SQL: LLM call failed ({type(e).__name__}: {e}), falling back to heuristic intent")
         updates["intent"] = QueryIntent.SIMPLE_STAT
         updates["requires_visualization"] = False

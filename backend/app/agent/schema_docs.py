@@ -1,14 +1,15 @@
 """
 AFL Analytics Agent - Curated Schema Documentation (Milestone 3b)
 
-Replaces the ~300-line embedded schema block inside `consolidated_llm.py`'s
+Replaces the ~300-line embedded schema block inside the old (removed)
+`consolidated_llm.py`'s
 mega-prompt with small, per-table documentation strings that `retrieve_context`
 prunes down to only the tables relevant to the current query before handing
 them to `generate_sql`.
 
 Ground truth for this file:
   - `backend/app/data/models.py` (SQLAlchemy models)
-  - `backend/app/agent/consolidated_llm.py`'s `_INTENT_AND_SQL_PROMPT` (the
+  - the removed `consolidated_llm.py`'s `_INTENT_AND_SQL_PROMPT` (the
     schema/gotchas block being replaced)
   - Live DB introspection (2026-07-07) via
     `SELECT column_name, data_type FROM information_schema.columns` against
