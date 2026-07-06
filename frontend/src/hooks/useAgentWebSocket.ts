@@ -46,7 +46,15 @@ export const useAgentWebSocket = ({
   const [thinkingStep, setThinkingStep] = useState('');
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const socketRef = useRef<Socket | null>(null);
-  const currentAgentMessageRef = useRef<Message | null>(null);
+  // Holds a visualization spec that arrived before we've attached it to an
+  // agent message yet. The `visualization` and `response` socket events are
+  // NOT guaranteed to arrive in a fixed order, so we can't rely on mutating a
+  // single in-flight message object (that was the old, order-dependent bug).
+  const pendingVizRef = useRef<any>(null);
+  // Id of the most recently added agent message, so a late-arriving
+  // visualization (arrives after `response` already fired) can still be
+  // attached via `complete`.
+  const lastAgentMessageIdRef = useRef<string | null>(null);
   const conversationIdRef = useRef<string | null>(conversationId || null);
   const historyLoadedRef = useRef(false);
   const hadConversationRef = useRef(!!conversationId);
@@ -136,8 +144,17 @@ export const useAgentWebSocket = ({
     const socket = globalSocket;
     socketRef.current = socket;
 
-    // Remove old listeners to prevent duplicates on remount
-    socket.removeAllListeners();
+    // Remove this hook's own listeners to prevent duplicates on remount.
+    // (Per-event `off` rather than `removeAllListeners`, since the latter
+    // would also strip listeners registered by anyone else sharing the
+    // singleton socket.)
+    socket.off('connect');
+    socket.off('disconnect');
+    socket.off('thinking');
+    socket.off('visualization');
+    socket.off('response');
+    socket.off('complete');
+    socket.off('error');
 
     socket.on('connect', () => {
       setIsConnected(true);
@@ -145,6 +162,8 @@ export const useAgentWebSocket = ({
 
     socket.on('disconnect', () => {
       setIsConnected(false);
+      setIsThinking(false);
+      setThinkingStep('');
     });
 
     socket.on('thinking', (data: { step: string }) => {
@@ -153,9 +172,7 @@ export const useAgentWebSocket = ({
     });
 
     socket.on('visualization', (data: { spec: any }) => {
-      if (currentAgentMessageRef.current) {
-        currentAgentMessageRef.current.visualization = data.spec;
-      }
+      pendingVizRef.current = data.spec;
     });
 
     socket.on('response', (data: { text: string; confidence?: number; sources?: string[] }) => {
@@ -163,22 +180,35 @@ export const useAgentWebSocket = ({
       setThinkingStep('');
 
       const agentMessage: Message = {
-        id: Date.now().toString(),
+        id: crypto.randomUUID(),
         type: 'agent',
         text: data.text,
         timestamp: new Date(),
         confidence: data.confidence,
         sources: data.sources,
-        visualization: currentAgentMessageRef.current?.visualization,
+        visualization: pendingVizRef.current ?? undefined,
       };
+      pendingVizRef.current = null;
+      lastAgentMessageIdRef.current = agentMessage.id;
 
       setMessages((prev) => [...prev, agentMessage]);
-      currentAgentMessageRef.current = null;
     });
 
     socket.on('complete', (data: { conversation_id?: string }) => {
       setIsThinking(false);
       setThinkingStep('');
+
+      // If a visualization arrived AFTER `response` already built the agent
+      // message (race between the two events), attach it to that message now
+      // instead of silently dropping it.
+      if (pendingVizRef.current && lastAgentMessageIdRef.current) {
+        const viz = pendingVizRef.current;
+        const targetId = lastAgentMessageIdRef.current;
+        pendingVizRef.current = null;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === targetId ? { ...m, visualization: viz } : m)),
+        );
+      }
 
       if (data.conversation_id) {
         const isNew = !conversationIdRef.current;
@@ -218,7 +248,7 @@ export const useAgentWebSocket = ({
       }
 
       const errorMessage: Message = {
-        id: Date.now().toString(),
+        id: crypto.randomUUID(),
         type: 'agent',
         text: friendlyMessage,
         timestamp: new Date(),
@@ -240,7 +270,7 @@ export const useAgentWebSocket = ({
     }
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       type: 'user',
       text: message,
       timestamp: new Date(),
@@ -248,12 +278,9 @@ export const useAgentWebSocket = ({
 
     setMessages((prev) => [...prev, userMessage]);
 
-    currentAgentMessageRef.current = {
-      id: (Date.now() + 1).toString(),
-      type: 'agent',
-      text: '',
-      timestamp: new Date(),
-    };
+    // Clear any leftover pending visualization from a previous turn (e.g. one
+    // that never got flushed because that turn ended in an error).
+    pendingVizRef.current = null;
 
     socketRef.current.emit('chat_message', {
       message,

@@ -10,43 +10,8 @@ import {
   ErrorBar,
   ComposedChart,
 } from 'recharts';
-import LegacyPlotlyChart from './LegacyPlotlyChart';
-
-// ── Types ───────────────────────────────────────────────────────
-
-interface Series {
-  key: string;
-  name: string;
-  color: string;
-  dashed?: boolean;
-  stackId?: string;
-}
-
-interface AxisConfig {
-  label?: string;
-  tickAngle?: number;
-  domain?: [number, number];
-  integerOnly?: boolean;
-}
-
-interface Annotation {
-  x: string | number;
-  y: number;
-  label: string;
-  color: string;
-}
-
-interface RechartsSpec {
-  chartType: string;
-  title: string;
-  data: Record<string, any>[];
-  series: Series[];
-  xAxis: AxisConfig;
-  yAxis: AxisConfig;
-  annotations?: Annotation[];
-  legend?: boolean;
-  colors: string[];
-}
+import { chartSpecSchema, ChartSpec, DEFAULT_COLORS } from '../../types/chartSpec';
+import DataTable from './DataTable';
 
 interface ChartRendererProps {
   spec: any;
@@ -77,14 +42,31 @@ const integerFormatter = (value: any) => {
 const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
   if (!spec) return null;
 
-  // Legacy Plotly format detection: old conversations have spec.data[0].type
-  if (spec?.data?.[0]?.type) {
-    return <LegacyPlotlyChart spec={spec} />;
+  const result = chartSpecSchema.safeParse(spec);
+
+  if (!result.success) {
+    // Spec doesn't match the shape we know how to chart (missing chartType,
+    // empty/malformed data, etc). Fall back to a table if there's usable data
+    // to show, otherwise render nothing — never crash on a bad spec.
+    const rawData = Array.isArray(spec?.data) ? spec.data : null;
+    if (rawData && rawData.length > 0) {
+      return <DataTable data={rawData} title={typeof spec?.title === 'string' ? spec.title : undefined} />;
+    }
+    return null;
   }
 
-  // New Recharts format
-  const s = spec as RechartsSpec;
-  if (!s.chartType) return null;
+  const s = result.data;
+
+  // Empty dataset: nothing sensible to chart. This is also reachable directly
+  // since the schema enforces data.min(1), but keep an explicit guard so the
+  // intent is obvious and this stays safe if the schema ever relaxes that rule.
+  if (!s.data.length) return null;
+
+  if (!s.chartType) {
+    return <DataTable data={s.data} title={s.title} />;
+  }
+
+  const colors = s.colors && s.colors.length ? s.colors : DEFAULT_COLORS;
 
   return (
     <div className="w-full card-apple p-6 my-4">
@@ -94,7 +76,7 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
         </h3>
       )}
       <ResponsiveContainer width="100%" height={400}>
-        {renderChart(s)}
+        {renderChart(s, colors)}
       </ResponsiveContainer>
     </div>
   );
@@ -102,32 +84,33 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
 
 // ── Chart Router ────────────────────────────────────────────────
 
-function renderChart(spec: RechartsSpec): React.ReactElement {
+function renderChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   switch (spec.chartType) {
     case 'line':
-      return renderLineChart(spec);
+      return renderLineChart(spec, colors);
     case 'bar':
-      return renderBarChart(spec);
+      return renderBarChart(spec, colors);
     case 'horizontal_bar':
-      return renderHorizontalBarChart(spec);
+      return renderHorizontalBarChart(spec, colors);
     case 'grouped_bar':
-      return renderGroupedBarChart(spec);
+    case 'groupedBar':
+      return renderGroupedBarChart(spec, colors);
     case 'stacked_bar':
-      return renderGroupedBarChart(spec); // same component, series have stackId
+      return renderGroupedBarChart(spec, colors); // same component, series have stackId
     case 'scatter':
-      return renderScatterChart(spec);
+      return renderScatterChart(spec, colors);
     case 'pie':
-      return renderPieChart(spec);
+      return renderPieChart(spec, colors);
     case 'box':
-      return renderBoxChart(spec);
+      return renderBoxChart(spec, colors);
     default:
-      return renderBarChart(spec);
+      return renderBarChart(spec, colors);
   }
 }
 
 // ── Shared helpers ──────────────────────────────────────────────
 
-function renderAnnotations(spec: RechartsSpec) {
+function renderAnnotations(spec: ChartSpec) {
   if (!spec.annotations?.length) return null;
   return spec.annotations.map((ann, i) => (
     <ReferenceDot
@@ -135,7 +118,7 @@ function renderAnnotations(spec: RechartsSpec) {
       x={ann.x}
       y={ann.y}
       r={5}
-      fill={ann.color}
+      fill={ann.color || DEFAULT_COLORS[0]}
       stroke="#fff"
       strokeWidth={2}
     >
@@ -143,13 +126,13 @@ function renderAnnotations(spec: RechartsSpec) {
         value={ann.label}
         position="top"
         offset={10}
-        style={{ fontSize: 11, fill: ann.color, fontWeight: 600 }}
+        style={{ fontSize: 11, fill: ann.color || DEFAULT_COLORS[0], fontWeight: 600 }}
       />
     </ReferenceDot>
   ));
 }
 
-function xAxisProps(spec: RechartsSpec): Record<string, any> {
+function xAxisProps(spec: ChartSpec): Record<string, any> {
   const props: Record<string, any> = {
     dataKey: 'x',
     tick: { fontSize: 12, fill: '#8C7B6B' },
@@ -170,7 +153,7 @@ function xAxisProps(spec: RechartsSpec): Record<string, any> {
   return props;
 }
 
-function yAxisProps(spec: RechartsSpec): Record<string, any> {
+function yAxisProps(spec: ChartSpec): Record<string, any> {
   const props: Record<string, any> = {
     tick: { fontSize: 12, fill: '#8C7B6B' },
     tickLine: false,
@@ -191,7 +174,7 @@ function yAxisProps(spec: RechartsSpec): Record<string, any> {
 
 // ── Line Chart ──────────────────────────────────────────────────
 
-function renderLineChart(spec: RechartsSpec): React.ReactElement {
+function renderLineChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   // Use ComposedChart if any series is dashed (moving avg)
   const hasDashed = spec.series.some(s => s.dashed);
   const ChartComponent = hasDashed ? ComposedChart : LineChart;
@@ -203,20 +186,23 @@ function renderLineChart(spec: RechartsSpec): React.ReactElement {
       <YAxis {...yAxisProps(spec)} />
       <Tooltip contentStyle={tooltipStyle} />
       {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
-      {spec.series.map(s => (
-        <Line
-          key={s.key}
-          type="monotone"
-          dataKey={s.key}
-          name={s.name}
-          stroke={s.color}
-          strokeWidth={s.dashed ? 2 : 3}
-          strokeDasharray={s.dashed ? '6 3' : undefined}
-          dot={s.dashed ? false : { r: 4, fill: s.color, strokeWidth: 2, stroke: '#fff' }}
-          activeDot={{ r: 6 }}
-          animationDuration={800}
-        />
-      ))}
+      {spec.series.map((s, i) => {
+        const color = s.color || colors[i % colors.length];
+        return (
+          <Line
+            key={s.key || s.name || i}
+            type="monotone"
+            dataKey={s.key || ''}
+            name={s.name}
+            stroke={color}
+            strokeWidth={s.dashed ? 2 : 3}
+            strokeDasharray={s.dashed ? '6 3' : undefined}
+            dot={s.dashed ? false : { r: 4, fill: color, strokeWidth: 2, stroke: '#fff' }}
+            activeDot={{ r: 6 }}
+            animationDuration={800}
+          />
+        );
+      })}
       {renderAnnotations(spec)}
     </ChartComponent>
   );
@@ -224,7 +210,7 @@ function renderLineChart(spec: RechartsSpec): React.ReactElement {
 
 // ── Bar Chart ───────────────────────────────────────────────────
 
-function renderBarChart(spec: RechartsSpec): React.ReactElement {
+function renderBarChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   return (
     <BarChart data={spec.data} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE4" />
@@ -232,12 +218,12 @@ function renderBarChart(spec: RechartsSpec): React.ReactElement {
       <YAxis {...yAxisProps(spec)} />
       <Tooltip contentStyle={tooltipStyle} />
       {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
-      {spec.series.map(s => (
+      {spec.series.map((s, i) => (
         <Bar
-          key={s.key}
-          dataKey={s.key}
+          key={s.key || s.name || i}
+          dataKey={s.key || ''}
           name={s.name}
-          fill={s.color}
+          fill={s.color || colors[i % colors.length]}
           radius={[4, 4, 0, 0]}
           animationDuration={600}
         />
@@ -249,7 +235,7 @@ function renderBarChart(spec: RechartsSpec): React.ReactElement {
 
 // ── Horizontal Bar Chart ────────────────────────────────────────
 
-function renderHorizontalBarChart(spec: RechartsSpec): React.ReactElement {
+function renderHorizontalBarChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   return (
     <BarChart data={spec.data} layout="vertical" margin={{ top: 20, right: 30, left: 80, bottom: 20 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE4" />
@@ -263,12 +249,12 @@ function renderHorizontalBarChart(spec: RechartsSpec): React.ReactElement {
         width={70}
       />
       <Tooltip contentStyle={tooltipStyle} />
-      {spec.series.map(s => (
+      {spec.series.map((s, i) => (
         <Bar
-          key={s.key}
-          dataKey={s.key}
+          key={s.key || s.name || i}
+          dataKey={s.key || ''}
           name={s.name}
-          fill={s.color}
+          fill={s.color || colors[i % colors.length]}
           radius={[0, 4, 4, 0]}
           animationDuration={600}
         />
@@ -279,7 +265,7 @@ function renderHorizontalBarChart(spec: RechartsSpec): React.ReactElement {
 
 // ── Grouped / Stacked Bar Chart ─────────────────────────────────
 
-function renderGroupedBarChart(spec: RechartsSpec): React.ReactElement {
+function renderGroupedBarChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   return (
     <BarChart data={spec.data} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE4" />
@@ -287,12 +273,12 @@ function renderGroupedBarChart(spec: RechartsSpec): React.ReactElement {
       <YAxis {...yAxisProps(spec)} />
       <Tooltip contentStyle={tooltipStyle} />
       {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
-      {spec.series.map(s => (
+      {spec.series.map((s, i) => (
         <Bar
-          key={s.key}
-          dataKey={s.key}
+          key={s.key || s.name || i}
+          dataKey={s.key || ''}
           name={s.name}
-          fill={s.color}
+          fill={s.color || colors[i % colors.length]}
           stackId={s.stackId}
           radius={s.stackId ? undefined : [4, 4, 0, 0]}
           animationDuration={600}
@@ -304,7 +290,7 @@ function renderGroupedBarChart(spec: RechartsSpec): React.ReactElement {
 
 // ── Scatter Chart ───────────────────────────────────────────────
 
-function renderScatterChart(spec: RechartsSpec): React.ReactElement {
+function renderScatterChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   if (spec.series.length > 1) {
     // Grouped scatter — split data by group field
     return (
@@ -314,12 +300,12 @@ function renderScatterChart(spec: RechartsSpec): React.ReactElement {
         <YAxis type="number" dataKey="y" name={spec.yAxis.label || 'Y'} tick={{ fontSize: 12, fill: '#8C7B6B' }} />
         <Tooltip contentStyle={tooltipStyle} />
         <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />
-        {spec.series.map(s => (
+        {spec.series.map((s, i) => (
           <Scatter
-            key={s.key}
+            key={s.key || s.name || i}
             name={s.name}
-            data={spec.data.filter(d => d.group === s.key)}
-            fill={s.color}
+            data={spec.data.filter((d: any) => d.group === s.key)}
+            fill={s.color || colors[i % colors.length]}
             animationDuration={600}
           />
         ))}
@@ -336,7 +322,7 @@ function renderScatterChart(spec: RechartsSpec): React.ReactElement {
       <Scatter
         name={spec.series[0]?.name || 'Data'}
         data={spec.data}
-        fill={spec.colors[0]}
+        fill={colors[0]}
         animationDuration={600}
       />
       {renderAnnotations(spec)}
@@ -346,7 +332,7 @@ function renderScatterChart(spec: RechartsSpec): React.ReactElement {
 
 // ── Pie Chart ───────────────────────────────────────────────────
 
-function renderPieChart(spec: RechartsSpec): React.ReactElement {
+function renderPieChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   return (
     <PieChart>
       <Pie
@@ -363,7 +349,7 @@ function renderPieChart(spec: RechartsSpec): React.ReactElement {
         animationDuration={800}
       >
         {spec.data.map((_: any, i: number) => (
-          <Cell key={i} fill={spec.colors[i % spec.colors.length]} />
+          <Cell key={i} fill={colors[i % colors.length]} />
         ))}
       </Pie>
       <Tooltip contentStyle={tooltipStyle} />
@@ -374,7 +360,7 @@ function renderPieChart(spec: RechartsSpec): React.ReactElement {
 
 // ── Box Chart (rendered as bar with error bars for IQR) ─────────
 
-function renderBoxChart(spec: RechartsSpec): React.ReactElement {
+function renderBoxChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   // Data has: x, median, q1, q3, min, max
   // We show median as bar height, with error bars from q1 to q3
   const processedData = spec.data.map((d: any) => ({
@@ -395,8 +381,8 @@ function renderBoxChart(spec: RechartsSpec): React.ReactElement {
           return [`Median: ${d.median}, Q1: ${d.q1}, Q3: ${d.q3}, Min: ${d.min}, Max: ${d.max}`, ''];
         }}
       />
-      <Bar dataKey="median" fill={spec.colors[0]} radius={[4, 4, 0, 0]} animationDuration={600}>
-        <ErrorBar dataKey="errorHigh" direction="y" width={8} stroke={spec.colors[1] || '#2D7A6F'} />
+      <Bar dataKey="median" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={600}>
+        <ErrorBar dataKey="errorHigh" direction="y" width={8} stroke={colors[1] || colors[0]} />
       </Bar>
     </BarChart>
   );

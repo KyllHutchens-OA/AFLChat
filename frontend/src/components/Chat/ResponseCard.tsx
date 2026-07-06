@@ -1,6 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ChartRenderer from '../Visualization/ChartRenderer';
+import ChartErrorBoundary from '../Common/ChartErrorBoundary';
 
 interface ResponseCardProps {
   text: string;
@@ -33,7 +34,12 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isErro
       {visualization && (
         <>
           <div className="border-t border-afl-warm-100 my-4" />
-          <ChartRenderer spec={visualization} />
+          <ChartErrorBoundary
+            data={Array.isArray(visualization?.data) ? visualization.data : null}
+            title={visualization?.title}
+          >
+            <ChartRenderer spec={visualization} />
+          </ChartErrorBoundary>
         </>
       )}
     </div>
