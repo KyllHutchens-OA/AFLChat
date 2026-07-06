@@ -1,0 +1,114 @@
+{
+  "meta": {
+    "generated_at": "2026-07-07T07:20:00+09:30",
+    "purpose": "Milestone 1 verification: dynamic season ceiling, player-season mismatch warning, correction cache-bypass, real token usage reporting",
+    "backend_url": "http://localhost:5001",
+    "backend_git_commit": "1912a84 (M1) + a7ea3c3 (M2, frontend-only, does not affect this backend test)",
+    "backend_process_note": "IMPORTANT: a stale backend process (PID 34121, started 2026-07-07 06:44:26, i.e. BEFORE the M1 commit at 07:09:53) was found already listening on :5001 at the start of this task. It was killed and the backend was restarted fresh from the current working tree so these results reflect the actual M1 code, not a stale pre-M1 process.",
+    "raw_ws_capture": "scripts/benchmark_results/m1_verify_raw.json",
+    "driver_script": "scripts/benchmark_results/m1_verify_driver.py (imports build_client/run_turn/TurnCapture from benchmark_chat.py unmodified; does not alter TEST_CASES in benchmark_chat.py)",
+    "db_ground_truth_queries_run": [
+      "select count(*) from matches where (home_team_id=14 or away_team_id=14) and season=2026 and <win condition>  -> 9 wins / 23 games",
+      "select count(*) ... season=2025 ... -> 17 wins / 25 games (for comparison with baseline and to explain the coincidental '17')",
+      "select p.name, sum(goals) from player_stats/matches season=2026 group by player order by goals desc -> Jeremy Cameron 39 (top)",
+      "select min(season), max(season) from matches/player_stats for Nick Daicos -> 2022-2026",
+      "select count/sum(...) for Bontempelli season=2023 -> 23 games, 636 disposals, 370 kicks, 266 handballs, 101 marks, 172 tackles, 19 goals, 14 behinds, 2631 fantasy_points, 29 brownlow_votes, 84.9 avg TOG"
+    ]
+  },
+  "per_query_results": [
+    {
+      "case_id": "single_01_2026season",
+      "query": "How many games have Collingwood won this season?",
+      "response_text": "Collingwood had 17 wins in 2026.",
+      "latency_ms": 28534.7,
+      "token_usage_observed": {"input_tokens": 6531, "output_tokens": 1213, "model": "gpt-5-mini", "source": "backend log line 'API usage tracked' immediately following this request"},
+      "db_ground_truth": "Collingwood season 2026 (matches table, home_team_id/away_team_id=14): 9 wins from 23 games, all with final scores (no nulls).",
+      "correct_vs_db": false,
+      "verdict": "FAIL (season resolution itself worked, but the answer is numerically wrong)",
+      "evidence": "Backend log 'Generated SQL' shows the query correctly filters on season = 2026 for BOTH a matches-table CTE (match_wins, correctly giving 9) and a live_games-table CTE (live_wins, giving 8) and then SUMS them: COALESCE(mw.wins,0)+COALESCE(lw.wins,0) = 17. Re-running the exact generated SQL against the DB confirms matches_wins=9, live_wins=8, total=17. Every one of those 8 'live_wins' rows for Collingwood in live_games season=2026 carries a match_id (e.g. 6631, 6637, 6649...) that points back to a game ALREADY counted in the matches table — i.e. live_games and matches contain the same completed 2026 games, and the query double-counts them. The true answer is 9. The returned '17' is coincidentally identical to Collingwood's real 2025 win tally (also verified: 17/25), which is a red herring, not evidence the season resolution reverted to 2025 — the SQL text unambiguously says season=2026 throughout.",
+      "notes": "This is a genuine, newly-exposed correctness bug, not one of the four M1 fixes under test. It was latent in baseline because 'this season' incorrectly resolved to 2025, and 2025 apparently has no matching live_games rows to double-count (only 2026, the in-progress/most-recent season, is populated in live_games). Now that M1's season-ceiling fix correctly targets 2026, it walks straight into this pre-existing UNION-with-live_games double-counting bug in whatever SQL template/QueryBuilder produces 'current season team wins' answers. Net effect for the user: the season-resolution bug is fixed, but the visible answer is still wrong, now for a different reason."
+    },
+    {
+      "case_id": "explicit_2026",
+      "query": "Who kicked the most goals in 2026?",
+      "response_text": "Top goal kickers in 2026:\n1. Jeremy Cameron (Geelong) — 39 goals\n2. Ben King (Gold Coast) — 38 goals\n3. Jack Gunston (Hawthorn) — 35 goals\n4. Charlie Curnow (Sydney) — 34 goals\n5. Jye Amiss (Fremantle) — 33 goals",
+      "latency_ms": 8080.9,
+      "token_usage_observed": {"input_tokens": 0, "output_tokens": 0, "model": "gpt-5-mini", "note": "Zero tokens because this hit a fast-path regex pattern (no LLM call at all, per the minimal 'thinking' trace: only 'Received'/'Looking up AFL data'), not because usage reporting is broken — see token-usage verdict below for a case that DID use the LLM and reported nonzero, non-500/200 numbers."},
+      "db_ground_truth": "select p.name, sum(goals) from player_stats/matches season=2026 group by player order by goals desc: Jeremy Cameron 39, Ben King 38, Jack Gunston 35, Charlie Curnow 34, then a 3-way tie at 33 (Aaron Naughton, Jye Amiss, Nick Watson).",
+      "correct_vs_db": true,
+      "verdict": "PASS",
+      "evidence": "Top 4 match the DB exactly. Position 5 is an arbitrary but valid pick from a genuine 3-way tie at 33 goals (Naughton/Amiss/Watson) since the underlying ORDER BY has no tiebreaker column — not an error.",
+      "notes": "Confirms explicit '2026' queries correctly reach 2026 data (independent of the 'this season' relative-date resolution logic exercised by single_01)."
+    },
+    {
+      "case_id": "pair_02_correction",
+      "turns": [
+        {
+          "turn": 1,
+          "query": "Show me Patrick Cripps's stats for 2023",
+          "response_text": "Here's Patrick Cripps's data in 2023. [line chart: disposals by round, 2023]",
+          "latency_ms": 21460.1,
+          "token_usage_observed": {"input_tokens": 6531, "output_tokens": 1021, "model": "gpt-5-mini"}
+        },
+        {
+          "turn": 2,
+          "query": "Sorry, I meant Marcus Bontempelli, not Cripps.",
+          "response_text": "Marcus Bontempelli (Western Bulldogs, 2023): 23 games — 636 disposals (370 kicks, 266 handballs), 101 marks, 172 tackles, 19 goals, 14 behinds, 2,631 fantasy points, 29 Brownlow votes, 84.9% avg TOG.",
+          "latency_ms": 33586.4,
+          "token_usage_observed": {"input_tokens": 7176, "output_tokens": 1238, "model": "gpt-5-mini"},
+          "db_ground_truth": "Bontempelli 2023 (player_stats join matches, season=2023): 23 games, 636 disposals, 370 kicks, 266 handballs, 101 marks, 172 tackles, 19 goals, 14 behinds, 2631 fantasy_points, 29 brownlow_votes, 84.9 avg TOG.",
+          "correct_vs_db": true,
+          "verdict": "PASS",
+          "evidence": "Every number in the turn-2 response matches a fresh DB query exactly. Critically, the backend log's 'Generated SQL' line for turn 2 shows a brand-new SQL statement scoped to `p.name ILIKE '%Marcus% Bontempelli%' AND m.season = 2023` — a different player entirely from turn 1's Cripps query, generated freshly rather than replayed from the LLM/SQL cache (which is keyed loosely enough that a naive cache could otherwise have served a stale Cripps-shaped answer). This directly demonstrates the correction cache-bypass (`is_correction` flag → `skip_cache_read=True` in consolidated_llm) is working: the correction produced a materially different, correct answer, not a cached repeat.",
+          "notes": "Turn 2 latency (33.6s) is the slowest of all 5 turns tested, consistent with skip_cache_read forcing a full fresh LLM call instead of a cache hit — expected cost of the bypass, not a bug."
+        }
+      ]
+    },
+    {
+      "case_id": "nodata_01_mismatch",
+      "query": "What were Nick Daicos's stats in 2015?",
+      "response_text": "I had trouble finding an answer for \"What were Nick Daicos's stats in 2015?\". I have AFL data from 1990 to 2026 covering match results, player stats, and team performance. Try rephrasing or being more specific — and if you think this should work, hit the report button so we can look into it.",
+      "latency_ms": 26048.0,
+      "token_usage_observed": {"input_tokens": 6761, "output_tokens": 1307, "model": "gpt-5-mini"},
+      "db_ground_truth": "Nick Daicos has player_stats rows for seasons 2022-2026 only; 2015 genuinely has zero rows for him.",
+      "correct_vs_db": "n/a (correctly returns no data; the check here is response quality, not correctness)",
+      "verdict": "PARTIAL — same generic fallback text as the M0 baseline, word-for-word identical. The mismatch check now runs server-side but is not surfaced to the user.",
+      "evidence": "Backend log shows the season-mismatch detector DID fire correctly: `WARNING - app.analytics.entity_resolver - Nick Daicos has no 2015 data; seasons available: 2022, 2023, 2024, 2025, 2026` and `WARNING - app.agent.graph - Entity resolution: Nick Daicos has no 2015 data; seasons available: 2022, 2023, 2024, 2025, 2026`. Reading `backend/app/analytics/entity_resolver.py:296-352` (`_season_availability_warning`) confirms this computes and returns a `warning` string in the resolver's result dict (lines 396/430). However, `backend/app/agent/graph.py` never reads that `warning` key anywhere (grep for '\"warning\"'/\"'warning'\" in graph.py returns nothing) — it's logged and then silently dropped before reaching the response-generation step. The user-facing text is therefore identical, character-for-character, to the M0 baseline's generic fallback for this exact query.",
+      "notes": "This matches the task brief's expectation ('M3 fully fixes this; just record current behavior') — M1 laid the groundwork (the DB check + warning string + logging) but did not wire it into the LLM error-response prompt or template. No regression; simply not yet user-visible."
+    }
+  ],
+  "m1_fix_verdicts": {
+    "dynamic_season_ceiling": {
+      "verdict": "PASS (season-resolution logic) / new bug discovered downstream",
+      "evidence_for_pass": "Explicit '2026' query (explicit_2026) returns exactly-correct 2026 data. The relative 'this season' query (single_01_2026season) now generates SQL that unambiguously targets season=2026 (previously it targeted 2025, per M0 baseline's ground-truth note), confirming 'this season' now resolves to 2026 as intended. Code review: `backend/app/data/database.py` `get_data_recency()` queries `SELECT season, round FROM matches ... ORDER BY match_date DESC LIMIT 1` (DB-driven, not a hardcoded year), consumed by `consolidated_llm.py` to build the current-season hint injected into the LLM prompt.",
+      "evidence_for_new_bug": "The 'this season' query's FINAL ANSWER (17) is wrong — ground truth is 9 wins. The SQL generated for 'current season team wins' unions matches-table wins with live_games-table wins, and live_games for season 2026 already duplicates completed games that are also in matches (same match_id values), causing double-counting. This bug was invisible in the M0 baseline only because season resolution was pointed at 2025, which has no live_games rows to double-count.",
+      "caveats_noted_by_code_review": "`get_data_recency()` has an in-code fallback default of 2025 if the DB query fails (database.py ~line 122); the secondary/fallback QueryBuilder path (`analytics/query_builder.py` ~135-136, used only if consolidated_llm fails) still has a static hardcoded schema string saying '1990-2025... 2025 season: COMPLETE' that was not updated. Neither caveat was triggered in this test run (consolidated_llm succeeded every time), but both are latent risks."
+    },
+    "player_season_mismatch_warning": {
+      "verdict": "IMPLEMENTED AT DATA LAYER, NOT YET USER-VISIBLE (expected per task brief — M3 finishes this)",
+      "evidence": "entity_resolver.py's `_season_availability_warning` correctly detects Nick Daicos has no 2015 data and lists his real range (2022-2026); confirmed via log WARNING lines. graph.py never reads the `warning` field from the resolver's result, so the final response is byte-identical to the M0 baseline's generic fallback."
+    },
+    "correction_cache_bypass": {
+      "verdict": "PASS",
+      "evidence": "pair_02_correction turn 2 ('Sorry, I meant Marcus Bontempelli, not Cripps.') produced a freshly-generated SQL query (confirmed via 'Generated SQL' log line, scoped to Bontempelli/2023) and a response with every stat matching a live DB check exactly — not a repeat of turn 1's Cripps data, and not a stale cache hit. Code review: `graph.py` has `_CORRECTION_PATTERN` regex + `_is_correction_query()`, sets `state['is_correction']`, and passes `skip_cache_read=state.get('is_correction', False)` into `understand_and_generate_sql`; `consolidated_llm.py` line ~438 `if not skip_cache_read and key in _llm_cache` skips the read (still writes on the way out). Turn 2's markedly higher latency (33.6s vs turn 1's 21.5s) is consistent with a forced fresh LLM call rather than a cache hit."
+    },
+    "real_token_usage_reporting": {
+      "verdict": "PASS",
+      "evidence": "5 distinct 'API usage tracked' log lines were captured for the 5 turns run, with 5 DIFFERENT non-hardcoded token counts: (6531,1213), (0,0 — fast-path, no LLM call), (6531,1021), (7176,1238), (6761,1307). None are the old hardcoded 500/200 pair, and the values vary per-request in a way that tracks each request's actual prompt complexity (e.g. the fast-path goal-kicker query correctly reports 0/0 since no LLM call occurred at all, rather than falsely reporting a nonzero fixed cost). Code review: `consolidated_llm.py` pulls `usage.prompt_tokens`/`usage.completion_tokens` directly off the real OpenAI `response.usage` object; `graph.py`'s `_accumulate_usage()` sums this across every OpenAI call in a request; `websocket.py` feeds the accumulated total into `UsageTracker.track_usage()`, which is what logs/persists it (not emitted directly in the WS payload to the frontend — it's a server-side cost-tracking path, so verification here was done via backend logs / the api_usage table write, not a WS event field)."
+    }
+  },
+  "regressions_vs_baseline": [
+    {
+      "summary": "New double-counting bug in 'current season team wins' SQL (matches + live_games union) now that 'this season' correctly resolves to 2026.",
+      "severity": "high — user-facing wrong number presented with high confidence (0.9)",
+      "was_this_visible_in_baseline": "No — baseline's season resolution pointed at 2025, which has no live_games rows to double count, so this exact bug could not manifest in M0. It is a pre-existing latent bug in the SQL-generation template, only just exposed by the M1 season-ceiling fix working as intended."
+    }
+  ],
+  "no_other_regressions_found": true,
+  "summary_verdict": {
+    "dynamic_season_ceiling": "PARTIAL PASS — season resolution logic fixed and confirmed dynamic (DB-driven), but exposes a separate, previously-latent double-counting bug that makes the flagship 'this season' test case (Collingwood wins) return a wrong number (17 instead of 9).",
+    "player_season_mismatch_warning": "NOT YET USER-VISIBLE — detection works and logs correctly server-side, but is not wired into the response (expected, per task brief M3 will finish this).",
+    "correction_cache_bypass": "PASS — verified correct, fresh, non-cached, DB-accurate answer after a correction turn.",
+    "real_token_usage_reporting": "PASS — real, varying, non-hardcoded token counts observed for every LLM-invoking turn; fast-path turns correctly report zero."
+  }
+}
