@@ -10,6 +10,8 @@ from enum import Enum
 class WorkflowStep(str, Enum):
     """Agent workflow steps."""
     CLASSIFY_RESOLVE = "classify_resolve"  # v2 pipeline only (Milestone 3a+)
+    RETRIEVE_CONTEXT = "retrieve_context"  # v2 pipeline only (Milestone 3b+)
+    GENERATE_SQL = "generate_sql"  # v2 pipeline only (Milestone 3b+)
     UNDERSTAND = "understand"
     ANALYZE_DEPTH = "analyze_depth"
     PLAN = "plan"
@@ -103,3 +105,8 @@ class AgentState(TypedDict, total=False):
     complaint_summary: Optional[str]  # One-sentence summary of what the user says was wrong (turn_type == "correction")
     diagnosis: Optional[Dict[str, Any]]  # Output of diagnose_empty node (M3c+): why a query returned 0 rows, and whether it's fixable
     review_verdict: Optional[str]  # Output of review node (M3d+): "pass" | "fail" verdict on query results before visualize/respond
+
+    # ── Milestone 3b: retrieve_context → generate_sql ──
+    retrieved_schema_docs: Optional[str]  # Pruned per-table schema docs for this query (app/agent/schema_docs.py), set by retrieve_context
+    retrieved_examples: List[Dict[str, Any]]  # Top-k verified SQL examples for this query (app/agent/sql_examples.py), set by retrieve_context
+    conversation_snippet: Optional[str]  # Short textual summary of recent turns, set by retrieve_context, consumed by generate_sql's prompt

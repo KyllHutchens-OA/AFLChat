@@ -1,0 +1,1570 @@
+{
+  "meta": {
+    "generated_at": "2026-07-06T22:26:25.765646+00:00",
+    "backend_url": "http://localhost:5001",
+    "turn_timeout_s": 90,
+    "inter_turn_sleep_s": 6,
+    "num_cases": 12,
+    "num_turns": 15
+  },
+  "cases": [
+    {
+      "id": "single_01",
+      "category": "single",
+      "turns": [
+        {
+          "query": "How many games has Collingwood won this season?",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:26:25.772503+00:00",
+          "timed_out": false,
+          "latency_ms": 19367.2,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 5004.8,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6113.1,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 10005.6,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 10009.0,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 17136.5,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 17139.6,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 18234.4,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 18241.0,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 18241.2,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "2cbdcc39-6026-432a-a02e-fa6de6b8e837"
+            },
+            "visualization": null,
+            "response": {
+              "text": "Collingwood: 9 wins, 16 games.",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "2cbdcc39-6026-432a-a02e-fa6de6b8e837"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "single_02",
+      "category": "single",
+      "turns": [
+        {
+          "query": "Who won the Brownlow Medal in 2023?",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:26:51.150290+00:00",
+          "timed_out": false,
+          "latency_ms": 14529.2,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 5115.3,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6252.3,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 8660.1,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 8663.8,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 13421.0,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 13426.8,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 13426.9,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 13427.0,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "c1f83ac6-d921-46f4-8dcc-2ea84d680347"
+            },
+            "visualization": null,
+            "response": {
+              "text": "Marcus Bontempelli had 29 votes in 2023.",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "c1f83ac6-d921-46f4-8dcc-2ea84d680347"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "single_03",
+      "category": "single",
+      "turns": [
+        {
+          "query": "Show me a chart of Melbourne's wins per season since 2018",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:27:11.683449+00:00",
+          "timed_out": false,
+          "latency_ms": 19823.4,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 5001.9,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6097.8,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 8136.4,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 8139.2,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 14076.6,
+                "data": {
+                  "step": "Analyzing query complexity...",
+                  "current_step": "analyze_depth"
+                }
+              },
+              {
+                "t_offset_ms": 14086.0,
+                "data": {
+                  "step": "Planning the analysis...",
+                  "current_step": "plan"
+                }
+              },
+              {
+                "t_offset_ms": 14086.1,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 14086.2,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 15236.5,
+                "data": {
+                  "step": "Found 9 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 15236.7,
+                "data": {
+                  "step": "Calculating statistics...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 15240.9,
+                "data": {
+                  "step": "Enriching context...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 18673.6,
+                "data": {
+                  "step": "Creating visualization...",
+                  "current_step": "visualize"
+                }
+              },
+              {
+                "t_offset_ms": 18680.0,
+                "data": {
+                  "step": "Chart created (line)",
+                  "current_step": "visualize"
+                }
+              },
+              {
+                "t_offset_ms": 18680.1,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 18680.3,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "6cea6f27-0b57-4331-9693-0d44a6687be8"
+            },
+            "visualization": {
+              "spec": {
+                "chartType": "line",
+                "title": "Melbourne Wins 2018",
+                "data": [
+                  {
+                    "x": "2018",
+                    "wins": 16
+                  },
+                  {
+                    "x": "2019",
+                    "wins": 5
+                  },
+                  {
+                    "x": "2020",
+                    "wins": 9
+                  },
+                  {
+                    "x": "2021",
+                    "wins": 20
+                  },
+                  {
+                    "x": "2022",
+                    "wins": 16
+                  },
+                  {
+                    "x": "2023",
+                    "wins": 16
+                  },
+                  {
+                    "x": "2024",
+                    "wins": 11
+                  },
+                  {
+                    "x": "2025",
+                    "wins": 7
+                  },
+                  {
+                    "x": "2026",
+                    "wins": 10
+                  }
+                ],
+                "series": [
+                  {
+                    "key": "wins",
+                    "name": "Wins",
+                    "color": "#C2581C"
+                  }
+                ],
+                "xAxis": {
+                  "label": "Season",
+                  "integerOnly": true
+                },
+                "yAxis": {
+                  "label": "Wins"
+                },
+                "annotations": [],
+                "legend": false,
+                "colors": [
+                  "#C2581C",
+                  "#2D7A6F",
+                  "#D4794D",
+                  "#246359",
+                  "#8C7B6B",
+                  "#A30046",
+                  "#D4001A",
+                  "#002B5C"
+                ]
+              }
+            },
+            "response": {
+              "text": "Here's how Melbourne's numbers have changed from 2018 to 2026.",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "6cea6f27-0b57-4331-9693-0d44a6687be8"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "single_04",
+      "category": "single",
+      "turns": [
+        {
+          "query": "What's Dustin Martin's career goals tally?",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:27:37.517351+00:00",
+          "timed_out": false,
+          "latency_ms": 17255.5,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 5200.6,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6344.5,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 9403.6,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 9407.3,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 13273.9,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 13277.4,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 14391.0,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 14397.1,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 16151.4,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "2fcc2718-a79f-4c8a-b21f-9825a7d85fe0"
+            },
+            "visualization": null,
+            "response": {
+              "text": "Dustin Martin had 338 career goals.\n\n*Based on data from 1990 to present.*",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "2fcc2718-a79f-4c8a-b21f-9825a7d85fe0"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "single_05",
+      "category": "single",
+      "turns": [
+        {
+          "query": "What was the score in the 2024 grand final?",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:28:00.782796+00:00",
+          "timed_out": false,
+          "latency_ms": 13645.6,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 4944.2,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6105.0,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 8311.6,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 8315.5,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 12527.7,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 12535.8,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 12535.9,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 12536.1,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "b365f613-cd1b-4d98-b3e5-b52818991640"
+            },
+            "visualization": null,
+            "response": {
+              "text": "Brisbane Lions defeated Sydney 120-60 by 60 points.",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "b365f613-cd1b-4d98-b3e5-b52818991640"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "single_06",
+      "category": "single",
+      "turns": [
+        {
+          "query": "Show me a pie chart of scoring sources - goals vs behinds for Sydney in 2024",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:28:20.436040+00:00",
+          "timed_out": false,
+          "latency_ms": 23337.3,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 4978.3,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6069.2,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 8634.5,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 8638.6,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 17594.0,
+                "data": {
+                  "step": "Analyzing query complexity...",
+                  "current_step": "analyze_depth"
+                }
+              },
+              {
+                "t_offset_ms": 17599.7,
+                "data": {
+                  "step": "Planning the analysis...",
+                  "current_step": "plan"
+                }
+              },
+              {
+                "t_offset_ms": 17599.8,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 17599.9,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 18766.6,
+                "data": {
+                  "step": "Found 2 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 18766.9,
+                "data": {
+                  "step": "Calculating statistics...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 18771.2,
+                "data": {
+                  "step": "Enriching context...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 22188.9,
+                "data": {
+                  "step": "Creating visualization...",
+                  "current_step": "visualize"
+                }
+              },
+              {
+                "t_offset_ms": 22195.7,
+                "data": {
+                  "step": "Chart created (pie)",
+                  "current_step": "visualize"
+                }
+              },
+              {
+                "t_offset_ms": 22195.9,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 22196.1,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "40ca1a8c-b649-466b-aded-0e2822840d48"
+            },
+            "visualization": {
+              "spec": {
+                "chartType": "pie",
+                "title": "Sydney Goals 2024",
+                "data": [
+                  {
+                    "name": "Goals",
+                    "value": 2196
+                  },
+                  {
+                    "name": "Behinds",
+                    "value": 239
+                  }
+                ],
+                "series": [],
+                "xAxis": {},
+                "yAxis": {},
+                "annotations": [],
+                "legend": true,
+                "colors": [
+                  "#C2581C",
+                  "#2D7A6F",
+                  "#D4794D",
+                  "#246359",
+                  "#8C7B6B",
+                  "#A30046",
+                  "#D4001A",
+                  "#002B5C"
+                ]
+              }
+            },
+            "response": {
+              "text": "Here's Sydney's performance breakdown in 2024.",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "40ca1a8c-b649-466b-aded-0e2822840d48"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "single_07",
+      "category": "single",
+      "turns": [
+        {
+          "query": "What's Carlton's win-loss record against Essendon since 1990?",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:28:49.782681+00:00",
+          "timed_out": false,
+          "latency_ms": 18744.3,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 5195.8,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6345.0,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 8586.1,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 8590.4,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 16431.2,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 16433.9,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 17579.8,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 17587.0,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 17587.2,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "15f3013a-348f-4fb5-856a-0592fcb8e43d"
+            },
+            "visualization": null,
+            "response": {
+              "text": "Carlton: 69 games, 31 carlton wins, 34 essendon wins, 4 draws.\n\n*Based on data from 1990 to present.*",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "15f3013a-348f-4fb5-856a-0592fcb8e43d"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "pair_01",
+      "category": "pair",
+      "turns": [
+        {
+          "query": "Who kicked the most goals last round?",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:29:14.535928+00:00",
+          "timed_out": false,
+          "latency_ms": 23131.5,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 4822.6,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 5884.6,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 8933.0,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 8937.6,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 18351.0,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 18354.0,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 19444.6,
+                "data": {
+                  "step": "Found 0 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 19448.4,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "b194790a-ad50-492d-8fd1-2269a7a4ee5f"
+            },
+            "visualization": null,
+            "response": {
+              "text": "I had trouble finding an answer for \"Who kicked the most goals last round?\". I have AFL data from 1990 to 2026 covering match results, player stats, and team performance. Try rephrasing or being more specific \u2014 and if you think this should work, hit the report button so we can look into it.",
+              "confidence": 0.3,
+              "sources": []
+            },
+            "complete": {
+              "conversation_id": "b194790a-ad50-492d-8fd1-2269a7a4ee5f"
+            },
+            "error": null
+          }
+        },
+        {
+          "query": "No, I meant round 10 of the 2024 season, not last round.",
+          "sent_conversation_id": "b194790a-ad50-492d-8fd1-2269a7a4ee5f",
+          "sent_at": "2026-07-06T22:29:43.676241+00:00",
+          "timed_out": false,
+          "latency_ms": 18713.5,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 4924.7,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6038.7,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 9191.2,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 9193.8,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 16477.2,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 16481.2,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 17572.7,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 17582.1,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 17582.3,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": null,
+            "visualization": null,
+            "response": {
+              "text": "Charlie Cameron had 5 goals in 2024.",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "b194790a-ad50-492d-8fd1-2269a7a4ee5f"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "pair_02",
+      "category": "pair",
+      "turns": [
+        {
+          "query": "Show me Patrick Cripps's stats for 2023",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:30:08.397490+00:00",
+          "timed_out": false,
+          "latency_ms": 21894.3,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 4953.2,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6043.0,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 9825.1,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 9828.7,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 15348.4,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 15351.3,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 16424.6,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 16438.4,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 20772.8,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "111db6ab-eb53-4eb4-aa5f-a8464abd5ad0"
+            },
+            "visualization": null,
+            "response": {
+              "text": "| name | team | games | goals | behinds | disposals | kicks | handballs | marks | tackles | hitouts | clearances | inside_50s | contested_possessions | uncontested_possessions | brownlow_votes | fantasy_points |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n| Patrick Cripps | Carlton | 24 | 9 | 14 | 596 | 226 | 370 | 51 | 130 | 3 | 146 | 77 | 292 | 249 | 22 | 2053 |\n\nWant to see his per-game averages or how that compares to his 2022 numbers?",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "111db6ab-eb53-4eb4-aa5f-a8464abd5ad0"
+            },
+            "error": null
+          }
+        },
+        {
+          "query": "Sorry, I meant Marcus Bontempelli, not Cripps.",
+          "sent_conversation_id": "111db6ab-eb53-4eb4-aa5f-a8464abd5ad0",
+          "sent_at": "2026-07-06T22:30:36.298903+00:00",
+          "timed_out": false,
+          "latency_ms": 35396.9,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 4998.4,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6099.5,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 11711.9,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 11715.5,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 29027.6,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 29029.7,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 30156.0,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 30177.2,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 34288.9,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": null,
+            "visualization": null,
+            "response": {
+              "text": "Marcus Bontempelli (Western Bulldogs, 2023) \u2014 23 games, 19 goals, 14 behinds, 636 disposals (27.65/g), 370 kicks, 266 handballs, 101 marks, 172 tackles, 175 clearances, 131 inside 50s, 332 contested possessions, 339 uncontested possessions, 29 Brownlow votes, 2631 fantasy points. \n\nI can also show you his game-by-game breakdown if you're interested.",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "111db6ab-eb53-4eb4-aa5f-a8464abd5ad0"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "pair_03",
+      "category": "pair",
+      "turns": [
+        {
+          "query": "What was the score in the 2023 grand final?",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:31:17.701423+00:00",
+          "timed_out": false,
+          "latency_ms": 14851.2,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 5036.1,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6159.2,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 8472.7,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 8476.4,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 12609.4,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 12612.6,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 13724.2,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 13734.2,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 13734.4,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "58b3cffe-69ba-47df-870c-eaca36cace0e"
+            },
+            "visualization": null,
+            "response": {
+              "text": "Collingwood defeated Brisbane Lions 90-86 by 4 points.",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "58b3cffe-69ba-47df-870c-eaca36cace0e"
+            },
+            "error": null
+          }
+        },
+        {
+          "query": "Actually I meant the 2022 grand final, not 2023.",
+          "sent_conversation_id": "58b3cffe-69ba-47df-870c-eaca36cace0e",
+          "sent_at": "2026-07-06T22:31:38.555398+00:00",
+          "timed_out": false,
+          "latency_ms": 22636.9,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 5015.4,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6130.4,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 10279.2,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 10283.3,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 20415.0,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 20418.9,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 21518.7,
+                "data": {
+                  "step": "Found 1 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 21529.6,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              },
+              {
+                "t_offset_ms": 21529.7,
+                "data": {
+                  "step": "Response complete",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": null,
+            "visualization": null,
+            "response": {
+              "text": "Geelong defeated Sydney 133-52 by 81 points at MCG.",
+              "confidence": 0.9,
+              "sources": [
+                "AFL Tables (1990-2026)"
+              ]
+            },
+            "complete": {
+              "conversation_id": "58b3cffe-69ba-47df-870c-eaca36cace0e"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "nodata_01",
+      "category": "nodata",
+      "turns": [
+        {
+          "query": "What were Nick Daicos's stats in 2015?",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:32:07.202228+00:00",
+          "timed_out": false,
+          "latency_ms": 20287.0,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 4959.3,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6056.7,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 10028.7,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 10032.6,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 15711.9,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 15714.5,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 16824.7,
+                "data": {
+                  "step": "Found 0 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 16828.1,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "14904dad-6354-433a-bcd1-75cc078a3a0c"
+            },
+            "visualization": null,
+            "response": {
+              "text": "I had trouble finding an answer for \"What were Nick Daicos's stats in 2015?\". I have AFL data from 1990 to 2026 covering match results, player stats, and team performance. Try rephrasing or being more specific \u2014 and if you think this should work, hit the report button so we can look into it.",
+              "confidence": 0.3,
+              "sources": []
+            },
+            "complete": {
+              "conversation_id": "14904dad-6354-433a-bcd1-75cc078a3a0c"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "nodata_02",
+      "category": "nodata",
+      "turns": [
+        {
+          "query": "What was the score in the 2030 AFL grand final?",
+          "sent_conversation_id": null,
+          "sent_at": "2026-07-06T22:32:33.499502+00:00",
+          "timed_out": false,
+          "latency_ms": 17616.1,
+          "missing_events": [],
+          "events": {
+            "thinking": [
+              {
+                "t_offset_ms": 5088.5,
+                "data": {
+                  "step": "Received your question...",
+                  "current_step": "received"
+                }
+              },
+              {
+                "t_offset_ms": 6226.8,
+                "data": {
+                  "step": "Reading your question...",
+                  "current_step": "classify_resolve"
+                }
+              },
+              {
+                "t_offset_ms": 8488.7,
+                "data": {
+                  "step": "Looking up relevant AFL data...",
+                  "current_step": "retrieve_context"
+                }
+              },
+              {
+                "t_offset_ms": 8492.3,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "generate_sql"
+                }
+              },
+              {
+                "t_offset_ms": 12737.0,
+                "data": {
+                  "step": "\ud83d\udd28 Generating SQL query...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 12740.3,
+                "data": {
+                  "step": "\u26a1 Querying AFL database (6,243 matches)...",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 13846.2,
+                "data": {
+                  "step": "Found 0 results",
+                  "current_step": "execute"
+                }
+              },
+              {
+                "t_offset_ms": 13850.2,
+                "data": {
+                  "step": "Writing response...",
+                  "current_step": "respond"
+                }
+              }
+            ],
+            "conversation_started": {
+              "conversation_id": "67dabb9b-ca17-4cdd-a1a1-6d17c67582f5"
+            },
+            "visualization": null,
+            "response": {
+              "text": "I had trouble finding an answer for \"What was the score in the 2030 AFL grand final?\". I have AFL data from 1990 to 2026 covering match results, player stats, and team performance. Try rephrasing or being more specific \u2014 and if you think this should work, hit the report button so we can look into it.",
+              "confidence": 0.3,
+              "sources": []
+            },
+            "complete": {
+              "conversation_id": "67dabb9b-ca17-4cdd-a1a1-6d17c67582f5"
+            },
+            "error": null
+          }
+        }
+      ]
+    }
+  ]
+}

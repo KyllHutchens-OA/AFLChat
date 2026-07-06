@@ -162,13 +162,15 @@ class TestTurnTypeRouting:
 
         assert AFLAnalyticsAgent._route_after_classify({"turn_type": "chitchat"}) == "respond"
 
-    def test_non_chitchat_routes_to_understand(self):
+    def test_non_chitchat_routes_to_retrieve_context(self):
+        # Milestone 3b: classify_resolve -> retrieve_context -> generate_sql replaces
+        # the old classify_resolve -> understand entry point for non-chitchat turns.
         from app.agent.graph import AFLAnalyticsAgent
 
         for turn_type in ["new_question", "follow_up", "correction", "clarification_answer"]:
-            assert AFLAnalyticsAgent._route_after_classify({"turn_type": turn_type}) == "understand"
+            assert AFLAnalyticsAgent._route_after_classify({"turn_type": turn_type}) == "retrieve_context"
 
-    def test_missing_turn_type_routes_to_understand(self):
+    def test_missing_turn_type_routes_to_retrieve_context(self):
         from app.agent.graph import AFLAnalyticsAgent
 
-        assert AFLAnalyticsAgent._route_after_classify({}) == "understand"
+        assert AFLAnalyticsAgent._route_after_classify({}) == "retrieve_context"

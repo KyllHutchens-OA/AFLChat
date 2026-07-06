@@ -138,11 +138,11 @@ class AFLAnalyticsAgent:
         Routing decision after `classify_resolve` (v2 only).
 
         chitchat → straight to respond (classify_resolve already produced the
-        reply text). Everything else → the existing pipeline, entering at
-        `understand` as before — v2 does not restructure `understand` itself;
-        it just gives it a head start via state["turn_type"]/entities.
+        reply text). Everything else → retrieve_context (Milestone 3b+):
+        classify_resolve → retrieve_context → generate_sql replaces the old
+        understand-mega-prompt entry point for v2.
         """
-        return "respond" if state.get("turn_type") == "chitchat" else "understand"
+        return "respond" if state.get("turn_type") == "chitchat" else "retrieve_context"
 
     def _build_graph(self) -> StateGraph:
         """Build the v1 (default) LangGraph workflow — unchanged from pre-M3."""
@@ -191,17 +191,25 @@ class AFLAnalyticsAgent:
         """
         Build the v2 LangGraph workflow (AGENT_PIPELINE=v2, Milestone 3+).
 
-        Milestone 3a only prepends `classify_resolve`; everything downstream
-        of `understand` is identical to v1 for now. Later sub-milestones
-        (3b-3e) replace understand→...→execute with
-        retrieve_context→generate_sql→execute→diagnose_empty→review and
-        delete fast_path — this graph is structured so that work is a
-        node-swap, not a rewire.
+        Milestone 3b replaces the `understand` node (the old consolidated
+        mega-prompt call) with `retrieve_context` (deterministic, no LLM —
+        prunes schema docs + SQL examples) followed by `generate_sql` (one
+        focused LLM call using that retrieved context). `analyze_depth`,
+        `plan`, `execute`, `visualize`, `respond` are unchanged from v1/3a —
+        `generate_sql` populates the same state keys (`intent`,
+        `pre_generated_sql`, `requires_visualization`, chart hints) that
+        `understand_node` used to, so nothing downstream needed to change.
+
+        classify_resolve → retrieve_context → generate_sql → analyze_depth →
+        plan → execute → (visualize) → respond. Later sub-milestones (3c-3e)
+        add self-correction/diagnose_empty/review between execute and
+        visualize, and delete fast_path.
         """
         workflow = StateGraph(AgentState)
 
         workflow.add_node("classify_resolve", self.classify_resolve_node)
-        workflow.add_node("understand", self.understand_node)
+        workflow.add_node("retrieve_context", self.retrieve_context_node)
+        workflow.add_node("generate_sql", self.generate_sql_node)
         workflow.add_node("analyze_depth", self.analyze_depth_node)
         workflow.add_node("plan", self.plan_node)
         workflow.add_node("execute", self.execute_node)
@@ -213,12 +221,16 @@ class AFLAnalyticsAgent:
             self._route_after_classify,
             {
                 "respond": "respond",
-                "understand": "understand",
+                "retrieve_context": "retrieve_context",
             }
         )
 
+        workflow.add_edge("retrieve_context", "generate_sql")
+
+        # Reuses the same routing predicate as v1's post-understand check
+        # (both just look at state["needs_clarification"]).
         workflow.add_conditional_edges(
-            "understand",
+            "generate_sql",
             self._route_after_understand,
             {
                 "respond": "respond",
@@ -266,16 +278,23 @@ class AFLAnalyticsAgent:
         from typing import List, Any
 
         # ── Fast-path: answer simple queries without any LLM calls ──────────
-        from app.agent.fast_path import FastPathRouter
-        fast_result = FastPathRouter.try_fast_path(
-            user_query=user_query,
-            conversation_history=conversation_history,
-            socketio_emit=socketio_emit,
-        )
-        if fast_result is not None:
-            fast_result["conversation_id"] = conversation_id
-            logger.info(f"FAST-PATH answered: {user_query[:60]}")
-            return fast_result
+        # FAST_PATH=off skips this interception entirely so benchmarks can exercise
+        # the full v2 pipeline (retrieve_context/generate_sql) end-to-end instead of
+        # having most queries answered before the graph ever runs. fast_path.py
+        # itself is untouched — this is purely a bypass switch for measurement
+        # (fast_path's actual removal/integration is Milestone 3e).
+        fast_path_enabled = os.getenv("FAST_PATH", "on").strip().lower() != "off"
+        if fast_path_enabled:
+            from app.agent.fast_path import FastPathRouter
+            fast_result = FastPathRouter.try_fast_path(
+                user_query=user_query,
+                conversation_history=conversation_history,
+                socketio_emit=socketio_emit,
+            )
+            if fast_result is not None:
+                fast_result["conversation_id"] = conversation_id
+                logger.info(f"FAST-PATH answered: {user_query[:60]}")
+                return fast_result
         # ────────────────────────────────────────────────────────────────────
 
         is_correction = _is_correction_query(user_query)
@@ -321,6 +340,10 @@ class AFLAnalyticsAgent:
             complaint_summary=None,
             diagnosis=None,
             review_verdict=None,
+            # Milestone 3b fields (v2 pipeline only — no-ops under v1)
+            retrieved_schema_docs=None,
+            retrieved_examples=[],
+            conversation_snippet=None,
         )
 
         final_state = await active_graph.ainvoke(initial_state)
@@ -365,6 +388,92 @@ class AFLAnalyticsAgent:
         logger.info(
             f"CLASSIFY_RESOLVE: turn_type={state.get('turn_type')}, "
             f"entities={state.get('entities')}, bypass_cache={state.get('bypass_cache')}"
+        )
+
+        return state
+
+    async def retrieve_context_node(self, state: AgentState) -> AgentState:
+        """
+        RETRIEVE_CONTEXT node (v2 pipeline only, Milestone 3b).
+
+        Second node in the v2 graph, runs immediately after classify_resolve.
+        Deterministic — makes NO LLM calls and NO database calls: prunes the
+        curated schema docs (app/agent/schema_docs.py) and picks the top few
+        verified SQL examples (app/agent/sql_examples.py) relevant to this
+        turn's entities/question, so generate_sql's prompt only carries what's
+        actually relevant.
+
+        See app/agent/retrieve_context.py for the implementation.
+
+        Updates:
+        - retrieved_schema_docs, retrieved_examples, conversation_snippet
+        """
+        state["current_step"] = WorkflowStep.RETRIEVE_CONTEXT
+        state["thinking_message"] = "Looking up relevant AFL data..."
+        self._emit_progress(state, "retrieve_context", "Looking up relevant AFL data...")
+
+        logger.info(f"RETRIEVE_CONTEXT: Processing query: {state['user_query']}")
+
+        from app.agent.retrieve_context import retrieve_context
+
+        updates = retrieve_context(
+            user_query=state["user_query"],
+            entities=state.get("entities", {}),
+            conversation_history=state.get("conversation_history", []),
+        )
+        state.update(updates)
+
+        return state
+
+    async def generate_sql_node(self, state: AgentState) -> AgentState:
+        """
+        GENERATE_SQL node (v2 pipeline only, Milestone 3b).
+
+        Third node in the v2 graph. Makes ONE LLM call — using the schema docs
+        + examples retrieved by retrieve_context, plus the entities/turn_type
+        already resolved by classify_resolve — that classifies the final
+        intent (including non-SQL tool intents, so execute_node's existing
+        routing is untouched) and generates focused SQL. Replaces the old
+        consolidated mega-prompt call (`understand_node` → `consolidated_llm.py`)
+        for v2. For turn_type == "correction", the prompt is augmented with
+        prior_sql/prior_answer/complaint_summary and asked to produce different
+        SQL addressing the complaint.
+
+        See app/agent/generate_sql.py for the implementation and
+        app/agent/prompts/generate_sql.py for the prompt.
+
+        Updates:
+        - intent, requires_visualization, pre_generated_sql, sql_query,
+          llm_chart_type_hint, llm_chart_config_hint, sql_attempts (incremented)
+        - needs_clarification, clarification_question (off-topic, non-follow-up only)
+        """
+        state["current_step"] = WorkflowStep.GENERATE_SQL
+        state["thinking_message"] = "🔨 Generating SQL query..."
+        self._emit_progress(state, "generate_sql", "🔨 Generating SQL query...")
+
+        logger.info(f"GENERATE_SQL: Processing query: {state['user_query']}")
+
+        from app.agent.generate_sql import generate_sql
+
+        updates = generate_sql(
+            user_query=state["user_query"],
+            entities=state.get("entities", {}),
+            turn_type=state.get("turn_type"),
+            retrieved_schema_docs=state.get("retrieved_schema_docs", ""),
+            retrieved_examples=state.get("retrieved_examples", []),
+            conversation_snippet=state.get("conversation_snippet", ""),
+            conversation_history=state.get("conversation_history", []),
+            state=state,
+            prior_sql=state.get("prior_sql"),
+            prior_answer=state.get("prior_answer"),
+            complaint_summary=state.get("complaint_summary"),
+        )
+        state.update(updates)
+
+        logger.info(
+            f"GENERATE_SQL: intent={state.get('intent')}, "
+            f"sql_attempts={state.get('sql_attempts')}, "
+            f"needs_clarification={state.get('needs_clarification')}"
         )
 
         return state
