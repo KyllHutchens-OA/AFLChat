@@ -29,6 +29,13 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Milestone 3c: global cap on total generate_sql invocations per turn (v2 only),
+# shared across ALL retry sources — the initial call, DB-error self-correct
+# retries, and the diagnose_empty-driven regen (review-driven regen joins this
+# same cap in M3d). Keyed off state["sql_attempts"], incremented inside
+# generate_sql() itself on every invocation.
+SQL_ATTEMPT_CAP = 3
+
 # Import config for model selection
 from app.config import get_config
 config_obj = get_config()
@@ -133,6 +140,51 @@ class AFLAnalyticsAgent:
         )
 
     @staticmethod
+    def _route_after_execute_v2(state: AgentState) -> str:
+        """
+        v2-only routing after `execute` (Milestone 3c).
+
+        - `sql_error` set (by execute_node, only when under SQL_ATTEMPT_CAP) →
+          self-correct: loop back to generate_sql with the exact failed SQL +
+          DB error baked into the retry prompt.
+        - 0 rows, no error, and a DB-backed intent (not a news/odds/tips tool
+          call) → diagnose_empty (deterministic, no LLM) figures out why.
+        - Otherwise falls through to the same visualize/respond decision v1 uses.
+        """
+        if state.get("sql_error"):
+            return "generate_sql"
+
+        results = state.get("query_results")
+        no_sql_intents = {
+            QueryIntent.AFL_NEWS,
+            QueryIntent.INJURY_NEWS,
+            QueryIntent.BETTING_ODDS,
+            QueryIntent.TIPPING_ADVICE,
+        }
+        if (
+            not state.get("execution_error")
+            and results is not None
+            and len(results) == 0
+            and state.get("intent") not in no_sql_intents
+        ):
+            return "diagnose_empty"
+
+        return AFLAnalyticsAgent._route_after_execute(state)
+
+    @staticmethod
+    def _route_after_diagnose_empty(state: AgentState) -> str:
+        """
+        v2-only routing after `diagnose_empty` (Milestone 3c).
+
+        diagnose_empty_node itself decides (and records in
+        `diagnose_should_regenerate`) whether the diagnosis is obviously
+        fixable AND we haven't already used our one diagnose-triggered regen
+        this turn AND we're still under SQL_ATTEMPT_CAP — this router just
+        reads that decision.
+        """
+        return "generate_sql" if state.get("diagnose_should_regenerate") else "respond"
+
+    @staticmethod
     def _route_after_classify(state: AgentState) -> str:
         """
         Routing decision after `classify_resolve` (v2 only).
@@ -201,9 +253,13 @@ class AFLAnalyticsAgent:
         `understand_node` used to, so nothing downstream needed to change.
 
         classify_resolve → retrieve_context → generate_sql → analyze_depth →
-        plan → execute → (visualize) → respond. Later sub-milestones (3c-3e)
-        add self-correction/diagnose_empty/review between execute and
-        visualize, and delete fast_path.
+        plan → execute → (visualize) → respond, with two Milestone 3c
+        self-correct loops feeding back into generate_sql:
+          - execute hits a DB error → generate_sql (max 2 retries, global cap
+            of 3 total generate_sql calls this turn via sql_attempts).
+          - execute returns 0 rows → diagnose_empty (deterministic, no LLM)
+            → generate_sql ONCE if obviously fixable, else respond.
+        Milestone 3d adds a review node between execute and visualize.
         """
         workflow = StateGraph(AgentState)
 
@@ -213,6 +269,7 @@ class AFLAnalyticsAgent:
         workflow.add_node("analyze_depth", self.analyze_depth_node)
         workflow.add_node("plan", self.plan_node)
         workflow.add_node("execute", self.execute_node)
+        workflow.add_node("diagnose_empty", self.diagnose_empty_node)
         workflow.add_node("visualize", self.visualize_node)
         workflow.add_node("respond", self.respond_node)
 
@@ -242,9 +299,20 @@ class AFLAnalyticsAgent:
 
         workflow.add_conditional_edges(
             "execute",
-            self._route_after_execute,
+            self._route_after_execute_v2,
             {
+                "generate_sql": "generate_sql",
+                "diagnose_empty": "diagnose_empty",
                 "visualize": "visualize",
+                "respond": "respond"
+            }
+        )
+
+        workflow.add_conditional_edges(
+            "diagnose_empty",
+            self._route_after_diagnose_empty,
+            {
+                "generate_sql": "generate_sql",
                 "respond": "respond"
             }
         )
@@ -344,6 +412,12 @@ class AFLAnalyticsAgent:
             retrieved_schema_docs=None,
             retrieved_examples=[],
             conversation_snippet=None,
+            # Milestone 3c fields (v2 pipeline only — no-ops under v1)
+            pipeline_version=pipeline_version,
+            sql_error=None,
+            failed_sql=None,
+            diagnose_regenerated=False,
+            diagnose_should_regenerate=False,
         )
 
         final_state = await active_graph.ainvoke(initial_state)
@@ -467,13 +541,67 @@ class AFLAnalyticsAgent:
             prior_sql=state.get("prior_sql"),
             prior_answer=state.get("prior_answer"),
             complaint_summary=state.get("complaint_summary"),
+            # Milestone 3c: self-correct retry context, if this call was routed
+            # here from execute (DB error) or diagnose_empty (fixable 0-row diagnosis).
+            failed_sql=state.get("failed_sql"),
+            sql_error=state.get("sql_error"),
+            diagnosis=state.get("diagnosis"),
         )
         state.update(updates)
 
         logger.info(
             f"GENERATE_SQL: intent={state.get('intent')}, "
             f"sql_attempts={state.get('sql_attempts')}, "
-            f"needs_clarification={state.get('needs_clarification')}"
+            f"needs_clarification={state.get('needs_clarification')}, "
+            f"was_retry={bool(state.get('failed_sql') or state.get('sql_error'))}"
+        )
+
+        return state
+
+    async def diagnose_empty_node(self, state: AgentState) -> AgentState:
+        """
+        DIAGNOSE_EMPTY node (v2 pipeline only, Milestone 3c).
+
+        Runs when `execute` returned 0 rows for a DB-backed intent. Purely
+        deterministic — no LLM call. Delegates to app/agent/diagnose_empty.py,
+        which first consumes any M1 EntityResolver warnings already in
+        state["warnings"] (season-out-of-range, player-season-mismatch), and
+        only hits the DB with fresh probes (entity exists? which seasons does
+        it have data for?) if no warning already answers the question.
+
+        Also decides (and records via diagnose_should_regenerate) whether the
+        diagnosis is obviously fixable AND we haven't already used our one
+        diagnose-triggered regen this turn AND we're still under
+        SQL_ATTEMPT_CAP — _route_after_diagnose_empty just reads that decision.
+
+        Updates:
+        - diagnosis: {reason_code, human_reason, fixable, suggestion}
+        - diagnose_should_regenerate (ephemeral, read by the router)
+        - diagnose_regenerated (sticky, set once we decide to regenerate)
+        """
+        state["current_step"] = WorkflowStep.DIAGNOSE_EMPTY
+        state["thinking_message"] = "Checking why that came back empty..."
+        self._emit_progress(state, "diagnose_empty", "Checking why that came back empty...")
+
+        from app.agent.diagnose_empty import diagnose_empty
+
+        diagnosis = diagnose_empty(
+            user_query=state["user_query"],
+            entities=state.get("entities", {}),
+            warnings=state.get("warnings", []),
+        )
+        state["diagnosis"] = diagnosis
+
+        attempts = state.get("sql_attempts") or 0
+        already_used = state.get("diagnose_regenerated", False)
+        should_regenerate = bool(diagnosis.get("fixable")) and not already_used and attempts < SQL_ATTEMPT_CAP
+        state["diagnose_should_regenerate"] = should_regenerate
+        if should_regenerate:
+            state["diagnose_regenerated"] = True
+
+        logger.info(
+            f"DIAGNOSE_EMPTY: reason_code={diagnosis.get('reason_code')}, "
+            f"fixable={diagnosis.get('fixable')}, should_regenerate={should_regenerate}"
         )
 
         return state
@@ -969,6 +1097,34 @@ class AFLAnalyticsAgent:
 
         return state
 
+    def _signal_v2_sql_failure(
+        self, state: AgentState, raw_error: str, failed_sql: Optional[str]
+    ) -> AgentState:
+        """
+        v2-only (Milestone 3c): record a retryable SQL failure.
+
+        If still under SQL_ATTEMPT_CAP, sets sql_error/failed_sql so
+        `_route_after_execute_v2` sends this turn back to generate_sql with the
+        exact error + failed SQL baked into the retry prompt (self-correct
+        loop). Once the cap is reached, falls through to an honest
+        execution_error instead of retrying again — respond_node's existing
+        error path picks this up.
+        """
+        attempts = state.get("sql_attempts") or 0
+        if attempts < SQL_ATTEMPT_CAP:
+            state["sql_error"] = raw_error
+            state["failed_sql"] = failed_sql
+            state["thinking_message"] = "Query failed, retrying with a corrected query..."
+            self._emit_progress(state, "execute", "Query failed, retrying with a corrected query...")
+        else:
+            error_msg = f"Database query failed after {attempts} attempts: {raw_error}"
+            logger.error(f"EXECUTE (v2): {error_msg}")
+            state["execution_error"] = error_msg
+            state["errors"].append(error_msg)
+            state["sql_error"] = None
+            state["failed_sql"] = None
+        return state
+
     async def execute_node(self, state: AgentState) -> AgentState:
         """
         EXECUTE node: Run SQL queries and compute statistics.
@@ -1052,13 +1208,35 @@ class AFLAnalyticsAgent:
 
         logger.info("EXECUTE: Generating and running SQL query")
 
+        # Milestone 3c: v2 branches away from v1's QueryBuilder-fallback/inline-retry
+        # behaviour below in two spots — see is_v2 checks. Reset the self-correct
+        # signal fields at the start of every fresh attempt so a successful retry
+        # doesn't leave a stale sql_error lying around and loop forever.
+        is_v2 = state.get("pipeline_version") == "v2"
+        if is_v2:
+            state["sql_error"] = None
+            state["failed_sql"] = None
+
         try:
-            # Step 1: Get SQL — use pre-generated SQL from consolidated LLM call if available,
-            # otherwise generate via QueryBuilder (fallback to separate LLM call).
+            # Step 1: Get SQL — use pre-generated SQL from generate_sql/consolidated LLM
+            # call if available, otherwise generate via QueryBuilder (v1 fallback to a
+            # separate LLM call — NOT used in v2, where the self-correct loop below
+            # replaces this fallback: a missing pre_generated_sql becomes a retryable
+            # signal that routes back to generate_sql instead).
             pre_sql = state.get("pre_generated_sql")
             if pre_sql:
                 logger.info(f"EXECUTE: Using pre-generated SQL from consolidated call: {pre_sql[:80]}...")
                 sql_result = {"success": True, "sql": pre_sql, "error": None}
+            elif is_v2:
+                logger.warning(
+                    "EXECUTE (v2): no pre_generated_sql available (generate_sql produced none) — "
+                    "signalling self-correct retry instead of falling back to QueryBuilder"
+                )
+                return self._signal_v2_sql_failure(
+                    state,
+                    raw_error="SQL generation failed to produce a query for this question.",
+                    failed_sql=None,
+                )
             else:
                 logger.info(f"EXECUTE: Calling QueryBuilder.generate_sql with query='{state['user_query'][:100]}', entities={state.get('entities')}")
                 sql_result = QueryBuilder.generate_sql(
@@ -1113,8 +1291,16 @@ class AFLAnalyticsAgent:
                 logger.info(f"EXECUTE: Database query result: success={db_result.get('success')}, rows={db_result.get('rows_returned')}, error={db_result.get('error')}")
 
                 if not db_result["success"]:
-                    # --- LLM SQL retry (max 1 attempt) ---
                     raw_error = db_result.get("raw_error", db_result["error"])
+
+                    if is_v2:
+                        # Milestone 3c self-correct loop: route back to generate_sql
+                        # with the exact failed SQL + DB error instead of v1's inline
+                        # single-shot _llm_retry_sql call — replaces that fallback in v2.
+                        logger.warning(f"EXECUTE (v2): SQL failed, signalling self-correct retry. Error: {raw_error}")
+                        return self._signal_v2_sql_failure(state, raw_error, state["sql_query"])
+
+                    # --- v1: LLM SQL retry (max 1 attempt), unchanged ---
                     logger.warning(f"EXECUTE: SQL failed, attempting LLM retry. Error: {raw_error}")
                     state["thinking_message"] = "Query failed, retrying with fix..."
                     self._emit_progress(state, "execute", "Query failed, retrying with fix...")
@@ -1554,6 +1740,44 @@ class AFLAnalyticsAgent:
     def _build_empty_results_response(state: Dict[str, Any]) -> str:
         """Build a helpful, conversational response when no results found using gpt-5-nano."""
         return AFLAnalyticsAgent._generate_llm_error_response(state, error_type="no_results")
+
+    @staticmethod
+    def _build_diagnosis_response(state: Dict[str, Any]) -> str:
+        """
+        Milestone 3c: build the empty-results response directly from
+        diagnose_empty's structured facts (state["diagnosis"]) instead of
+        asking an LLM to guess why — this guarantees the response NAMES the
+        actual reason (e.g. "Nick Daicos has no 2015 stats — his data covers
+        2022-2026") rather than a plausible-sounding hallucinated guess.
+
+        Falls back to the generic LLM-based guess if diagnose_empty didn't
+        produce a usable human_reason for some reason (defensive only — v2
+        always runs diagnose_empty before reaching this branch).
+        """
+        diagnosis = state.get("diagnosis") or {}
+        human_reason = diagnosis.get("human_reason")
+        if not human_reason:
+            return AFLAnalyticsAgent._build_empty_results_response(state)
+
+        parts = [human_reason]
+        suggestion = diagnosis.get("suggestion")
+        if suggestion:
+            parts.append(suggestion)
+
+        # The out-of-range/no-data reason strings already state the data
+        # coverage explicitly — don't repeat it again in a second sentence.
+        if diagnosis.get("reason_code") not in ("season_out_of_range",) and not suggestion:
+            from app.data.database import get_data_recency
+            try:
+                recency = get_data_recency()
+                parts.append(
+                    f"Let me know if you'd like to try a different season or player — "
+                    f"our database covers {recency['earliest_season']}-{recency['historical_latest_season']}."
+                )
+            except Exception:
+                pass
+
+        return " ".join(parts)
 
     @staticmethod
     def _generate_llm_error_response(state: Dict[str, Any], error_type: str = "no_results") -> str:
@@ -2366,7 +2590,13 @@ If you cannot fix it, return the string UNFIXABLE."""
 
             # Check if we have results
             if state.get("query_results") is None or len(state["query_results"]) == 0:
-                state["natural_language_summary"] = self._build_empty_results_response(state)
+                # v2: diagnose_empty already ran and worked out WHY — use its facts
+                # directly instead of asking an LLM to guess (M3c). v1 never sets
+                # state["diagnosis"], so this is a no-op there.
+                if state.get("diagnosis"):
+                    state["natural_language_summary"] = self._build_diagnosis_response(state)
+                else:
+                    state["natural_language_summary"] = self._build_empty_results_response(state)
                 state["confidence"] = 0.3
                 return state
 
@@ -2383,7 +2613,10 @@ If you cannot fix it, return the string UNFIXABLE."""
                 logger.info(f"NULL check (DataFrame): len(data)={len(data)}, all_null={all_null}, data=\n{data}")
 
             if all_null:
-                state["natural_language_summary"] = self._build_empty_results_response(state)
+                if state.get("diagnosis"):
+                    state["natural_language_summary"] = self._build_diagnosis_response(state)
+                else:
+                    state["natural_language_summary"] = self._build_empty_results_response(state)
                 state["confidence"] = 0.4
                 return state
 

@@ -62,6 +62,8 @@ in the examples above — never assume the team is always home or always away.
 
 {conversation_section}
 {correction_section}
+{error_retry_section}
+{diagnosis_retry_section}
 ## User's current question
 {user_query}
 
@@ -114,4 +116,49 @@ def build_correction_section(
         prior_sql=prior_sql or "(not available)",
         prior_answer=prior_answer or "(not available)",
         complaint_summary=complaint_summary or "(not specified)",
+    )
+
+
+# ── Milestone 3c: self-correct-on-error retry + diagnose_empty-driven retry ──
+
+ERROR_RETRY_SECTION_TEMPLATE = """\
+## This SQL FAILED — produce corrected SQL
+The SQL below failed when executed against the database with the exact \
+PostgreSQL error shown. Produce corrected SQL that fixes the problem — do \
+not just repeat the same query.
+
+SQL that failed:
+{failed_sql}
+
+Database error:
+{sql_error}
+
+"""
+
+DIAGNOSIS_RETRY_SECTION_TEMPLATE = """\
+## Previous query returned ZERO rows — diagnosis below
+{human_reason}
+
+{suggestion}
+
+"""
+
+
+def build_error_retry_section(failed_sql: str = None, sql_error: str = None) -> str:
+    """Self-correct-on-DB-error retry section (Milestone 3c). Empty unless both are present."""
+    if not (failed_sql and sql_error):
+        return ""
+    return ERROR_RETRY_SECTION_TEMPLATE.format(
+        failed_sql=failed_sql,
+        sql_error=sql_error,
+    )
+
+
+def build_diagnosis_retry_section(diagnosis: dict = None) -> str:
+    """diagnose_empty-driven retry section (Milestone 3c). Only meaningful when fixable."""
+    if not diagnosis or not diagnosis.get("fixable"):
+        return ""
+    return DIAGNOSIS_RETRY_SECTION_TEMPLATE.format(
+        human_reason=diagnosis.get("human_reason") or "",
+        suggestion=diagnosis.get("suggestion") or "Produce corrected SQL that returns rows.",
     )

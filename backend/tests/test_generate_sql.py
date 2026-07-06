@@ -16,7 +16,12 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.agent.generate_sql import generate_sql, _maybe_fix_group_by
-from app.agent.prompts.generate_sql import build_conversation_section, build_correction_section
+from app.agent.prompts.generate_sql import (
+    build_conversation_section,
+    build_correction_section,
+    build_error_retry_section,
+    build_diagnosis_retry_section,
+)
 from app.agent.state import QueryIntent
 
 
@@ -68,6 +73,33 @@ class TestPromptAssembly:
         assert "The answer was 1." in section
         assert "User wanted 2023 not 2024." in section
         assert "CORRECTION" in section
+
+    def test_error_retry_section_empty_when_missing_either_field(self):
+        assert build_error_retry_section(None, None) == ""
+        assert build_error_retry_section("SELECT 1", None) == ""
+        assert build_error_retry_section(None, "boom") == ""
+
+    def test_error_retry_section_includes_sql_and_error(self):
+        section = build_error_retry_section(
+            failed_sql="SELECT * FROM bad_table",
+            sql_error='relation "bad_table" does not exist',
+        )
+        assert "SELECT * FROM bad_table" in section
+        assert 'relation "bad_table" does not exist' in section
+        assert "FAILED" in section
+
+    def test_diagnosis_retry_section_empty_when_not_fixable(self):
+        assert build_diagnosis_retry_section(None) == ""
+        assert build_diagnosis_retry_section({"fixable": False, "human_reason": "x"}) == ""
+
+    def test_diagnosis_retry_section_includes_facts_when_fixable(self):
+        section = build_diagnosis_retry_section({
+            "fixable": True,
+            "human_reason": "Nick Daicos has no 2015 stats.",
+            "suggestion": "Re-run without the season filter.",
+        })
+        assert "Nick Daicos has no 2015 stats." in section
+        assert "Re-run without the season filter." in section
 
 
 class TestGenerateSqlHappyPath:
@@ -234,6 +266,60 @@ class TestErrorFallback:
         updates, _ = _call_generate_sql(payload)
         assert updates["intent"] == QueryIntent.SIMPLE_STAT
         assert updates["pre_generated_sql"] is None
+
+
+class TestSelfCorrectRetryTurns:
+    """Milestone 3c: generate_sql called as a self-correct/diagnose-driven retry."""
+
+    def test_db_error_retry_uses_medium_reasoning_and_includes_error_in_prompt(self):
+        payload = {"intent": "simple_stat", "sql": "SELECT 2", "requires_visualization": False}
+        state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}, "sql_attempts": 1}
+        with patch(
+            "app.agent.generate_sql.client.chat.completions.create",
+            return_value=_fake_response(payload),
+        ) as mock_create:
+            updates = generate_sql(
+                user_query="How many goals did Hawkins kick in 2024?",
+                entities={}, turn_type="new_question",
+                retrieved_schema_docs="", retrieved_examples=[], conversation_snippet="",
+                conversation_history=[], state=state,
+                failed_sql="SELECT * FROM bad_table",
+                sql_error='relation "bad_table" does not exist',
+            )
+        _, call_kwargs = mock_create.call_args
+        assert call_kwargs["reasoning_effort"] == "medium"
+        sent_prompt = call_kwargs["messages"][0]["content"]
+        assert "SELECT * FROM bad_table" in sent_prompt
+        assert 'relation "bad_table" does not exist' in sent_prompt
+        assert updates["sql_attempts"] == 2
+
+    def test_diagnosis_retry_includes_diagnosis_facts_and_clears_diagnosis(self):
+        payload = {"intent": "simple_stat", "sql": "SELECT 3", "requires_visualization": False}
+        state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}, "sql_attempts": 1}
+        diagnosis = {
+            "reason_code": "player_season_mismatch",
+            "fixable": True,
+            "human_reason": "Nick Daicos has no 2015 stats.",
+            "suggestion": "Re-run without pinning the season.",
+        }
+        with patch(
+            "app.agent.generate_sql.client.chat.completions.create",
+            return_value=_fake_response(payload),
+        ) as mock_create:
+            updates = generate_sql(
+                user_query="What are Nick Daicos's career stats?",
+                entities={}, turn_type="new_question",
+                retrieved_schema_docs="", retrieved_examples=[], conversation_snippet="",
+                conversation_history=[], state=state,
+                diagnosis=diagnosis,
+            )
+        _, call_kwargs = mock_create.call_args
+        assert call_kwargs["reasoning_effort"] == "medium"
+        sent_prompt = call_kwargs["messages"][0]["content"]
+        assert "Nick Daicos has no 2015 stats." in sent_prompt
+        assert "Re-run without pinning the season." in sent_prompt
+        # Consumed — cleared so a later retry this turn doesn't resend stale facts.
+        assert updates["diagnosis"] is None
 
 
 class TestGroupByPrePass:

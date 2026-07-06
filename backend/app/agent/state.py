@@ -12,6 +12,7 @@ class WorkflowStep(str, Enum):
     CLASSIFY_RESOLVE = "classify_resolve"  # v2 pipeline only (Milestone 3a+)
     RETRIEVE_CONTEXT = "retrieve_context"  # v2 pipeline only (Milestone 3b+)
     GENERATE_SQL = "generate_sql"  # v2 pipeline only (Milestone 3b+)
+    DIAGNOSE_EMPTY = "diagnose_empty"  # v2 pipeline only (Milestone 3c+)
     UNDERSTAND = "understand"
     ANALYZE_DEPTH = "analyze_depth"
     PLAN = "plan"
@@ -110,3 +111,10 @@ class AgentState(TypedDict, total=False):
     retrieved_schema_docs: Optional[str]  # Pruned per-table schema docs for this query (app/agent/schema_docs.py), set by retrieve_context
     retrieved_examples: List[Dict[str, Any]]  # Top-k verified SQL examples for this query (app/agent/sql_examples.py), set by retrieve_context
     conversation_snippet: Optional[str]  # Short textual summary of recent turns, set by retrieve_context, consumed by generate_sql's prompt
+
+    # ── Milestone 3c: self-correct loop (execute→generate_sql) + diagnose_empty ──
+    pipeline_version: Optional[str]  # "v1" | "v2", set once in run(). Lets shared nodes (execute_node, respond_node) branch on active pipeline without relying on incidental v2-only fields like turn_type.
+    sql_error: Optional[str]  # Raw DB error message from the most recent execute attempt (v2 only). When set, the post-execute router sends this turn back to generate_sql with the exact error + failed_sql (self-correct loop); cleared at the start of every fresh execute attempt.
+    failed_sql: Optional[str]  # The SQL that produced sql_error, fed back into generate_sql's retry prompt verbatim.
+    diagnose_regenerated: bool  # True once diagnose_empty has triggered ONE generate_sql regen this turn — prevents diagnose_empty from looping back more than once.
+    diagnose_should_regenerate: bool  # Ephemeral flag set by diagnose_empty_node and read immediately by the post-diagnose router (not meaningful outside that single hop).

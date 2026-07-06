@@ -37,6 +37,8 @@ from app.agent.prompts.generate_sql import (
     GENERATE_SQL_PROMPT,
     build_conversation_section,
     build_correction_section,
+    build_error_retry_section,
+    build_diagnosis_retry_section,
 )
 from app.agent.state import QueryIntent
 
@@ -157,6 +159,9 @@ def generate_sql(
     prior_sql: Optional[str] = None,
     prior_answer: Optional[str] = None,
     complaint_summary: Optional[str] = None,
+    failed_sql: Optional[str] = None,
+    sql_error: Optional[str] = None,
+    diagnosis: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Run the generate_sql LLM call.
@@ -165,6 +170,13 @@ def generate_sql(
         state: The in-flight AgentState — used only so token usage can be
             accumulated via state["token_usage"]; not mutated otherwise (the
             caller merges the returned dict into state itself).
+        failed_sql, sql_error: Set (both) when this call is a Milestone 3c
+            self-correct retry after `execute` hit a database error — the
+            exact failed SQL + Postgres error are fed back into the prompt.
+        diagnosis: Set when this call is a Milestone 3c diagnose_empty-driven
+            retry (execute returned 0 rows and diagnose_empty judged it
+            obviously fixable) — the diagnosis facts are fed back into the
+            prompt. Consumed (cleared) via the returned updates.
 
     Returns:
         Dict of state updates: intent, requires_visualization, pre_generated_sql,
@@ -175,9 +187,14 @@ def generate_sql(
     updates: Dict[str, Any] = {
         "sql_attempts": (state.get("sql_attempts") or 0) + 1,
     }
+    if diagnosis is not None:
+        # Consumed by this call — clear so a later retry in the same turn
+        # (e.g. a subsequent DB-error self-correct) doesn't re-send stale facts.
+        updates["diagnosis"] = None
 
     is_correction = turn_type == "correction"
-    reasoning_effort = "medium" if is_correction else "low"
+    is_retry = is_correction or bool(failed_sql and sql_error) or bool(diagnosis)
+    reasoning_effort = "medium" if is_retry else "low"
 
     try:
         entities_json = json.dumps(entities or {})
@@ -187,6 +204,8 @@ def generate_sql(
             build_correction_section(prior_sql, prior_answer, complaint_summary)
             if is_correction else ""
         )
+        error_retry_section = build_error_retry_section(failed_sql, sql_error)
+        diagnosis_retry_section = build_diagnosis_retry_section(diagnosis)
 
         prompt = GENERATE_SQL_PROMPT.format(
             entities_json=entities_json,
@@ -194,6 +213,8 @@ def generate_sql(
             examples_text=examples_text,
             conversation_section=conversation_section,
             correction_section=correction_section,
+            error_retry_section=error_retry_section,
+            diagnosis_retry_section=diagnosis_retry_section,
             user_query=user_query,
         )
 
