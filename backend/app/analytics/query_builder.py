@@ -343,6 +343,13 @@ Question: {user_query}"""
 
             sql = (response.choices[0].message.content or "").strip()
 
+            # Real token usage from this call (for accurate cost/usage tracking upstream)
+            usage = response.usage
+            usage_dict = {
+                "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
+            } if usage else {"input_tokens": 0, "output_tokens": 0}
+
             # Log raw SQL before cleaning for debugging
             logger.info(f"Raw SQL from GPT-5-nano: {sql[:200]}")
 
@@ -359,7 +366,8 @@ Question: {user_query}"""
                 "success": True,
                 "sql": sql,
                 "error": None,
-                "explanation": explanation
+                "explanation": explanation,
+                "usage": usage_dict,
             }
 
         except Exception as e:

@@ -3,6 +3,7 @@ AFL Analytics Agent - SQL Validation
 
 Prevents SQL injection and ensures queries are safe to execute.
 """
+import re
 import sqlparse
 from sqlparse.sql import IdentifierList, Identifier, Where
 from sqlparse.tokens import Keyword, DML
@@ -103,11 +104,17 @@ class SQLValidator:
 
     @classmethod
     def _find_forbidden_keywords(cls, statement) -> Optional[str]:
-        """Find any forbidden keywords in the query."""
-        sql_upper = str(statement).upper()
+        """
+        Find any forbidden keywords in the query using word-boundary matching.
+
+        Uses \\b regex boundaries rather than naive substring matching so that
+        identifiers like `created_at` or `updated_by` don't false-positive on
+        forbidden keywords like CREATE or UPDATE.
+        """
+        sql_str = str(statement)
 
         for keyword in cls.FORBIDDEN_KEYWORDS:
-            if keyword in sql_upper:
+            if re.search(rf'\b{re.escape(keyword)}\b', sql_str, re.IGNORECASE):
                 return keyword
 
         return None

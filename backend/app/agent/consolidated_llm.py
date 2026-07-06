@@ -16,6 +16,7 @@ from typing import Dict, Any, List, Optional
 from openai import OpenAI
 import httpx
 from dotenv import load_dotenv
+from cachetools import TTLCache
 
 import hashlib
 
@@ -34,9 +35,11 @@ client = OpenAI(
 
 # ── LLM Response Cache ───────────────────────────────────────────────────────
 # Cache identical (query, context) pairs to avoid repeat LLM calls.
-# TTL-style: stores up to 128 recent queries in memory.
-_llm_cache: Dict[str, Dict[str, Any]] = {}
+# Bounded + time-bound: up to 512 recent queries, evicted after 24h so stale
+# entity resolutions (seasons, "current round", etc.) don't linger forever.
 _LLM_CACHE_MAX = 512
+_LLM_CACHE_TTL = 86400  # 24 hours
+_llm_cache: TTLCache = TTLCache(maxsize=_LLM_CACHE_MAX, ttl=_LLM_CACHE_TTL)
 
 
 _PROMPT_VERSION = "v3"  # Bump when prompt template changes to invalidate cache
@@ -405,9 +408,17 @@ class ConsolidatedQueryUnderstanding:
     def understand_and_generate_sql(
         user_query: str,
         conversation_history: Optional[List[Dict]] = None,
+        skip_cache_read: bool = False,
     ) -> Dict[str, Any]:
         """
         Make one LLM call that understands the query AND generates SQL.
+
+        Args:
+            user_query: Natural language question
+            conversation_history: Optional previous conversation messages
+            skip_cache_read: If True, don't read from the cache (still writes to it).
+                Used for correction-style follow-ups ("no", "wrong", "actually...")
+                so we don't re-serve a stale cached understanding — see graph.py.
 
         Returns:
             {
@@ -416,17 +427,20 @@ class ConsolidatedQueryUnderstanding:
                 "entities": dict,
                 "requires_visualization": bool,
                 "sql": str,
+                "usage": {"input_tokens": int, "output_tokens": int},
                 "error": str or None,
             }
         """
         try:
             conv_ctx = _build_conversation_context(conversation_history)
 
-            # Check cache first
+            # Check cache first (unless explicitly bypassed for a correction turn)
             key = _cache_key(user_query, conv_ctx)
-            if key in _llm_cache:
+            if not skip_cache_read and key in _llm_cache:
                 logger.info("CONSOLIDATED-LLM: Cache HIT — skipping API call")
-                return _llm_cache[key]
+                cached_result = dict(_llm_cache[key])
+                cached_result["usage"] = {"input_tokens": 0, "output_tokens": 0}
+                return cached_result
 
             # Inject dynamic data recency
             from app.data.database import get_data_recency
@@ -482,6 +496,12 @@ class ConsolidatedQueryUnderstanding:
                 reasoning_effort="low",
             )
 
+            usage = response.usage
+            usage_dict = {
+                "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
+            } if usage else {"input_tokens": 0, "output_tokens": 0}
+
             raw = (response.choices[0].message.content or "").strip()
             logger.info(f"CONSOLIDATED-LLM: Raw response length={len(raw)}")
 
@@ -516,6 +536,7 @@ class ConsolidatedQueryUnderstanding:
                     "sql": None,
                     "chart_type": None,
                     "chart_config": {},
+                    "usage": usage_dict,
                     "error": None,
                 }
 
@@ -550,12 +571,12 @@ class ConsolidatedQueryUnderstanding:
                 "sql": sql,
                 "chart_type": chart_type,
                 "chart_config": chart_config,
+                "usage": usage_dict,
                 "error": None,
             }
 
-            # Store in cache (evict oldest if full)
-            if len(_llm_cache) >= _LLM_CACHE_MAX:
-                _llm_cache.pop(next(iter(_llm_cache)))
+            # Store in cache — TTLCache handles size-based eviction (LRU) and
+            # time-based expiry (24h TTL) automatically.
             _llm_cache[key] = result
 
             return result

@@ -8,6 +8,7 @@ from langgraph.graph import StateGraph, END
 from openai import OpenAI
 import httpx
 import os
+import re
 import logging
 from dotenv import load_dotenv
 
@@ -38,6 +39,45 @@ client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
     timeout=httpx.Timeout(60.0, connect=10.0)
 )
+
+# ── Interim correction detector (stopgap — replaced in M3) ──────────────────
+# Detects messages like "no", "wrong", "actually I meant X" that indicate the
+# user is correcting a previous answer. When detected, we bypass READING the
+# SQL result cache and the consolidated-LLM cache for this turn (we still
+# WRITE to both caches as normal) so the correction isn't served a stale
+# cached answer from before the correction.
+_CORRECTION_PATTERN = re.compile(
+    r"^(no|nope|wrong|that's not|actually|i meant)\b", re.IGNORECASE
+)
+
+
+def _is_correction_query(user_query: str) -> bool:
+    """Return True if the query looks like a correction of a previous answer."""
+    if not user_query:
+        return False
+    return bool(_CORRECTION_PATTERN.match(user_query.strip()))
+
+
+def _accumulate_usage(state: "AgentState", usage: Optional[Any]) -> None:
+    """
+    Merge real OpenAI token usage into the per-request state accumulator.
+
+    Accepts either an OpenAI `response.usage` object (with prompt_tokens /
+    completion_tokens attributes) or a plain dict with input_tokens/output_tokens
+    (used by helper functions that return usage explicitly, e.g. consolidated_llm).
+    """
+    if not usage:
+        return
+
+    totals = state.setdefault("token_usage", {"input_tokens": 0, "output_tokens": 0})
+
+    if isinstance(usage, dict):
+        totals["input_tokens"] += usage.get("input_tokens", 0) or 0
+        totals["output_tokens"] += usage.get("output_tokens", 0) or 0
+    else:
+        # OpenAI SDK CompletionUsage object
+        totals["input_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
+        totals["output_tokens"] += getattr(usage, "completion_tokens", 0) or 0
 
 
 class AFLAnalyticsAgent:
@@ -152,11 +192,16 @@ class AFLAnalyticsAgent:
             return fast_result
         # ────────────────────────────────────────────────────────────────────
 
+        is_correction = _is_correction_query(user_query)
+        if is_correction:
+            logger.info(f"Detected correction-style query (cache reads bypassed this turn): {user_query[:60]}")
+
         initial_state = AgentState(
             user_query=user_query,
             conversation_id=conversation_id,
             entities={},
             needs_clarification=False,
+            warnings=[],
             analysis_plan=[],
             requires_visualization=False,
             sql_validated=False,
@@ -168,7 +213,9 @@ class AFLAnalyticsAgent:
             data_quality={},
             stats_summary={},
             socketio_emit=socketio_emit,
-            conversation_history=conversation_history or []
+            conversation_history=conversation_history or [],
+            is_correction=is_correction,
+            token_usage={"input_tokens": 0, "output_tokens": 0},
         )
 
         final_state = await self.graph.ainvoke(initial_state)
@@ -347,7 +394,9 @@ class AFLAnalyticsAgent:
             consolidated = ConsolidatedQueryUnderstanding.understand_and_generate_sql(
                 user_query=state["user_query"],
                 conversation_history=conversation_history,
+                skip_cache_read=state.get("is_correction", False),
             )
+            _accumulate_usage(state, consolidated.get("usage"))
 
             if consolidated["success"]:
                 # Off-topic detection — LLM classified as non-AFL query
@@ -469,10 +518,12 @@ class AFLAnalyticsAgent:
             # Use corrected entities
             state["entities"] = validation_result["corrected_entities"]
 
-            # Log warnings about entity resolution
+            # Surface warnings about entity resolution into state so downstream
+            # nodes (e.g. RESPOND) can inform the user, not just the logs.
             if validation_result["warnings"]:
                 for warning in validation_result["warnings"]:
                     logger.warning(f"Entity resolution: {warning}")
+                state.setdefault("warnings", []).extend(validation_result["warnings"])
 
             # If validation failed completely, set clarification flag
             if not validation_result["is_valid"] and validation_result["suggestions"]:
@@ -758,6 +809,7 @@ class AFLAnalyticsAgent:
                     context=state["entities"],  # These are now validated/normalized
                     conversation_history=state.get("conversation_history", [])
                 )
+                _accumulate_usage(state, sql_result.get("usage"))
                 logger.info(f"EXECUTE: SQL generation result: success={sql_result.get('success')}, error={sql_result.get('error')}")
 
             if not sql_result["success"]:
@@ -782,8 +834,12 @@ class AFLAnalyticsAgent:
             logger.info(f"Generated SQL: {state['sql_query']}")
 
             # Step 2: Execute query (check cache first)
+            # Interim correction stopgap: if this turn looks like a correction of a
+            # previous answer ("no", "wrong", "actually...", etc.), skip READING the
+            # cache so we don't re-serve a stale cached result — but still WRITE the
+            # fresh result to cache below as normal.
             from app.utils.cache import get_cached_result, set_cached_result
-            cached = get_cached_result(state["sql_query"])
+            cached = None if state.get("is_correction") else get_cached_result(state["sql_query"])
             if cached is not None:
                 logger.info("EXECUTE: Returning cached query result")
                 state["sql_validated"] = True
@@ -808,6 +864,7 @@ class AFLAnalyticsAgent:
                         original_sql=state["sql_query"],
                         error_message=raw_error,
                         user_query=state["user_query"],
+                        state=state,
                     )
                     if retried_sql and retried_sql != state["sql_query"]:
                         logger.info(f"EXECUTE: Retrying with LLM-corrected SQL: {retried_sql[:200]}...")
@@ -981,6 +1038,7 @@ class AFLAnalyticsAgent:
                 llm_chart_type_hint=state.get("llm_chart_type_hint"),
                 llm_chart_config_hint=state.get("llm_chart_config_hint", {}),
             )
+            _accumulate_usage(state, chart_config.get("_usage"))
 
             logger.info(f"ChartSelector recommendation: {chart_config.get('chart_type')} "
                        f"(confidence: {chart_config.get('confidence', 'unknown')})")
@@ -1296,6 +1354,7 @@ Rules:
                 messages=[{"role": "user", "content": prompt}],
                 max_completion_tokens=300,
             )
+            _accumulate_usage(state, response.usage)
 
             result = (response.choices[0].message.content or "").strip()
             if result:
@@ -1326,7 +1385,7 @@ Rules:
             )
 
     @staticmethod
-    def _llm_retry_sql(original_sql: str, error_message: str, user_query: str) -> Optional[str]:
+    def _llm_retry_sql(original_sql: str, error_message: str, user_query: str, state: Optional["AgentState"] = None) -> Optional[str]:
         """
         Ask the LLM to fix a failed SQL query based on the Postgres error.
 
@@ -1350,6 +1409,8 @@ If you cannot fix it, return the string UNFIXABLE."""
                 model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
                 messages=[{"role": "user", "content": prompt}],
             )
+            if state is not None:
+                _accumulate_usage(state, response.usage)
             fixed = (response.choices[0].message.content or "").strip()
 
             # Clean up response
@@ -2251,6 +2312,7 @@ Provide a concise analysis (3-5 sentences):"""
                 messages=[{"role": "user", "content": prompt}],
                 reasoning_effort="low",
             )
+            _accumulate_usage(state, response.usage)
 
             llm_response = (response.choices[0].message.content or "").strip()
             # Add data range disclaimer for all-time queries

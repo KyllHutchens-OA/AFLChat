@@ -6,9 +6,18 @@ Converts natural language variations to canonical database values.
 """
 from typing import Optional, Dict, List, Tuple
 from difflib import SequenceMatcher
+from datetime import datetime
 import logging
 
+from cachetools import TTLCache
+
 logger = logging.getLogger(__name__)
+
+# Cache the DB-derived max season for a day at a time so we don't hit the DB
+# on every single entity-validation call. Falls back to the current calendar
+# year if the DB is unavailable (see EntityResolver._get_max_season).
+_MAX_SEASON_CACHE: TTLCache = TTLCache(maxsize=1, ttl=86400)  # 24h TTL
+_MAX_SEASON_CACHE_KEY = "max_season"
 
 
 class EntityResolver:
@@ -164,6 +173,39 @@ class EntityResolver:
         return best_match
 
     @classmethod
+    def _get_max_season(cls) -> int:
+        """
+        Get the maximum season present in the `matches` table, cached for 24h.
+
+        Falls back to the current calendar year if the DB is unavailable so
+        that entity validation never hard-fails just because the recency
+        query couldn't run.
+        """
+        cached = _MAX_SEASON_CACHE.get(_MAX_SEASON_CACHE_KEY)
+        if cached is not None:
+            return cached
+
+        fallback = datetime.now().year
+        max_season = fallback
+        try:
+            from app.data.database import Session
+            from sqlalchemy import text
+
+            session = Session()
+            try:
+                row = session.execute(text("SELECT MAX(season) FROM matches")).fetchone()
+                if row and row[0]:
+                    max_season = row[0]
+            finally:
+                session.close()
+        except Exception as e:
+            logger.warning(f"Could not determine max season from DB, falling back to current year ({fallback}): {e}")
+            max_season = fallback
+
+        _MAX_SEASON_CACHE[_MAX_SEASON_CACHE_KEY] = max_season
+        return max_season
+
+    @classmethod
     def validate_entities(cls, entities: Dict) -> Dict:
         """
         Validate and normalize extracted entities.
@@ -198,16 +240,17 @@ class EntityResolver:
 
             result["corrected_entities"]["teams"] = corrected_teams
 
-        # Validate seasons (basic range check)
+        # Validate seasons (basic range check against the DB's actual max season)
         if "seasons" in entities and entities["seasons"]:
             corrected_seasons = []
+            max_season = cls._get_max_season()
             for season in entities["seasons"]:
                 try:
                     year = int(season)
-                    if 1990 <= year <= 2025:
+                    if 1990 <= year <= max_season:
                         corrected_seasons.append(str(year))
                     else:
-                        result["warnings"].append(f"Season {year} outside data range (1990-2025)")
+                        result["warnings"].append(f"Season {year} outside data range (1990-{max_season})")
                 except (ValueError, TypeError):
                     result["warnings"].append(f"Invalid season: '{season}'")
 
@@ -251,6 +294,64 @@ class EntityResolver:
         return result
 
     @classmethod
+    def _season_availability_warning(cls, session, player_id, player_name: str, seasons: Optional[List[str]]) -> Optional[str]:
+        """
+        Check whether a resolved player has any player_stats data for the requested
+        season(s). If not, return a warning string listing the seasons that ARE
+        available for that player, instead of silently resolving to the wrong season.
+
+        Returns None if no seasons were requested, or if the player has data for
+        at least one of the requested seasons.
+        """
+        if not seasons:
+            return None
+
+        from sqlalchemy import text
+
+        try:
+            season_ints = [int(s) for s in seasons]
+        except (ValueError, TypeError):
+            return None
+
+        is_active = session.execute(
+            text("""
+                SELECT COUNT(*) > 0 AS is_active
+                FROM player_stats ps
+                JOIN matches m ON ps.match_id = m.id
+                WHERE ps.player_id = :player_id
+                AND m.season = ANY(:seasons)
+            """),
+            {"player_id": player_id, "seasons": season_ints}
+        ).fetchone()[0]
+
+        if is_active:
+            return None
+
+        available_result = session.execute(
+            text("""
+                SELECT DISTINCT m.season
+                FROM player_stats ps
+                JOIN matches m ON ps.match_id = m.id
+                WHERE ps.player_id = :player_id
+                ORDER BY m.season
+            """),
+            {"player_id": player_id}
+        )
+        available_seasons = [str(row[0]) for row in available_result.fetchall()]
+        season_str = ', '.join(seasons)
+
+        if available_seasons:
+            warning = (
+                f"{player_name} has no {season_str} data; "
+                f"seasons available: {', '.join(available_seasons)}"
+            )
+        else:
+            warning = f"{player_name} has no player-stats data available for any season."
+
+        logger.warning(warning)
+        return warning
+
+    @classmethod
     def _disambiguate_player(cls, player_name: str, seasons: List[str] = None) -> Dict[str, any]:
         """
         Disambiguate player name when multiple players exist with similar names.
@@ -291,12 +392,14 @@ class EntityResolver:
             exact_matches = exact_result.fetchall()
             if len(exact_matches) == 1:
                 logger.info(f"Exact name match for '{player_name}': {exact_matches[0][0]}")
+                matched_name, matched_id = exact_matches[0]
+                warning = cls._season_availability_warning(session, matched_id, matched_name, seasons)
                 return {
                     "needs_clarification": False,
-                    "resolved_name": exact_matches[0][0],
-                    "candidates": [exact_matches[0][0]],
+                    "resolved_name": matched_name,
+                    "candidates": [matched_name],
                     "clarification_question": None,
-                    "warning": None
+                    "warning": warning
                 }
 
             # Find all players matching the name (using ILIKE for case-insensitive partial match)
@@ -322,13 +425,15 @@ class EntityResolver:
                 }
 
             if len(all_matches) == 1:
-                # Single match - use it
+                # Single match - use it, but warn if it has no data for the requested season(s)
+                matched_name, matched_id = all_matches[0]
+                warning = cls._season_availability_warning(session, matched_id, matched_name, seasons)
                 return {
                     "needs_clarification": False,
-                    "resolved_name": all_matches[0][0],
-                    "candidates": [all_matches[0][0]],
+                    "resolved_name": matched_name,
+                    "candidates": [matched_name],
                     "clarification_question": None,
-                    "warning": None
+                    "warning": warning
                 }
 
             # Multiple matches - check activity during specified seasons

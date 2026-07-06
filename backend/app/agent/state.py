@@ -50,6 +50,7 @@ class AgentState(TypedDict, total=False):
     entities: Dict[str, Any]  # {players: [...], teams: [...], seasons: [...], metrics: [...]}
     needs_clarification: bool
     clarification_question: Optional[str]
+    warnings: List[str]  # Non-fatal warnings surfaced during processing (e.g. entity resolution mismatches)
 
     # Planning phase
     analysis_plan: List[str]  # Step-by-step plan
@@ -88,3 +89,5 @@ class AgentState(TypedDict, total=False):
     errors: List[str]
     socketio_emit: Optional[Any]  # Callback for emitting WebSocket progress updates
     conversation_history: Optional[List[Dict[str, Any]]]  # Recent conversation messages for context
+    is_correction: bool  # True if user_query looks like a correction of a previous answer (see fast_path/graph entry)
+    token_usage: Dict[str, int]  # Accumulated real OpenAI usage for this request: {"input_tokens": int, "output_tokens": int}

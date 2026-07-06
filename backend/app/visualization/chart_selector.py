@@ -477,6 +477,15 @@ Important:
             # Parse LLM response
             result = json.loads(response.choices[0].message.content or "{}")
 
+            # Attach real token usage so the caller can accumulate it (stripped
+            # out again in _validate_and_enhance's returned public fields... no,
+            # it's explicitly carried through — see _validate_and_enhance).
+            usage = response.usage
+            result["_usage"] = {
+                "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
+            } if usage else None
+
             logger.info(f"LLM chart selection: {result.get('chart_type')} (confidence: {result.get('confidence')})")
             logger.info(f"Reasoning: {result.get('reasoning')}")
 
@@ -541,7 +550,8 @@ Important:
             "group_col": group_col,
             "reasoning": llm_result.get("reasoning", ""),
             "confidence": llm_result.get("confidence", "medium"),
-            "alternative": llm_result.get("alternative")
+            "alternative": llm_result.get("alternative"),
+            "_usage": llm_result.get("_usage"),
         }
 
     @classmethod

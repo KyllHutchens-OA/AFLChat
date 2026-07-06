@@ -130,13 +130,16 @@ def handle_chat_message(data):
         ))
         logger.info(f"Agent completed, final state keys: {final_state.keys()}")
 
-        # Track API usage for cost control
+        # Track API usage for cost control — real token counts accumulated across
+        # every OpenAI call made during this request (understand/SQL, retries,
+        # chart selection, response generation), not a fabricated estimate.
+        token_usage = final_state.get("token_usage") or {}
         UsageTracker.track_usage(
             visitor_id=visitor_id,
             ip_address=ip_address or '',
             model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
-            input_tokens=500,   # Per-request estimate (2 OpenAI calls per query)
-            output_tokens=200,
+            input_tokens=token_usage.get("input_tokens", 0),
+            output_tokens=token_usage.get("output_tokens", 0),
             endpoint="afl_chat"
         )
 
