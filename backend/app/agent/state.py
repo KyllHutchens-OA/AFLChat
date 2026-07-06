@@ -9,6 +9,7 @@ from enum import Enum
 
 class WorkflowStep(str, Enum):
     """Agent workflow steps."""
+    CLASSIFY_RESOLVE = "classify_resolve"  # v2 pipeline only (Milestone 3a+)
     UNDERSTAND = "understand"
     ANALYZE_DEPTH = "analyze_depth"
     PLAN = "plan"
@@ -91,3 +92,14 @@ class AgentState(TypedDict, total=False):
     conversation_history: Optional[List[Dict[str, Any]]]  # Recent conversation messages for context
     is_correction: bool  # True if user_query looks like a correction of a previous answer (see fast_path/graph entry)
     token_usage: Dict[str, int]  # Accumulated real OpenAI usage for this request: {"input_tokens": int, "output_tokens": int}
+
+    # ── Milestone 3+ (v2 pipeline: classify_resolve → retrieve_context → generate_sql → execute → diagnose_empty/review → visualize → respond) ──
+    turn_type: Optional[str]  # "new_question" | "follow_up" | "correction" | "clarification_answer" | "chitchat" (set by classify_resolve, v2 only)
+    bypass_cache: bool  # True when this turn should skip cache READS (LLM-understanding cache + SQL result cache) — set for corrections so a stale cached answer isn't re-served. Still WRITES to cache as normal.
+    sql_attempts: int  # Number of SQL generation/execution attempts this turn (self-correction retries in generate_sql, M3b+)
+    prior_sql: Optional[str]  # Previous turn's persisted SQL, loaded when turn_type == "correction" (see conversation metadata)
+    prior_row_count: Optional[int]  # Previous turn's persisted row count, loaded alongside prior_sql
+    prior_answer: Optional[str]  # Previous turn's assistant response text, loaded alongside prior_sql
+    complaint_summary: Optional[str]  # One-sentence summary of what the user says was wrong (turn_type == "correction")
+    diagnosis: Optional[Dict[str, Any]]  # Output of diagnose_empty node (M3c+): why a query returned 0 rows, and whether it's fixable
+    review_verdict: Optional[str]  # Output of review node (M3d+): "pass" | "fail" verdict on query results before visualize/respond

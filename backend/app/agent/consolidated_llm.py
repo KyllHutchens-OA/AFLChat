@@ -42,7 +42,7 @@ _LLM_CACHE_TTL = 86400  # 24 hours
 _llm_cache: TTLCache = TTLCache(maxsize=_LLM_CACHE_MAX, ttl=_LLM_CACHE_TTL)
 
 
-_PROMPT_VERSION = "v3"  # Bump when prompt template changes to invalidate cache
+_PROMPT_VERSION = "v4"  # Bump when prompt template changes to invalidate cache
 
 
 def _cache_key(user_query: str, conv_ctx: str) -> str:
@@ -182,6 +182,11 @@ CRITICAL RULES:
 ## CURRENT ROUND FALLBACK:
 For the CURRENT ROUND of the current season (where match data may not yet be in the `matches` table), use `live_games` with `status IN ('completed', 'post_match')` for scores, results, and game-level stats. For all prior rounds of the current season, use `matches` as normal — that data is ingested from AFL Tables weekly. The `player_stats` table only has rows for ingested matches, so current-round player stats may not be available yet.
 
+⚠️ CRITICAL — DO NOT UNION `matches` WITH `live_games` FOR SEASON TOTALS: The `matches` table is kept fully up to date for the CURRENT season too — completed rounds are backfilled into `matches` within 1-3 days, and once backfilled the corresponding `live_games` row keeps a `match_id` pointing at that same match. If you UNION `matches` with `live_games` without excluding rows already backfilled, you DOUBLE-COUNT every match present in both — e.g. summing a team's wins from `matches UNION ALL live_games` can report 17 wins when the true season total (from `matches` alone) is 9.
+- For season totals/records ("X's wins this season", "how many games has X won in 2026", ladder position, etc.): query `matches` ALONE. Never touch `live_games` for these.
+- `live_games` is ONLY for the handful of most-recent games not yet backfilled into `matches` (see round-level guidance above) — never combine it with `matches` for a whole-season aggregate.
+- If you ever must combine both tables in one query, you MUST exclude already-backfilled rows: add `AND lg.match_id IS NULL` on the live_games side.
+
 ## DO NOT (common LLM mistakes):
 - DO NOT use round numbers like WHERE m.round = 1. Round is VARCHAR — use WHERE m.round = '1'
 - DO NOT join players.team_id for historical stats — it only stores CURRENT team. Use player_stats.team_id
@@ -317,6 +322,11 @@ Common patterns:
     FROM season_records
   )
   SELECT name, COUNT(*) AS spoon_count FROM ranked WHERE spoon_rank = 1 GROUP BY name ORDER BY spoon_count DESC
+
+- CURRENT-SEASON SEASON TOTALS — never UNION matches with live_games (see rule above):
+  Q: "How many games has Collingwood won this season?" (current season, e.g. 2026)
+  SQL: SELECT SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score) OR (m.away_team_id = t.id AND m.away_score > m.home_score) THEN 1 ELSE 0 END) AS wins, COUNT(*) AS games FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id) WHERE t.name = 'Collingwood' AND m.season = 2026
+  WRONG (double-counts already-backfilled rounds): the same query but with `UNION ALL SELECT ... FROM live_games lg ...` added — every completed live_games row this season already has a matching row in `matches`, so its wins get counted twice.
 
 {conversation_context}
 

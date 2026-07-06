@@ -249,13 +249,26 @@ def handle_chat_message(data):
         except Exception as e:
             logger.warning(f"Entity enrichment from results failed: {e}")
 
+        # Persist the final SQL + row count alongside this turn so a future
+        # correction turn (turn_type == "correction", v2 pipeline) can load
+        # prior_sql/prior_row_count/prior_answer without re-running anything
+        # (see app/agent/classify_resolve.py).
+        row_count = None
+        if query_results is not None:
+            try:
+                row_count = len(query_results)
+            except TypeError:
+                row_count = None
+
         metadata = {
             "entities": entities,
             "intent": str(final_state.get("intent", "")),
             "confidence": final_state.get("confidence", 0.0),
             "needs_clarification": final_state.get("needs_clarification", False),
             "clarification_question": final_state.get("clarification_question"),
-            "sources": final_state.get("sources", [])
+            "sources": final_state.get("sources", []),
+            "sql": final_state.get("sql_query"),
+            "row_count": row_count,
         }
 
         # Store visualization spec if chart was generated (for history restoration)

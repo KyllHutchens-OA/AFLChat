@@ -95,6 +95,7 @@ class AFLAnalyticsAgent:
 
     def __init__(self):
         self.graph = self._build_graph()
+        self.graph_v2 = self._build_graph_v2()
 
     @staticmethod
     def _emit_progress(state: AgentState, step: str, message: str):
@@ -115,8 +116,36 @@ class AFLAnalyticsAgent:
             except Exception as e:
                 logger.warning(f"Failed to emit WebSocket progress: {e}")
 
+    @staticmethod
+    def _route_after_understand(state: AgentState) -> str:
+        """Shared routing decision after `understand` (used by both v1 and v2 graphs)."""
+        return "respond" if state.get("needs_clarification") else "analyze_depth"
+
+    @staticmethod
+    def _route_after_execute(state: AgentState) -> str:
+        """Shared routing decision after `execute` (used by both v1 and v2 graphs)."""
+        return (
+            "visualize"
+            if state.get("requires_visualization")
+            and state.get("query_results") is not None
+            and len(state.get("query_results", [])) > 0
+            else "respond"
+        )
+
+    @staticmethod
+    def _route_after_classify(state: AgentState) -> str:
+        """
+        Routing decision after `classify_resolve` (v2 only).
+
+        chitchat → straight to respond (classify_resolve already produced the
+        reply text). Everything else → the existing pipeline, entering at
+        `understand` as before — v2 does not restructure `understand` itself;
+        it just gives it a head start via state["turn_type"]/entities.
+        """
+        return "respond" if state.get("turn_type") == "chitchat" else "understand"
+
     def _build_graph(self) -> StateGraph:
-        """Build the LangGraph workflow."""
+        """Build the v1 (default) LangGraph workflow — unchanged from pre-M3."""
         workflow = StateGraph(AgentState)
 
         # Add nodes
@@ -131,7 +160,7 @@ class AFLAnalyticsAgent:
         # After understand: if needs clarification, skip to respond
         workflow.add_conditional_edges(
             "understand",
-            lambda state: "respond" if state.get("needs_clarification") else "analyze_depth",
+            self._route_after_understand,
             {
                 "respond": "respond",
                 "analyze_depth": "analyze_depth"
@@ -143,7 +172,7 @@ class AFLAnalyticsAgent:
         # Conditional edge: visualize if needed, otherwise go to respond
         workflow.add_conditional_edges(
             "execute",
-            lambda state: "visualize" if state.get("requires_visualization") and state.get("query_results") is not None and len(state.get("query_results", [])) > 0 else "respond",
+            self._route_after_execute,
             {
                 "visualize": "visualize",
                 "respond": "respond"
@@ -155,6 +184,63 @@ class AFLAnalyticsAgent:
 
         # Set entry point
         workflow.set_entry_point("understand")
+
+        return workflow.compile()
+
+    def _build_graph_v2(self) -> StateGraph:
+        """
+        Build the v2 LangGraph workflow (AGENT_PIPELINE=v2, Milestone 3+).
+
+        Milestone 3a only prepends `classify_resolve`; everything downstream
+        of `understand` is identical to v1 for now. Later sub-milestones
+        (3b-3e) replace understand→...→execute with
+        retrieve_context→generate_sql→execute→diagnose_empty→review and
+        delete fast_path — this graph is structured so that work is a
+        node-swap, not a rewire.
+        """
+        workflow = StateGraph(AgentState)
+
+        workflow.add_node("classify_resolve", self.classify_resolve_node)
+        workflow.add_node("understand", self.understand_node)
+        workflow.add_node("analyze_depth", self.analyze_depth_node)
+        workflow.add_node("plan", self.plan_node)
+        workflow.add_node("execute", self.execute_node)
+        workflow.add_node("visualize", self.visualize_node)
+        workflow.add_node("respond", self.respond_node)
+
+        workflow.add_conditional_edges(
+            "classify_resolve",
+            self._route_after_classify,
+            {
+                "respond": "respond",
+                "understand": "understand",
+            }
+        )
+
+        workflow.add_conditional_edges(
+            "understand",
+            self._route_after_understand,
+            {
+                "respond": "respond",
+                "analyze_depth": "analyze_depth"
+            }
+        )
+        workflow.add_edge("analyze_depth", "plan")
+        workflow.add_edge("plan", "execute")
+
+        workflow.add_conditional_edges(
+            "execute",
+            self._route_after_execute,
+            {
+                "visualize": "visualize",
+                "respond": "respond"
+            }
+        )
+
+        workflow.add_edge("visualize", "respond")
+        workflow.add_edge("respond", END)
+
+        workflow.set_entry_point("classify_resolve")
 
         return workflow.compile()
 
@@ -196,6 +282,15 @@ class AFLAnalyticsAgent:
         if is_correction:
             logger.info(f"Detected correction-style query (cache reads bypassed this turn): {user_query[:60]}")
 
+        # ── Pipeline selection (Milestone 3a) ────────────────────────────────
+        # AGENT_PIPELINE=v2 prepends classify_resolve (LLM turn-type + entity
+        # classification) ahead of the existing understand→...→respond flow.
+        # Default (unset, or any other value) keeps the old v1 behaviour
+        # unchanged — this flag is the risk-mitigation switch for M3.
+        pipeline_version = os.getenv("AGENT_PIPELINE", "v1").strip().lower()
+        active_graph = self.graph_v2 if pipeline_version == "v2" else self.graph
+        entry_step = WorkflowStep.CLASSIFY_RESOLVE if pipeline_version == "v2" else WorkflowStep.UNDERSTAND
+
         initial_state = AgentState(
             user_query=user_query,
             conversation_id=conversation_id,
@@ -207,7 +302,7 @@ class AFLAnalyticsAgent:
             sql_validated=False,
             statistical_analysis={},
             errors=[],
-            current_step=WorkflowStep.UNDERSTAND,
+            current_step=entry_step,
             analysis_types=[],
             context_insights={},
             data_quality={},
@@ -216,12 +311,63 @@ class AFLAnalyticsAgent:
             conversation_history=conversation_history or [],
             is_correction=is_correction,
             token_usage={"input_tokens": 0, "output_tokens": 0},
+            # Milestone 3+ fields (v2 pipeline only — no-ops under v1)
+            turn_type=None,
+            bypass_cache=False,
+            sql_attempts=0,
+            prior_sql=None,
+            prior_row_count=None,
+            prior_answer=None,
+            complaint_summary=None,
+            diagnosis=None,
+            review_verdict=None,
         )
 
-        final_state = await self.graph.ainvoke(initial_state)
+        final_state = await active_graph.ainvoke(initial_state)
         return final_state
 
     # ==================== WORKFLOW NODES ====================
+
+    async def classify_resolve_node(self, state: AgentState) -> AgentState:
+        """
+        CLASSIFY_RESOLVE node (v2 pipeline only, Milestone 3a).
+
+        First node in the v2 graph. Runs a small LLM call to classify the
+        turn (turn_type) and extract entities, then resolves those entities
+        deterministically via EntityResolver. For turn_type == "correction",
+        also sets bypass_cache and loads the prior turn's persisted
+        sql/row_count/answer from conversation history.
+
+        See app/agent/classify_resolve.py for the implementation and
+        app/agent/prompts/classify.py for the prompt.
+
+        Updates:
+        - turn_type, entities, warnings
+        - complaint_summary (correction only)
+        - natural_language_summary, confidence (chitchat only)
+        - bypass_cache, prior_sql, prior_row_count, prior_answer (correction only)
+        """
+        state["current_step"] = WorkflowStep.CLASSIFY_RESOLVE
+        state["thinking_message"] = "Reading your question..."
+        self._emit_progress(state, "classify_resolve", "Reading your question...")
+
+        logger.info(f"CLASSIFY_RESOLVE: Processing query: {state['user_query']}")
+
+        from app.agent.classify_resolve import classify_and_resolve
+
+        updates = classify_and_resolve(
+            user_query=state["user_query"],
+            conversation_history=state.get("conversation_history", []),
+            state=state,
+        )
+        state.update(updates)
+
+        logger.info(
+            f"CLASSIFY_RESOLVE: turn_type={state.get('turn_type')}, "
+            f"entities={state.get('entities')}, bypass_cache={state.get('bypass_cache')}"
+        )
+
+        return state
 
     async def understand_node(self, state: AgentState) -> AgentState:
         """
@@ -394,7 +540,9 @@ class AFLAnalyticsAgent:
             consolidated = ConsolidatedQueryUnderstanding.understand_and_generate_sql(
                 user_query=state["user_query"],
                 conversation_history=conversation_history,
-                skip_cache_read=state.get("is_correction", False),
+                # v1: regex-based is_correction stopgap. v2: turn_type=="correction"
+                # (classify_resolve) sets bypass_cache — see Milestone 3a plan.
+                skip_cache_read=state.get("is_correction", False) or state.get("bypass_cache", False),
             )
             _accumulate_usage(state, consolidated.get("usage"))
 
@@ -839,7 +987,9 @@ class AFLAnalyticsAgent:
             # cache so we don't re-serve a stale cached result — but still WRITE the
             # fresh result to cache below as normal.
             from app.utils.cache import get_cached_result, set_cached_result
-            cached = None if state.get("is_correction") else get_cached_result(state["sql_query"])
+            # v1: regex-based is_correction stopgap. v2: turn_type=="correction" sets bypass_cache.
+            _skip_cache_read = state.get("is_correction") or state.get("bypass_cache")
+            cached = None if _skip_cache_read else get_cached_result(state["sql_query"])
             if cached is not None:
                 logger.info("EXECUTE: Returning cached query result")
                 state["sql_validated"] = True
@@ -2077,6 +2227,16 @@ If you cannot fix it, return the string UNFIXABLE."""
         logger.info("RESPOND: Generating natural language response")
 
         try:
+            # v2 only: chitchat turns already have their reply generated by
+            # classify_resolve (single LLM call, no DB/SQL work needed) — just
+            # pass it through.
+            if state.get("turn_type") == "chitchat" and state.get("natural_language_summary"):
+                state.setdefault("confidence", 0.9)
+                state["thinking_message"] = "Response complete"
+                self._emit_progress(state, "respond", "Response complete")
+                logger.info("RESPOND: Passed through chitchat reply from classify_resolve")
+                return state
+
             # Check for clarification needed (player disambiguation, etc.)
             if state.get("needs_clarification"):
                 clarification_q = state.get("clarification_question", "Could you provide more details?")
