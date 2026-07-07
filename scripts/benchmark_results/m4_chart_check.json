@@ -1,0 +1,189 @@
+{
+  "meta": {
+    "generated_at": "2026-07-07T00:03:42.477804+00:00",
+    "backend_url": "http://localhost:5001",
+    "overall_ok": true,
+    "zod_validation_all_pass": true
+  },
+  "cases": [
+    {
+      "id": "m4_line",
+      "query": "Show me a chart of Melbourne's wins per season since 2018",
+      "ok": true,
+      "problems": [],
+      "response_text": "Here's how Melbourne's numbers have changed from 2018 to 2026.",
+      "visualization_spec": {
+        "version": "1",
+        "chartType": "line",
+        "title": "Melbourne Wins 2018",
+        "data": [
+          {
+            "x": "2018",
+            "wins": 16
+          },
+          {
+            "x": "2019",
+            "wins": 5
+          },
+          {
+            "x": "2020",
+            "wins": 9
+          },
+          {
+            "x": "2021",
+            "wins": 20
+          },
+          {
+            "x": "2022",
+            "wins": 16
+          },
+          {
+            "x": "2023",
+            "wins": 16
+          },
+          {
+            "x": "2024",
+            "wins": 11
+          },
+          {
+            "x": "2025",
+            "wins": 7
+          },
+          {
+            "x": "2026",
+            "wins": 10
+          }
+        ],
+        "series": [
+          {
+            "key": "wins",
+            "name": "Wins",
+            "color": "#C2581C"
+          }
+        ],
+        "xAxis": {
+          "label": "Season",
+          "integerOnly": true
+        },
+        "yAxis": {
+          "label": "Wins"
+        },
+        "colors": [
+          "#C2581C",
+          "#2D7A6F",
+          "#D4794D",
+          "#246359",
+          "#8C7B6B",
+          "#A30046",
+          "#D4001A",
+          "#002B5C"
+        ],
+        "annotations": [],
+        "legend": false
+      },
+      "zod_valid": true,
+      "zod_errors": null
+    },
+    {
+      "id": "m4_pie",
+      "query": "Show me a pie chart of scoring sources - goals vs behinds for Sydney in 2024",
+      "ok": true,
+      "problems": [],
+      "response_text": "Here's Sydney's performance breakdown in 2024.",
+      "visualization_spec": {
+        "version": "1",
+        "chartType": "pie",
+        "title": "Sydney Goals 2024",
+        "data": [
+          {
+            "name": "Goals",
+            "value": 366
+          },
+          {
+            "name": "Behinds",
+            "value": 239
+          }
+        ],
+        "series": [
+          {
+            "key": "value",
+            "name": "Value",
+            "color": "#C2581C"
+          }
+        ],
+        "xAxis": {},
+        "yAxis": {},
+        "colors": [
+          "#C2581C",
+          "#2D7A6F",
+          "#D4794D",
+          "#246359",
+          "#8C7B6B",
+          "#A30046",
+          "#D4001A",
+          "#002B5C"
+        ],
+        "annotations": [],
+        "legend": true,
+        "showSliceLabels": true
+      },
+      "zod_valid": true,
+      "zod_errors": null
+    },
+    {
+      "id": "m4_box_reroute",
+      "query": "Show me a box plot of Collingwood's disposals by round in 2024",
+      "ok": true,
+      "problems": [],
+      "response_text": "Here's Collingwood's game-by-game performance in 2024.",
+      "visualization_spec": {
+        "version": "1",
+        "chartType": "groupedBar",
+        "title": "Collingwood Disposals by Round (2024)",
+        "data": [
+          {
+            "x": "Disposals",
+            "median": 12,
+            "range": 42,
+            "q1": 5,
+            "q3": 18,
+            "min": 0,
+            "max": 42
+          }
+        ],
+        "series": [
+          {
+            "key": "median",
+            "name": "Median",
+            "color": "#C2581C"
+          },
+          {
+            "key": "range",
+            "name": "Range (Max − Min)",
+            "color": "#2D7A6F"
+          }
+        ],
+        "xAxis": {
+          "label": "Round"
+        },
+        "yAxis": {
+          "label": "Disposals"
+        },
+        "colors": [
+          "#C2581C",
+          "#2D7A6F",
+          "#D4794D",
+          "#246359",
+          "#8C7B6B",
+          "#A30046",
+          "#D4001A",
+          "#002B5C"
+        ],
+        "annotations": [],
+        "legend": true
+      },
+      "zod_valid": true,
+      "zod_errors": null
+    }
+  ]
+}

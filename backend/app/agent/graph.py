@@ -1232,14 +1232,24 @@ class AFLAnalyticsAgent:
                 x_col=x_col if isinstance(x_col, str) else None
             )
 
-            # Generate chart
+            # Generate chart — RechartsBuilder validates the output against the
+            # ChartSpecV1 wire contract internally and returns None (logging
+            # loudly) if the builder errored or produced a non-conforming spec.
+            # Guard here too so an invalid/absent spec never gets attached to
+            # state (websocket.py only emits 'visualization' when this is set).
             chart_spec = RechartsBuilder.generate_chart(data, chart_type, params)
 
-            state["visualization_spec"] = chart_spec
-
-            logger.info(f"Chart generated: {chart_type}")
-            state["thinking_message"] = f"Chart created ({chart_type})"
-            self._emit_progress(state, "visualize", f"Chart created ({chart_type})")
+            if chart_spec is None:
+                logger.warning(
+                    f"VISUALIZE: chart spec generation/validation failed for "
+                    f"chart_type={chart_type}; skipping chart"
+                )
+                state["thinking_message"] = "Skipping chart generation"
+            else:
+                state["visualization_spec"] = chart_spec
+                logger.info(f"Chart generated: {chart_type}")
+                state["thinking_message"] = f"Chart created ({chart_type})"
+                self._emit_progress(state, "visualize", f"Chart created ({chart_type})")
 
         except Exception as e:
             logger.error(f"Error in VISUALIZE node: {e}")

@@ -2,12 +2,12 @@ import React from 'react';
 import {
   ResponsiveContainer,
   LineChart, Line,
+  AreaChart, Area,
   BarChart, Bar,
   ScatterChart, Scatter,
   PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ReferenceDot, Label,
-  ErrorBar,
   ComposedChart,
 } from 'recharts';
 import { chartSpecSchema, ChartSpec, DEFAULT_COLORS } from '../../types/chartSpec';
@@ -62,7 +62,9 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
   // intent is obvious and this stays safe if the schema ever relaxes that rule.
   if (!s.data.length) return null;
 
-  if (!s.chartType) {
+  // `table` isn't a Recharts chart at all — render the plain table directly
+  // rather than routing it through ResponsiveContainer/renderChart.
+  if (s.chartType === 'table') {
     return <DataTable data={s.data} title={s.title} />;
   }
 
@@ -89,20 +91,22 @@ function renderChart(spec: ChartSpec, colors: string[]): React.ReactElement {
     case 'line':
       return renderLineChart(spec, colors);
     case 'bar':
-      return renderBarChart(spec, colors);
-    case 'horizontal_bar':
-      return renderHorizontalBarChart(spec, colors);
-    case 'grouped_bar':
+      // Horizontal bars share the `bar` chartType — orientation is the hint.
+      return spec.orientation === 'horizontal'
+        ? renderHorizontalBarChart(spec, colors)
+        : renderBarChart(spec, colors);
     case 'groupedBar':
-      return renderGroupedBarChart(spec, colors);
-    case 'stacked_bar':
-      return renderGroupedBarChart(spec, colors); // same component, series have stackId
+      return renderGroupedBarChart(spec, colors); // stacked vs grouped: per-series stackId
     case 'scatter':
       return renderScatterChart(spec, colors);
     case 'pie':
       return renderPieChart(spec, colors);
-    case 'box':
-      return renderBoxChart(spec, colors);
+    case 'area':
+      return renderAreaChart(spec, colors);
+    case 'table':
+      // Handled earlier in ChartRenderer (rendered directly, no ResponsiveContainer).
+      // Unreachable in practice; kept for exhaustiveness.
+      return renderBarChart(spec, colors);
     default:
       return renderBarChart(spec, colors);
   }
@@ -333,6 +337,11 @@ function renderScatterChart(spec: ChartSpec, colors: string[]): React.ReactEleme
 // ── Pie Chart ───────────────────────────────────────────────────
 
 function renderPieChart(spec: ChartSpec, colors: string[]): React.ReactElement {
+  // Slice-level text labels overlap once there are more than a handful of
+  // slices — the backend sets showSliceLabels: false once it's grouped the
+  // tail into "Other" (>5 slices), and legend + tooltip carry the info instead.
+  const showLabels = spec.showSliceLabels !== false;
+
   return (
     <PieChart>
       <Pie
@@ -344,8 +353,8 @@ function renderPieChart(spec: ChartSpec, colors: string[]): React.ReactElement {
         outerRadius={140}
         innerRadius={60}
         paddingAngle={2}
-        label={(props: any) => `${props.name ?? ''} ${((props.percent ?? 0) * 100).toFixed(0)}%`}
-        labelLine={{ stroke: '#8C7B6B' }}
+        label={showLabels ? (props: any) => `${props.name ?? ''} ${((props.percent ?? 0) * 100).toFixed(0)}%` : false}
+        labelLine={showLabels ? { stroke: '#8C7B6B' } : false}
         animationDuration={800}
       >
         {spec.data.map((_: any, i: number) => (
@@ -358,33 +367,35 @@ function renderPieChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   );
 }
 
-// ── Box Chart (rendered as bar with error bars for IQR) ─────────
+// ── Area Chart ──────────────────────────────────────────────────
 
-function renderBoxChart(spec: ChartSpec, colors: string[]): React.ReactElement {
-  // Data has: x, median, q1, q3, min, max
-  // We show median as bar height, with error bars from q1 to q3
-  const processedData = spec.data.map((d: any) => ({
-    ...d,
-    errorLow: d.median - d.q1,
-    errorHigh: d.q3 - d.median,
-  }));
-
+function renderAreaChart(spec: ChartSpec, colors: string[]): React.ReactElement {
   return (
-    <BarChart data={processedData} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
+    <AreaChart data={spec.data} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE4" />
-      <XAxis dataKey="x" tick={{ fontSize: 12, fill: '#8C7B6B' }} tickLine={false} axisLine={{ stroke: '#E8DDD3' }} />
-      <YAxis tick={{ fontSize: 12, fill: '#8C7B6B' }} tickLine={false} axisLine={{ stroke: '#E8DDD3' }} />
-      <Tooltip
-        contentStyle={tooltipStyle}
-        formatter={(_: any, __: any, props: any) => {
-          const d = props.payload;
-          return [`Median: ${d.median}, Q1: ${d.q1}, Q3: ${d.q3}, Min: ${d.min}, Max: ${d.max}`, ''];
-        }}
-      />
-      <Bar dataKey="median" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={600}>
-        <ErrorBar dataKey="errorHigh" direction="y" width={8} stroke={colors[1] || colors[0]} />
-      </Bar>
-    </BarChart>
+      <XAxis {...xAxisProps(spec)} />
+      <YAxis {...yAxisProps(spec)} />
+      <Tooltip contentStyle={tooltipStyle} />
+      {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
+      {spec.series.map((s, i) => {
+        const color = s.color || colors[i % colors.length];
+        return (
+          <Area
+            key={s.key || s.name || i}
+            type="monotone"
+            dataKey={s.key || ''}
+            name={s.name}
+            stroke={color}
+            fill={color}
+            fillOpacity={0.25}
+            strokeWidth={2}
+            stackId={s.stackId}
+            animationDuration={800}
+          />
+        );
+      })}
+      {renderAnnotations(spec)}
+    </AreaChart>
   );
 }
 

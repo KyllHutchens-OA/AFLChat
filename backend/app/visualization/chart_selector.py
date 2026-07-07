@@ -37,6 +37,11 @@ class ChartSelector:
         "stacked_bar": "Shows composition/parts of a whole across categories.",
         "scatter": "Shows relationship/correlation between two numeric variables.",
         "pie": "Shows proportions of a whole. Best for 3-7 categories only.",
+        # NOTE: "box" is an internal selection concept only — there is no
+        # `box` chartType in the ChartSpecV1 wire contract (a real
+        # box-and-whisker plot isn't a Recharts primitive). RechartsBuilder's
+        # "box" builder reroutes it to a `groupedBar` of median + range
+        # per group (see recharts_builder.py::_build_box_chart).
         "box": "Shows distribution and outliers. Best for statistical analysis.",
     }
 

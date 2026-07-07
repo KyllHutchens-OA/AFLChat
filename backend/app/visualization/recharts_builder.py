@@ -9,6 +9,10 @@ import pandas as pd
 import math
 import logging
 
+from pydantic import ValidationError
+
+from app.visualization.spec import ChartSpecV1
+
 logger = logging.getLogger(__name__)
 
 # AFL warm color palette
@@ -179,35 +183,54 @@ class RechartsBuilder:
         data: pd.DataFrame,
         chart_type: str,
         params: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """Generate a Recharts-compatible chart specification."""
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Generate a Recharts-compatible chart specification, validated against
+        the ChartSpecV1 wire contract (app/visualization/spec.py).
+
+        Returns the validated spec as a plain dict (`.model_dump()`), or
+        `None` if the builder raised or produced a spec that fails contract
+        validation (logged loudly either way — callers must treat `None` as
+        "do not emit a chart").
+        """
         if params is None:
             params = {}
 
+        builders = {
+            "line": RechartsBuilder._build_line_chart,
+            "bar": RechartsBuilder._build_bar_chart,
+            "horizontal_bar": RechartsBuilder._build_horizontal_bar_chart,
+            "scatter": RechartsBuilder._build_scatter_chart,
+            "pie": RechartsBuilder._build_pie_chart,
+            "box": RechartsBuilder._build_box_chart,
+            "stacked_bar": lambda d, p: RechartsBuilder._build_multi_bar_chart(d, p, stacked=True),
+            "grouped_bar": lambda d, p: RechartsBuilder._build_multi_bar_chart(d, p, stacked=False),
+            "comparison": RechartsBuilder._build_comparison_chart,
+            "trend": RechartsBuilder._build_line_chart,
+        }
+
+        builder = builders.get(chart_type)
+        if builder is None:
+            logger.warning(f"Unknown chart type: {chart_type}, defaulting to bar")
+            builder = RechartsBuilder._build_bar_chart
+
         try:
-            builders = {
-                "line": RechartsBuilder._build_line_chart,
-                "bar": RechartsBuilder._build_bar_chart,
-                "horizontal_bar": RechartsBuilder._build_horizontal_bar_chart,
-                "scatter": RechartsBuilder._build_scatter_chart,
-                "pie": RechartsBuilder._build_pie_chart,
-                "box": RechartsBuilder._build_box_chart,
-                "stacked_bar": lambda d, p: RechartsBuilder._build_multi_bar_chart(d, p, stacked=True),
-                "grouped_bar": lambda d, p: RechartsBuilder._build_multi_bar_chart(d, p, stacked=False),
-                "comparison": RechartsBuilder._build_comparison_chart,
-                "trend": RechartsBuilder._build_line_chart,
-            }
-
-            builder = builders.get(chart_type)
-            if builder is None:
-                logger.warning(f"Unknown chart type: {chart_type}, defaulting to bar")
-                builder = RechartsBuilder._build_bar_chart
-
-            return builder(data, params)
-
+            raw = builder(data, params)
         except Exception as e:
-            logger.error(f"Error generating chart: {e}")
-            return {"error": str(e), "chartType": "bar", "data": [], "series": []}
+            logger.error(f"Error generating chart (chart_type={chart_type}): {e}")
+            return None
+
+        raw.setdefault("version", "1")
+
+        try:
+            spec = ChartSpecV1.model_validate(raw)
+        except ValidationError as e:
+            logger.error(
+                f"Chart spec failed ChartSpecV1 validation (chart_type={chart_type}): {e}"
+            )
+            return None
+
+        return spec.model_dump(exclude_none=True)
 
     # ── Line Chart ──────────────────────────────────────────────
 
@@ -368,7 +391,12 @@ class RechartsBuilder:
         _apply_layout_config(x_axis, y_axis, layout_config)
 
         return {
-            "chartType": "horizontal_bar",
+            # Contract v1 has no dedicated "horizontal_bar" chartType — a
+            # horizontal bar is chartType "bar" with an orientation hint.
+            # ChartRenderer's `bar` case checks spec.orientation to decide
+            # whether to render the vertical-layout (horizontal bars) path.
+            "chartType": "bar",
+            "orientation": "horizontal",
             "title": title,
             "data": chart_data,
             "series": series,
@@ -438,28 +466,59 @@ class RechartsBuilder:
 
     # ── Pie Chart ───────────────────────────────────────────────
 
+    # Pie charts with more slices than this get their tail grouped into a
+    # single "Other" slice, and slice-level text labels are suppressed in
+    # favor of legend + tooltip (the labels were the source of the overlap
+    # problem for pies with many categories).
+    _PIE_MAX_SLICES = 5
+
     @staticmethod
     def _build_pie_chart(data: pd.DataFrame, params: Dict) -> Dict:
         x_col = params.get("x_col", data.columns[0])
         y_col = params.get("y_col", data.columns[1])
         title = params.get("title", "Distribution")
 
-        chart_data = []
+        rows = []
         for _, r in data.iterrows():
-            chart_data.append(_clean_row({
+            rows.append({
                 "name": str(r[x_col]),
                 "value": _clean_value(r[y_col]),
-            }))
+            })
+
+        show_slice_labels = True
+        if len(rows) > RechartsBuilder._PIE_MAX_SLICES:
+            # Sort descending by value (None/NaN sort last) and keep the top N,
+            # summing everything else into a single "Other" slice.
+            rows_sorted = sorted(rows, key=lambda r: (r["value"] is None, -(r["value"] or 0)))
+            top = rows_sorted[:RechartsBuilder._PIE_MAX_SLICES]
+            tail = rows_sorted[RechartsBuilder._PIE_MAX_SLICES:]
+            other_total = sum(r["value"] for r in tail if isinstance(r["value"], (int, float)))
+            rows = top + [{"name": "Other", "value": _clean_value(other_total)}]
+            show_slice_labels = False
+            logger.info(
+                f"Pie chart: grouped {len(tail)} tail slices into 'Other' "
+                f"(kept top {RechartsBuilder._PIE_MAX_SLICES})"
+            )
+
+        chart_data = [_clean_row(r) for r in rows]
 
         return {
             "chartType": "pie",
             "title": title,
             "data": chart_data,
-            "series": [],
+            # Pie doesn't have multiple data series the way bar/line do, but
+            # the contract requires series to be non-empty — this single
+            # entry documents which field on each row is the plotted value.
+            "series": [{
+                "key": "value",
+                "name": ChartHelper.humanize_column_name(y_col),
+                "color": AFL_COLORS[0],
+            }],
             "xAxis": {},
             "yAxis": {},
             "annotations": [],
             "legend": True,
+            "showSliceLabels": show_slice_labels,
             "colors": AFL_COLORS,
         }
 
@@ -467,6 +526,14 @@ class RechartsBuilder:
 
     @staticmethod
     def _build_box_chart(data: pd.DataFrame, params: Dict) -> Dict:
+        """
+        Distribution ("box plot") requests. Contract v1 has no `box` chartType
+        (a real box/whisker plot isn't a Recharts primitive), so this emits a
+        `groupedBar` instead: one bar for the median, one bar for the range
+        (max - min), per group. q1/q3/min/max are still included as extra
+        per-row fields (data rows are untyped) so a future tooltip/table can
+        surface them even though they aren't plotted as bars.
+        """
         y_col = params.get("y_col", data.columns[-1])
         group_col = params.get("group_col") or params.get("x_col")
         title = params.get("title", "Distribution Analysis")
@@ -481,37 +548,46 @@ class RechartsBuilder:
                 q1 = float(group_data.quantile(0.25))
                 median = float(group_data.median())
                 q3 = float(group_data.quantile(0.75))
+                min_v = float(group_data.min())
+                max_v = float(group_data.max())
                 chart_data.append(_clean_row({
                     "x": str(group),
                     "median": median,
+                    "range": max_v - min_v,
                     "q1": q1,
                     "q3": q3,
-                    "min": float(group_data.min()),
-                    "max": float(group_data.max()),
+                    "min": min_v,
+                    "max": max_v,
                 }))
         else:
             y_data = data[y_col].dropna()
             if len(y_data) > 0:
+                min_v = float(y_data.min())
+                max_v = float(y_data.max())
                 chart_data.append(_clean_row({
                     "x": ChartHelper.humanize_column_name(y_col),
                     "median": float(y_data.median()),
+                    "range": max_v - min_v,
                     "q1": float(y_data.quantile(0.25)),
                     "q3": float(y_data.quantile(0.75)),
-                    "min": float(y_data.min()),
-                    "max": float(y_data.max()),
+                    "min": min_v,
+                    "max": max_v,
                 }))
 
-        series = [{"key": "median", "name": "Median", "color": AFL_COLORS[0]}]
+        series = [
+            {"key": "median", "name": "Median", "color": AFL_COLORS[0]},
+            {"key": "range", "name": "Range (Max − Min)", "color": AFL_COLORS[1]},
+        ]
 
         return {
-            "chartType": "box",
+            "chartType": "groupedBar",
             "title": title,
             "data": chart_data,
             "series": series,
             "xAxis": {"label": ChartHelper.humanize_column_name(group_col) if group_col else ""},
             "yAxis": {"label": ChartHelper.humanize_column_name(y_col)},
             "annotations": [],
-            "legend": False,
+            "legend": True,
             "colors": AFL_COLORS,
         }
 
@@ -574,7 +650,9 @@ class RechartsBuilder:
         _apply_layout_config(x_axis, y_axis, layout_config)
 
         return {
-            "chartType": "stacked_bar" if stacked else "grouped_bar",
+            # Both grouped and stacked bars are contract chartType "groupedBar" —
+            # stacking is signaled per-series via SeriesItem.stackId above.
+            "chartType": "groupedBar",
             "title": title,
             "data": chart_data,
             "series": series,
@@ -609,7 +687,7 @@ class RechartsBuilder:
             })
 
         return {
-            "chartType": "grouped_bar",
+            "chartType": "groupedBar",
             "title": title,
             "data": chart_data,
             "series": series,
