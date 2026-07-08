@@ -1,0 +1,845 @@
+{
+  "meta": {
+    "generated_at": "2026-07-08T10:46:33.848752+00:00",
+    "subset": "smoke15",
+    "mode": "in_process",
+    "judge": true,
+    "judge_model": "gpt-5-mini",
+    "judge_note": "Judge verdicts re-generated post-run with the chart-aware judge prompt (chart data included); recorded agent outputs and deterministic checks unchanged."
+  },
+  "cases": [
+    {
+      "case_id": "single_01",
+      "tags": [
+        "smoke",
+        "single",
+        "current_season"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "How many games has Collingwood won this season?",
+          "response_text": "Collingwood: 9 wins, 16 games.",
+          "latency_s": 18.213,
+          "chart_spec": null,
+          "sql": "SELECT SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score) OR (m.away_team_id = t.id AND m.away_score > m.home_score) THEN 1 ELSE 0 END) AS wins, COUNT(*) AS games FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id) WHERE t.name = 'Collingwood' AND m.season = 2026 AND NOT (m.home_score = 0 AND m.away_score = 0)",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 3734,
+          "output_tokens": 509
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "Response includes 'Collingwood' and the required win count '9', matching the expectations."
+      },
+      "error": null
+    },
+    {
+      "case_id": "single_02",
+      "tags": [
+        "smoke",
+        "single",
+        "award"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "Who won the Brownlow Medal in 2023?",
+          "response_text": "Marcus Bontempelli had 29 votes in 2023.",
+          "latency_s": 10.731,
+          "chart_spec": null,
+          "sql": "SELECT p.name, SUM(ps.brownlow_votes) AS total_votes, t.name AS team FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN matches m ON ps.match_id = m.id JOIN teams t ON ps.team_id = t.id WHERE m.season = 2023 AND ps.brownlow_votes IS NOT NULL AND ps.brownlow_votes > 0 GROUP BY p.id, p.name, t.id, t.name ORDER BY total_votes DESC NULLS LAST LIMIT 1",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 2917,
+          "output_tokens": 370
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "incorrect",
+        "reason": "The assistant named Marcus Bontempelli as winner with 29 votes, but the 2023 Brownlow Medal was won by Lachie Neale (the assistant's answer is factually incorrect)."
+      },
+      "error": null
+    },
+    {
+      "case_id": "single_03",
+      "tags": [
+        "smoke",
+        "single",
+        "chart",
+        "trend"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "Show me a chart of Melbourne's wins per season since 2018",
+          "response_text": "Here's how Melbourne's numbers have changed from 2018 to 2026.",
+          "latency_s": 17.836,
+          "chart_spec": {
+            "version": "1",
+            "chartType": "line",
+            "title": "Melbourne Wins 2018",
+            "data": [
+              {
+                "x": "2018",
+                "wins": 16
+              },
+              {
+                "x": "2019",
+                "wins": 5
+              },
+              {
+                "x": "2020",
+                "wins": 9
+              },
+              {
+                "x": "2021",
+                "wins": 20
+              },
+              {
+                "x": "2022",
+                "wins": 16
+              },
+              {
+                "x": "2023",
+                "wins": 16
+              },
+              {
+                "x": "2024",
+                "wins": 11
+              },
+              {
+                "x": "2025",
+                "wins": 7
+              },
+              {
+                "x": "2026",
+                "wins": 10
+              }
+            ],
+            "series": [
+              {
+                "key": "wins",
+                "name": "Wins",
+                "color": "#C2581C"
+              }
+            ],
+            "xAxis": {
+              "label": "Season",
+              "integerOnly": true
+            },
+            "yAxis": {
+              "label": "Wins"
+            },
+            "colors": [
+              "#C2581C",
+              "#2D7A6F",
+              "#D4794D",
+              "#246359",
+              "#8C7B6B",
+              "#A30046",
+              "#D4001A",
+              "#002B5C"
+            ],
+            "annotations": [],
+            "legend": false
+          },
+          "sql": "SELECT m.season, SUM(CASE WHEN (m.home_team_id = t.id AND m.home_score > m.away_score) OR (m.away_team_id = t.id AND m.away_score > m.home_score) THEN 1 ELSE 0 END) AS wins FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id) WHERE t.name = 'Melbourne' AND m.season >= 2018 AND NOT (m.home_score = 0 AND m.away_score = 0) GROUP BY m.season ORDER BY m.season",
+          "row_count": 9,
+          "error": null,
+          "input_tokens": 3435,
+          "output_tokens": 851
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": true,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "The response includes 'Melbourne', contains 2018, and presents a chart with the exact wins-per-season data (2018\u20132026) matching the provided counts."
+      },
+      "error": null
+    },
+    {
+      "case_id": "single_04",
+      "tags": [
+        "smoke",
+        "single",
+        "career_total"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "What's Dustin Martin's career goals tally?",
+          "response_text": "Dustin Martin had 338 career goals.\n\n*Based on data from 1990 to present.*",
+          "latency_s": 8.574,
+          "chart_spec": null,
+          "sql": "SELECT p.name, SUM(ps.goals) AS career_goals FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN matches m ON ps.match_id = m.id WHERE p.name ILIKE '%Dustin%Martin%' GROUP BY p.id, p.name",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 4261,
+          "output_tokens": 317
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "The assistant states Dustin Martin's career goals as 338, which matches the expected value from the given database query."
+      },
+      "error": null
+    },
+    {
+      "case_id": "single_05",
+      "tags": [
+        "smoke",
+        "single",
+        "match_result"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "What was the score in the 2024 grand final?",
+          "response_text": "Brisbane Lions defeated Sydney 120-60 by 60 points.",
+          "latency_s": 8.2,
+          "chart_spec": null,
+          "sql": "SELECT ht.name AS home_team, at.name AS away_team, m.home_score, m.away_score, CASE WHEN m.home_score > m.away_score THEN ht.name WHEN m.home_score < m.away_score THEN at.name ELSE 'Draw' END AS winner, GREATEST(m.home_score, m.away_score) AS winning_score, LEAST(m.home_score, m.away_score) AS losing_score FROM matches m JOIN teams ht ON m.home_team_id = ht.id JOIN teams at ON m.away_team_id = at.id WHERE m.season = 2024 AND m.round = 'Grand Final';",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 2971,
+          "output_tokens": 387
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "Response accurately states Brisbane Lions 120\u201360 (a 60-point margin) matching the provided ground-truth expectations."
+      },
+      "error": null
+    },
+    {
+      "case_id": "single_06",
+      "tags": [
+        "smoke",
+        "single",
+        "chart",
+        "pie"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "Show me a pie chart of scoring sources - goals vs behinds for Sydney in 2024",
+          "response_text": "Here's Sydney's performance breakdown in 2024.",
+          "latency_s": 24.893,
+          "chart_spec": {
+            "version": "1",
+            "chartType": "pie",
+            "title": "Sydney Goals 2024",
+            "data": [
+              {
+                "name": "Behinds",
+                "value": 239
+              },
+              {
+                "name": "Goals",
+                "value": 2196
+              }
+            ],
+            "series": [
+              {
+                "key": "value",
+                "name": "Points",
+                "color": "#C2581C"
+              }
+            ],
+            "xAxis": {},
+            "yAxis": {},
+            "colors": [
+              "#C2581C",
+              "#2D7A6F",
+              "#D4794D",
+              "#246359",
+              "#8C7B6B",
+              "#A30046",
+              "#D4001A",
+              "#002B5C"
+            ],
+            "annotations": [],
+            "legend": true,
+            "showSliceLabels": true
+          },
+          "sql": "SELECT label, points FROM ( SELECT 'Goals' AS label, COALESCE(SUM(ps.goals) * 6, 0) AS points FROM player_stats ps JOIN matches m ON ps.match_id = m.id JOIN teams t ON ps.team_id = t.id WHERE t.name = 'Sydney' AND m.season = 2024 AND NOT (m.home_score = 0 AND m.away_score = 0) UNION ALL SELECT 'Behinds' AS label, COALESCE(SUM(ps.behinds), 0) AS points FROM player_stats ps JOIN matches m ON ps.match_id = m.id JOIN teams t ON ps.team_id = t.id WHERE t.name = 'Sydney' AND m.season = 2024 AND NOT (m.home_score = 0 AND m.away_score = 0) ) q GROUP BY label, points;",
+          "row_count": 2,
+          "error": null,
+          "input_tokens": 4041,
+          "output_tokens": 1092
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": true,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "partially_correct",
+        "reason": "The response included a pie chart and correctly showed 'Behinds'=239 and referenced Sydney, but the 'Goals' value was wrong (2196 instead of the correct 366)."
+      },
+      "error": null
+    },
+    {
+      "case_id": "single_07",
+      "tags": [
+        "smoke",
+        "single",
+        "head_to_head"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "What's Carlton's win-loss record against Essendon since 1990?",
+          "response_text": "Carlton: 69 games, 31 carlton wins, 34 essendon wins, 4 draws.\n\n*Based on data from 1990 to present.*",
+          "latency_s": 12.714,
+          "chart_spec": null,
+          "sql": "SELECT COUNT(*) AS games, COUNT(*) FILTER (WHERE (m.home_team_id = (SELECT id FROM teams WHERE name = 'Carlton') AND m.home_score > m.away_score) OR (m.away_team_id = (SELECT id FROM teams WHERE name = 'Carlton') AND m.away_score > m.home_score)) AS carlton_wins, COUNT(*) FILTER (WHERE (m.home_team_id = (SELECT id FROM teams WHERE name = 'Essendon') AND m.home_score > m.away_score) OR (m.away_team_id = (SELECT id FROM teams WHERE name = 'Essendon') AND m.away_score > m.home_score)) AS essendon_wins, COUNT(*) FILTER (WHERE m.home_score = m.away_score) AS draws FROM matches m WHERE m.season >= 1990 AND ((m.home_team_id = (SELECT id FROM teams WHERE name = 'Carlton') AND m.away_team_id = (SELECT id FROM teams WHERE name = 'Essendon')) OR (m.home_team_id = (SELECT id FROM teams WHERE name = 'Essendon') AND m.away_team_id = (SELECT id FROM teams WHERE name = 'Carlton'))) AND NOT (m.home_score = 0 AND m.away_score = 0)",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 3457,
+          "output_tokens": 921
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "Response matches the ground truth: 69 total games since 1990 with Carlton 31 wins, Essendon 34 wins, and 4 draws."
+      },
+      "error": null
+    },
+    {
+      "case_id": "pair_01",
+      "tags": [
+        "smoke",
+        "pair",
+        "correction"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "Who kicked the most goals last round?",
+          "response_text": "No rows matched that specific combination of filters. Let me know if you'd like to try a different season or player \u2014 our database covers 1990-2026.",
+          "latency_s": 13.519,
+          "chart_spec": null,
+          "sql": "WITH last_round AS ( SELECT m.season, m.round FROM matches m WHERE m.round ~ '^[0-9]+$' AND (m.home_score + m.away_score) > 0 AND m.match_date <= now() ORDER BY m.season DESC, (m.round::int) DESC LIMIT 1 ) SELECT p.name, SUM(ps.goals) AS total_goals, t.name AS team, lr.season, lr.round FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN teams t ON ps.team_id = t.id JOIN matches m ON ps.match_id = m.id JOIN last_round lr ON m.season = lr.season AND m.round = lr.round WHERE ps.goals IS NOT NULL GROUP BY p.id, p.name, t.id, t.name, lr.season, lr.round ORDER BY total_goals DESC NULLS LAST LIMIT 1;",
+          "row_count": 0,
+          "error": null,
+          "input_tokens": 4158,
+          "output_tokens": 977
+        },
+        {
+          "query": "No, I meant round 10 of the 2024 season, not last round.",
+          "response_text": "Top goals in 2024:\n\n| # | Name | Team | Total Goals |\n| --- | --- | --- | --- |\n| 1 | Blake Hardwick | Hawthorn | 5 |\n| 2 | Charlie Cameron | Brisbane Lions | 5 |\n| 3 | Jake Waterman | West Coast | 5 |\n| 4 | Kai Lohmann | Brisbane Lions | 5 |\n\nCurious how Blake Hardwick and Charlie Cameron compare in 2024? Just ask.",
+          "latency_s": 28.196,
+          "chart_spec": null,
+          "sql": "WITH round_games AS ( SELECT m.id FROM matches m WHERE m.season = 2024 AND m.round = '10' AND (m.home_score + m.away_score) > 0 ), player_goals AS ( SELECT p.id, p.name, t.id AS team_id, t.name AS team, SUM(COALESCE(ps.goals,0)) AS total_goals FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN teams t ON ps.team_id = t.id WHERE ps.match_id IN (SELECT id FROM round_games) GROUP BY p.id, p.name, t.id, t.name ) SELECT pg.name, pg.team, pg.total_goals FROM player_goals pg WHERE pg.total_goals = (SELECT MAX(total_goals) FROM player_goals) ORDER BY pg.name ASC;",
+          "row_count": 4,
+          "error": null,
+          "input_tokens": 4895,
+          "output_tokens": 1733
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": true,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "Answer lists the four players (Cameron, Lohmann, Waterman, Hardwick) each with 5 goals for round 10 of 2024 as required and matches the provided ground truth."
+      },
+      "error": null
+    },
+    {
+      "case_id": "pair_02",
+      "tags": [
+        "smoke",
+        "pair",
+        "correction"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "Show me Patrick Cripps's stats for 2023",
+          "response_text": "Patrick Cripps (Carlton) \u2014 2023: 24 games, 9 goals, 14 behinds, 596 disposals (226 kicks, 370 handballs), 51 marks, 130 tackles, 3 hitouts, 146 clearances, 77 inside 50s, 292 contested possessions, 249 uncontested possessions, 22 Brownlow votes, 2053 fantasy points. \n\nI can also show you his per\u2011game averages if you're interested.",
+          "latency_s": 17.322,
+          "chart_spec": null,
+          "sql": "SELECT p.name, t.name AS team, COUNT(DISTINCT m.id) AS games, SUM(ps.goals) AS goals, SUM(ps.behinds) AS behinds, SUM(ps.disposals) AS disposals, SUM(ps.kicks) AS kicks, SUM(ps.handballs) AS handballs, SUM(ps.marks) AS marks, SUM(ps.tackles) AS tackles, SUM(ps.hitouts) AS hitouts, SUM(ps.clearances) AS clearances, SUM(ps.inside_50s) AS inside_50s, SUM(ps.contested_possessions) AS contested_possessions, SUM(ps.uncontested_possessions) AS uncontested_possessions, SUM(ps.brownlow_votes) AS brownlow_votes, SUM(ps.fantasy_points) AS fantasy_points FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN matches m ON ps.match_id = m.id JOIN teams t ON ps.team_id = t.id WHERE p.name ILIKE '%Patrick%Cripps%' AND m.season = 2023 GROUP BY p.id, p.name, t.id, t.name;",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 4208,
+          "output_tokens": 981
+        },
+        {
+          "query": "Sorry, I meant Marcus Bontempelli, not Cripps.",
+          "response_text": "Marcus Bontempelli (Western Bulldogs) \u2014 2023: 23 games, 19 goals, 14 behinds, 636 disposals (370 kicks, 266 handballs), 101 marks, 172 tackles, 1 hitout, 175 clearances, 131 inside 50s, 332 contested possessions, 339 uncontested possessions, 29 Brownlow votes, 2631 fantasy points. \n\nI can also show you his per-game averages if you're interested.",
+          "latency_s": 22.934,
+          "chart_spec": null,
+          "sql": "SELECT p.name, t.name AS team, COUNT(DISTINCT m.id) AS games, SUM(ps.goals) AS goals, SUM(ps.behinds) AS behinds, SUM(ps.disposals) AS disposals, SUM(ps.kicks) AS kicks, SUM(ps.handballs) AS handballs, SUM(ps.marks) AS marks, SUM(ps.tackles) AS tackles, SUM(ps.hitouts) AS hitouts, SUM(ps.clearances) AS clearances, SUM(ps.inside_50s) AS inside_50s, SUM(ps.contested_possessions) AS contested_possessions, SUM(ps.uncontested_possessions) AS uncontested_possessions, SUM(ps.brownlow_votes) AS brownlow_votes, SUM(ps.fantasy_points) AS fantasy_points FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN matches m ON ps.match_id = m.id JOIN teams t ON ps.team_id = t.id WHERE p.name ILIKE '%Marcus%Bontempelli%' AND m.season = 2023 GROUP BY p.id, p.name, t.id, t.name;",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 4503,
+          "output_tokens": 1459
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": true,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "Response correctly reflects the corrected player (Bontempelli) and includes the required disposal total (636) and matches the ground-truth 23 games for 2023."
+      },
+      "error": null
+    },
+    {
+      "case_id": "pair_03",
+      "tags": [
+        "smoke",
+        "pair",
+        "correction"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "What was the score in the 2023 grand final?",
+          "response_text": "Collingwood defeated Brisbane Lions 90-86 by 4 points.",
+          "latency_s": 6.994,
+          "chart_spec": null,
+          "sql": "SELECT ht.name AS home_team, at.name AS away_team, m.home_score, m.away_score, CASE WHEN m.home_score > m.away_score THEN ht.name WHEN m.home_score < m.away_score THEN at.name ELSE 'Draw' END AS winner FROM matches m JOIN teams ht ON m.home_team_id = ht.id JOIN teams at ON m.away_team_id = at.id WHERE m.season = 2023 AND m.round = 'Grand Final'",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 2979,
+          "output_tokens": 355
+        },
+        {
+          "query": "Actually I meant the 2022 grand final, not 2023.",
+          "response_text": "Geelong defeated Sydney 133-52 by 81 points.",
+          "latency_s": 17.313,
+          "chart_spec": null,
+          "sql": "SELECT ht.name AS home_team, at.name AS away_team, m.home_score, m.away_score, CASE WHEN m.home_score > m.away_score THEN ht.name WHEN m.home_score < m.away_score THEN at.name ELSE 'Draw' END AS winner, CASE WHEN m.home_score > m.away_score THEN at.name WHEN m.home_score < m.away_score THEN ht.name ELSE NULL END AS loser, GREATEST(m.home_score, m.away_score) AS winning_score, LEAST(m.home_score, m.away_score) AS losing_score, ABS(m.home_score - m.away_score) AS margin FROM matches m JOIN teams ht ON m.home_team_id = ht.id JOIN teams at ON m.away_team_id = at.id WHERE m.season = 2022 AND m.round = 'Grand Final'",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 3923,
+          "output_tokens": 1435
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": true,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "Answer correctly reports the 2022 Grand Final result (Geelong 133, Sydney 52) and includes the required tokens."
+      },
+      "error": null
+    },
+    {
+      "case_id": "nodata_01",
+      "tags": [
+        "smoke",
+        "nodata"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "What were Nick Daicos's stats in 2015?",
+          "response_text": "Nick Daicos has no 2015 stats \u2014 their data covers 2022, 2023, 2024, 2025, 2026. Let me know if you'd like to try a different season or player \u2014 our database covers 1990-2026.",
+          "latency_s": 17.247,
+          "chart_spec": null,
+          "sql": "SELECT p.name, t.name AS team, COUNT(*) AS games, SUM(ps.goals) AS goals, SUM(ps.behinds) AS behinds, SUM(ps.disposals) AS disposals, SUM(ps.kicks) AS kicks, SUM(ps.handballs) AS handballs, SUM(ps.marks) AS marks, SUM(ps.tackles) AS tackles, SUM(ps.hitouts) AS hitouts, SUM(ps.clearances) AS clearances, SUM(ps.inside_50s) AS inside_50s, SUM(ps.contested_possessions) AS contested_possessions, SUM(ps.uncontested_possessions) AS uncontested_possessions, SUM(ps.brownlow_votes) AS brownlow_votes, SUM(ps.fantasy_points) AS fantasy_points FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN matches m ON ps.match_id = m.id JOIN teams t ON ps.team_id = t.id WHERE p.name ILIKE '%Nick%Daicos%' AND m.season = 2015 GROUP BY p.id, p.name, t.id, t.name",
+          "row_count": 0,
+          "error": null,
+          "input_tokens": 3774,
+          "output_tokens": 548
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": true,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "The response correctly states that Nick Daicos has no 2015 stats and explains that available data for him begins in 2022, matching the established ground truth."
+      },
+      "error": null
+    },
+    {
+      "case_id": "nodata_02",
+      "tags": [
+        "smoke",
+        "nodata"
+      ],
+      "source": "m0_benchmark",
+      "turns": [
+        {
+          "query": "What was the score in the 2030 AFL grand final?",
+          "response_text": "2030 is outside the data we have \u2014 the database covers 1990\u20132026.",
+          "latency_s": 7.825,
+          "chart_spec": null,
+          "sql": "SELECT CASE WHEN m.home_score > m.away_score THEN ht.name ELSE at.name END AS winner, CASE WHEN m.home_score > m.away_score THEN at.name ELSE ht.name END AS loser, ht.name AS home_team, at.name AS away_team, m.home_score, m.away_score FROM matches m JOIN teams ht ON m.home_team_id = ht.id JOIN teams at ON m.away_team_id = at.id WHERE m.season = 2030 AND m.round = 'Grand Final';",
+          "row_count": 0,
+          "error": null,
+          "input_tokens": 3503,
+          "output_tokens": 366
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": true,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "The answer correctly states that 2030 is outside the dataset and explicitly notes the available range (1990\u20132026), matching the expectation that no data exists past 2026."
+      },
+      "error": null
+    },
+    {
+      "case_id": "salv_player_goals",
+      "tags": [
+        "smoke",
+        "single",
+        "salvaged"
+      ],
+      "source": "salvaged",
+      "turns": [
+        {
+          "query": "How many goals did Charlie Curnow kick in 2024?",
+          "response_text": "Charlie Curnow had 57 goals in 2024.",
+          "latency_s": 9.835,
+          "chart_spec": null,
+          "sql": "SELECT p.id, p.name, t.name AS team, SUM(ps.goals) AS total_goals FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN matches m ON ps.match_id = m.id JOIN teams t ON ps.team_id = t.id WHERE m.season = 2024 AND p.name ILIKE '%Charlie Curnow' GROUP BY p.id, p.name, t.id, t.name",
+          "row_count": 1,
+          "error": null,
+          "input_tokens": 3648,
+          "output_tokens": 420
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "Response states Charlie Curnow kicked 57 goals in 2024, matching the provided ground-truth total and includes the required strings."
+      },
+      "error": null
+    },
+    {
+      "case_id": "salv_top_disposals",
+      "tags": [
+        "smoke",
+        "single",
+        "top_n",
+        "salvaged"
+      ],
+      "source": "salvaged",
+      "turns": [
+        {
+          "query": "Top 5 disposal getters in 2024",
+          "response_text": "Top disposals in 2024:\n\n| # | Name | Team | Total Disposals |\n| --- | --- | --- | --- |\n| 1 | Lachie Neale | Brisbane Lions | 762 |\n| 2 | Lachie Whitfield | Greater Western Sydney | 754 |\n| 3 | Tom Green | Greater Western Sydney | 719 |\n| 4 | Dayne Zorko | Brisbane Lions | 711 |\n| 5 | Zak Butters | Port Adelaide | 705 |",
+          "latency_s": 12.225,
+          "chart_spec": {
+            "version": "1",
+            "chartType": "bar",
+            "title": "Disposals 2024",
+            "data": [
+              {
+                "x": "Lachie Neale",
+                "total_disposals": 762
+              },
+              {
+                "x": "Lachie Whitfield",
+                "total_disposals": 754
+              },
+              {
+                "x": "Tom Green",
+                "total_disposals": 719
+              },
+              {
+                "x": "Dayne Zorko",
+                "total_disposals": 711
+              },
+              {
+                "x": "Zak Butters",
+                "total_disposals": 705
+              }
+            ],
+            "series": [
+              {
+                "key": "total_disposals",
+                "name": "Total Disposals",
+                "color": "#C2581C"
+              }
+            ],
+            "xAxis": {
+              "label": "Name",
+              "tickAngle": -45.0
+            },
+            "yAxis": {
+              "label": "Total Disposals",
+              "domain": [
+                0.0,
+                914.4
+              ],
+              "integerOnly": true
+            },
+            "colors": [
+              "#C2581C",
+              "#2D7A6F",
+              "#D4794D",
+              "#246359",
+              "#8C7B6B",
+              "#A30046",
+              "#D4001A",
+              "#002B5C"
+            ],
+            "annotations": [],
+            "legend": false
+          },
+          "sql": "SELECT p.name, SUM(ps.disposals) AS total_disposals, t.name AS team FROM player_stats ps JOIN players p ON ps.player_id = p.id JOIN matches m ON ps.match_id = m.id JOIN teams t ON ps.team_id = t.id WHERE m.season = 2024 AND ps.disposals IS NOT NULL GROUP BY p.id, p.name, t.id, t.name ORDER BY total_disposals DESC NULLS LAST LIMIT 5",
+          "row_count": 5,
+          "error": null,
+          "input_tokens": 4072,
+          "output_tokens": 563
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": null,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "partially_correct",
+        "reason": "Response includes 'green' and names 'neale' and 'whitfield' as required, but several disposal totals and rankings are incorrect (e.g., Tom Green shown with 719 instead of 770 and Treloar omitted), so the facts are not fully accurate."
+      },
+      "error": null
+    },
+    {
+      "case_id": "salv_chart_trend",
+      "tags": [
+        "smoke",
+        "chart",
+        "trend",
+        "salvaged"
+      ],
+      "source": "salvaged",
+      "turns": [
+        {
+          "query": "Show Carlton's average score per season from 2015 to 2024",
+          "response_text": "Here's how Carlton's numbers have changed from 2015 to 2024.",
+          "latency_s": 22.095,
+          "chart_spec": {
+            "version": "1",
+            "chartType": "line",
+            "title": "Carlton Average Score (2015-2024)",
+            "data": [
+              {
+                "x": "2015.0",
+                "avg_score": 69.3
+              },
+              {
+                "x": "2016.0",
+                "avg_score": 71.3
+              },
+              {
+                "x": "2017.0",
+                "avg_score": 72.5
+              },
+              {
+                "x": "2018.0",
+                "avg_score": 61.5
+              },
+              {
+                "x": "2019.0",
+                "avg_score": 73.1
+              },
+              {
+                "x": "2020.0",
+                "avg_score": 59.8
+              },
+              {
+                "x": "2021.0",
+                "avg_score": 79.4
+              },
+              {
+                "x": "2022.0",
+                "avg_score": 84.4
+              },
+              {
+                "x": "2023.0",
+                "avg_score": 82.0
+              },
+              {
+                "x": "2024.0",
+                "avg_score": 92.6
+              }
+            ],
+            "series": [
+              {
+                "key": "avg_score",
+                "name": "Avg Score",
+                "color": "#C2581C"
+              }
+            ],
+            "xAxis": {
+              "label": "Season",
+              "integerOnly": true
+            },
+            "yAxis": {
+              "label": "Avg Score"
+            },
+            "colors": [
+              "#C2581C",
+              "#2D7A6F",
+              "#D4794D",
+              "#246359",
+              "#8C7B6B",
+              "#A30046",
+              "#D4001A",
+              "#002B5C"
+            ],
+            "annotations": [],
+            "legend": false
+          },
+          "sql": "SELECT m.season, ROUND(AVG(CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END), 1) AS avg_score FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id) WHERE t.name = 'Carlton' AND m.season BETWEEN 2015 AND 2024 AND NOT (m.home_score = 0 AND m.away_score = 0) GROUP BY m.season ORDER BY m.season",
+          "row_count": 10,
+          "error": null,
+          "input_tokens": 3503,
+          "output_tokens": 873
+        }
+      ],
+      "checks": {
+        "facts": true,
+        "chart": true,
+        "no_data": null,
+        "correction": null,
+        "sql": null
+      },
+      "passed": true,
+      "judge": {
+        "verdict": "correct",
+        "reason": "Response includes the required mention of 'carlton' and provides a chart of average scores for 2015\u20132024 as requested."
+      },
+      "error": null
+    }
+  ],
+  "summary": {
+    "num_cases": 15,
+    "num_turns": 18,
+    "passed": 15,
+    "failed": 0,
+    "pass_rate": 1.0,
+    "checks": {
+      "facts": {
+        "n": 15,
+        "passed": 15
+      },
+      "chart": {
+        "n": 3,
+        "passed": 3
+      },
+      "no_data": {
+        "n": 2,
+        "passed": 2
+      },
+      "correction": {
+        "n": 3,
+        "passed": 3
+      }
+    },
+    "latency_s": {
+      "min": 6.994,
+      "max": 28.196,
+      "avg": 15.37
+    },
+    "tokens": {
+      "input_tokens": 67982,
+      "output_tokens": 14157
+    },
+    "harness_errors": [],
+    "judge": {
+      "correct": 12,
+      "incorrect": 1,
+      "partially_correct": 2
+    }
+  }
+}

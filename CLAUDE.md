@@ -1,6 +1,6 @@
 # AFL App — CLAUDE.md
 
-This is **Footy-NAC** (Not Another Commentator): an AI-powered AFL analytics platform. Users ask natural-language questions about AFL stats, get interactive Plotly charts, and follow live games in real-time.
+This is **Footy-NAC** (Not Another Commentator): an AI-powered AFL analytics platform. Users ask natural-language questions about AFL stats, get interactive Recharts charts, and follow live games in real-time.
 
 ---
 
@@ -10,15 +10,15 @@ This is **Footy-NAC** (Not Another Commentator): an AI-powered AFL analytics pla
 AFL App/
 ├── backend/                     # Flask + LangGraph API
 │   ├── app/
-│   │   ├── agent/               # LangGraph pipeline (fast-path, graph, state, tools)
+│   │   ├── agent/               # LangGraph pipeline (graph, state, nodes, prompts/, eval/)
 │   │   ├── api/                 # REST + WebSocket endpoints (routes, websocket, analytics, reports)
-│   │   ├── analytics/           # Entity resolver, query builder, stats, validators
+│   │   ├── analytics/           # Entity resolver, context enrichment, stats, validators
 │   │   ├── data/                # SQLAlchemy models, database.py, ingestion scripts, migrations
 │   │   ├── middleware/          # Rate limiting (Flask-Limiter), usage tracking
 │   │   ├── scheduler/           # Background job scheduler
 │   │   ├── services/            # Business logic (conversations, live games, summaries, odds)
 │   │   ├── utils/               # JSON serialization, validators
-│   │   ├── visualization/       # Chart selection, Plotly builder, data preprocessor
+│   │   ├── visualization/       # Chart selection, Recharts spec builder (ChartSpecV1), preprocessor
 │   │   ├── __init__.py          # Flask app factory (CORS, SocketIO, blueprints)
 │   │   └── config.py            # Env var config
 │   ├── run.py                   # Entry point
@@ -39,8 +39,9 @@ AFL App/
 │   └── package.json
 │
 ├── database/migrations/         # SQL migrations V1–V6
-├── scripts/                     # ingest_data.py, init_db.py
-├── docs/                        # CONTEXT.md, plans/
+├── scripts/                     # ingest_data.py, init_db.py, benchmark_chat.py + benchmark_results/
+├── docs/                        # CONTEXT.md, BENCHMARK_BEFORE_AFTER.md, plans/
+├── eval_queries.txt             # 128 exploratory eval queries (parsed by the eval harness)
 ├── TODO.md
 └── CLAUDE.md                    # This file
 ```
@@ -55,7 +56,7 @@ AFL App/
 | LLM          | OpenAI `gpt-5-mini` (main), `gpt-5-nano` (news) |
 | Database     | PostgreSQL (Supabase / Railway), psycopg3       |
 | Frontend     | React 18, Vite, TypeScript, TailwindCSS         |
-| Charts       | Plotly (JSON spec from backend, rendered in frontend) |
+| Charts       | Recharts (backend emits validated `ChartSpecV1` JSON; frontend renders) |
 | Deployment   | Railway (backend + DB), static frontend         |
 | WebSockets   | Flask-SocketIO + geventwebsocket                |
 
@@ -111,45 +112,59 @@ DB_POOL_SIZE=5
 
 ## Agent Pipeline (Backend Core)
 
-The main query flow in `backend/app/agent/graph.py`:
+The main query flow in `backend/app/agent/graph.py` (class `AFLAnalyticsAgent`) — a single LangGraph pipeline, no fast-path/flags:
 
 ```
 User Query
     │
     ▼
-Fast-Path Router (fast_path.py)
-├── 40+ regex patterns → instant response (~100–300ms, no LLM)
-└── No match → LangGraph pipeline:
-        │
-        ▼
-    1. UNDERSTAND  (consolidated_llm.py)
-       Single LLM call: intent + entity extraction + SQL generation
-        │
-        ▼
-    2. ANALYZE_DEPTH
-       Summary vs in-depth analysis
-        │
-        ▼
-    3. PLAN (in-depth only)
-        │
-        ▼
-    4. EXECUTE
-       Run SQL against PostgreSQL, compute statistics
-        │
-        ▼
-    5. VISUALIZE (if applicable)
-       Heuristics (~90%) or LLM fallback → Plotly JSON spec
-        │
-        ▼
-    6. RESPOND
-       Template (simple) or LLM (complex) → natural language
+1. CLASSIFY_RESOLVE  (classify_resolve.py)
+   Cheap LLM call: turn type (new_question / follow_up / correction /
+   clarification_answer / chitchat) + entity extraction, then deterministic
+   entity resolution (EntityResolver). Corrections set bypass_cache and load
+   the prior turn's persisted sql/row_count/answer. Chitchat short-circuits
+   straight to RESPOND.
+    │
+    ▼
+2. RETRIEVE_CONTEXT  (retrieve_context.py)
+   Deterministic: prunes per-table schema docs (schema_docs.py) + picks
+   top-k verified SQL examples (sql_examples.py) + conversation snippet.
+    │
+    ▼
+3. GENERATE_SQL  (generate_sql.py)
+   One focused LLM call: final intent + SQL. All retry loops feed back here.
+    │
+    ▼
+4. ANALYZE_DEPTH → 5. PLAN
+   Summary vs in-depth analysis mode; analysis steps.
+    │
+    ▼
+6. EXECUTE
+   Run validated SQL against PostgreSQL, compute statistics. Then routes:
+   ├── DB error → back to GENERATE_SQL with the exact error + failed SQL
+   │   (self-correct loop, shared cap of 3 generate_sql calls per turn)
+   ├── 0 rows → DIAGNOSE_EMPTY (diagnose_empty.py, deterministic, no LLM):
+   │   explains WHY (season out of range, player debut, bad filter...);
+   │   regenerates SQL once if obviously fixable, else responds with the
+   │   why-no-data facts
+   └── rows → REVIEW (review.py): cheap LLM sanity check that the results
+       answer the question (skipped for trivial template answers); a NO
+       verdict triggers ONE critique-driven regen under the same cap
+    │
+    ▼
+7. VISUALIZE (if applicable)
+   Heuristics first, LLM fallback for ambiguous cases → RechartsBuilder
+   emits a `ChartSpecV1` spec (validated; invalid specs are dropped, never sent)
+    │
+    ▼
+8. RESPOND
+   Template (simple) or LLM (complex) → natural language
 ```
 
-**Key optimisations:**
-- `consolidated_llm.py` — merges UNDERSTAND + SQL into one API call (~500ms saved)
-- `fast_path.py` — regex for team wins, grand final winners, top-N lists, off-topic detection
-- In-memory LRU cache (128 entries) for identical (query, context) pairs
-- Chart selection uses heuristics before LLM; LLM only for ambiguous cases
+**Key details:**
+- In-memory LRU cache (128 entries) for identical (query, context) pairs; correction turns bypass cache reads
+- Real token usage accumulated in `state["token_usage"]` across every LLM call
+- Eval harness: `cd backend && venv/bin/python -m app.agent.eval --subset smoke15 [--judge]` (in-process; `--ws` drives a running backend). WS-level benchmark: `backend/venv/bin/python scripts/benchmark_chat.py` + `scripts/score_baseline.py`. Results in `scripts/benchmark_results/`; before/after summary in `docs/BENCHMARK_BEFORE_AFTER.md`
 
 ---
 
@@ -158,7 +173,7 @@ Fast-Path Router (fast_path.py)
 TypedDict flowing through LangGraph nodes:
 - `user_query`, `intent`, `entities` (teams, players, seasons, metrics)
 - `sql_query`, `query_results` (Pandas DataFrame)
-- `visualization_spec` (Plotly JSON)
+- `visualization_spec` (ChartSpecV1 JSON for Recharts)
 - `natural_language_summary`, `confidence` (0.0–1.0)
 
 ---
@@ -168,7 +183,7 @@ TypedDict flowing through LangGraph nodes:
 Core tables:
 - **teams** — 18 AFL teams with metadata
 - **players** — player registry (active and historical)
-- **matches** — 6,243 matches (1990–2025), quarter-by-quarter scoring
+- **matches** — 6,946 matches (1990–2026), quarter-by-quarter scoring
 - **player_stats** — 273k+ rows of per-match player stats (disposals, kicks, goals, etc.)
 - **team_stats** — per-match team aggregates
 - **conversations** — JSONB chat history (UUID keyed)
@@ -225,7 +240,7 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 
 - **WebSocket** — `useAgentWebSocket` hook; singleton socket to avoid React StrictMode duplicates
 - **Streaming** — backend emits `thinking` events; UI shows real-time step progress
-- **Charts** — `ChartRenderer` renders Plotly JSON spec from backend response
+- **Charts** — `ChartRenderer` (Recharts) renders the backend's `ChartSpecV1` spec; specs are validated with zod (`types/chartSpec.ts`), wrapped in `ChartErrorBoundary`, and fall back to `DataTable` on invalid/unrenderable specs (no white screens)
 - **Conversation persistence** — `conversationId` stored in `localStorage`
 - **Spoiler mode** — `SpoilerContext` (global toggle, persisted in `localStorage`); hides scores/results
 - **Live games** — polled via `useLiveGames` / `useLiveGameDetail`; `LiveDashboard` shows sidebar + stats + events
@@ -241,7 +256,6 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 ## Analytics Module (`analytics/`)
 
 - `entity_resolver.py` — maps nicknames ("Cats" → "Geelong"), abbreviations, fuzzy typos to DB values
-- `query_builder.py` — GPT-5-nano text-to-SQL with schema context
 - `context_enrichment.py` — adds form analysis, venue stats, historical context
 - `data_quality.py` — confidence scoring, outlier detection, sample size validation
 - `statistics.py` — fantasy points, disposal efficiency, moving averages
@@ -250,12 +264,13 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 
 ## Visualization Module (`visualization/`)
 
-1. `chart_selector.py` — heuristics first (single row → none, time series → line, top-N → bar); LLM fallback
+1. `chart_selector.py` — heuristics first (single row → none, time series → line, top-N → bar); LLM fallback. Uses the internal chart-type vocabulary (`horizontal_bar`, `stacked_bar`, `box`, `comparison`, `trend`, ...)
 2. `data_preprocessor.py` — aggregation, pivoting, null handling
-3. `plotly_builder.py` — builds Plotly JSON spec; Apple-inspired colour palette
-4. `layout_optimizer.py` — responsive sizing, axis formatting, legend placement
+3. `recharts_builder.py` — the single seam that translates internal chart types into the wire contract and builds the spec (e.g. `horizontal_bar` → `bar` + `orientation: "horizontal"`, `stacked_bar` → `groupedBar` + per-series `stackId`, `box` → `groupedBar` median/range)
+4. `spec.py` — `ChartSpecV1` pydantic contract (mirrored by zod in `frontend/src/types/chartSpec.ts`). Every spec is validated before emission; on validation failure nothing is sent
+5. `layout_config.py` / `layout_optimizer.py` — sizing, axis formatting, legend placement
 
-Supported chart types: `line`, `bar`, `horizontal_bar`, `grouped_bar`, `stacked_bar`, `scatter`, `pie`, `box`
+Wire-format chart types (`ChartSpecV1.chartType`, camelCase): `line`, `bar`, `groupedBar`, `pie`, `scatter`, `area`, `table`
 
 ---
 
@@ -324,12 +339,15 @@ Single worker required for WebSocket state. DB on Railway PostgreSQL (Supabase-c
 
 ---
 
-## Current Branch: `feature/live-games-backend`
+## Current Branch: `chat-restructure`
 
-Active development work:
-- Live Games screen redesign (sidebar layout, quarter summaries, live stats, event timeline)
-- New files: `backend/app/api/reports.py`, `backend/app/data/migrations/add_user_reports.py`
-- Modified: agent graph, consolidated LLM, analytics API, websocket handlers, RSS fetcher, models, chart selector
+Chat pipeline restructure (Milestones 0–5, complete):
+- M0: WS-level baseline benchmark (`scripts/benchmark_chat.py` + `scripts/score_baseline.py`)
+- M1: backend quick fixes (dynamic season ceiling, word-boundary SQL validator, correction cache-bypass, real token usage)
+- M2: frontend crash guards (ChartErrorBoundary, zod chart spec validation, DataTable fallback)
+- M3: new pipeline (classify_resolve → retrieve_context → generate_sql → execute with SQL self-correct / diagnose_empty / review loops); legacy fast-path/consolidated-LLM modules deleted
+- M4: `ChartSpecV1` contract (backend pydantic + frontend zod), validated-only chart emission
+- M5: eval harness (`backend/app/agent/eval/`, `python -m app.agent.eval`) + `docs/BENCHMARK_BEFORE_AFTER.md`
 
 ---
 

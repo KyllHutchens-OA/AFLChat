@@ -103,9 +103,10 @@ Open http://localhost:3000 and chat with the agent!
 ## Architecture
 
 ```
-User Query → WebSocket → LangGraph Agent → GPT-4 → SQL → Database → Plotly Chart → Frontend
+User Query → WebSocket → LangGraph Agent → gpt-5-mini → SQL → Database → ChartSpecV1 (Recharts) → Frontend
                 ↓
-        [UNDERSTAND → PLAN → EXECUTE → VISUALIZE → RESPOND]
+[CLASSIFY_RESOLVE → RETRIEVE_CONTEXT → GENERATE_SQL → EXECUTE
+        → (self-correct / diagnose_empty / review loops) → VISUALIZE → RESPOND]
 ```
 
 ## Troubleshooting
@@ -124,7 +125,7 @@ User Query → WebSocket → LangGraph Agent → GPT-4 → SQL → Database → 
 
 ### "Agent returns no results"
 - Verify the team or player name is spelled correctly (use exact names: "Richmond" not "Richmond Tigers")
-- Check the year range - match data: 1990-2025, player stats: 2012-2025
+- Check the year range - match data: 1990-2026 (player stats coverage varies by player)
 - Try rephrasing your question to be more specific
 
 ## Development
@@ -137,17 +138,18 @@ backend/
 │   │   ├── graph.py    # Main agent workflow
 │   │   ├── state.py    # Agent state schema
 │   │   └── tools.py    # Agent tools
-│   ├── analytics/      # SQL generation
-│   │   ├── query_builder.py  # Text-to-SQL
-│   │   └── validators.py     # SQL validation
+│   ├── analytics/      # Entity resolution + validation
+│   │   ├── entity_resolver.py # Team/player name resolution
+│   │   └── validators.py      # SQL validation
 │   ├── api/            # Flask routes
 │   │   ├── routes.py   # REST endpoints
 │   │   └── websocket.py # WebSocket handlers
 │   ├── data/           # Database
 │   │   ├── models.py   # SQLAlchemy models
 │   │   └── ingestion/  # Data scrapers
-│   └── visualization/  # Plotly charts
-│       └── plotly_builder.py
+│   └── visualization/  # Recharts chart specs
+│       ├── recharts_builder.py # Builds ChartSpecV1 specs
+│       └── spec.py             # ChartSpecV1 pydantic contract
 ├── run.py              # Entry point
 └── requirements.txt
 ```
