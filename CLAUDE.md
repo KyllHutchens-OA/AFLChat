@@ -168,7 +168,7 @@ User Query
   - `venv/bin/python -m app.agent.eval --subset smoke` (fast, ~20 cases); `--subset full` (121 ground-truth cases, the gate); `dev` (full minus 20 held-out cases: tune on this, never on `heldout`); `adversarial`; `--list-subsets`
   - `--engine v2|v2-ws|v3` (v3 adapter lands in 1E at `app/agent/eval/engines/v3.py`); `--case id1,id2`; `--repeat 3` (stability); `--strict` (also fails flaky cases, turns over `--max-turn-budget` 30s / `--token-budget`, and p90 over `--p90-budget` 15s)
   - `--truth-only` prints each case's live verification-SQL result without calling any LLM; `--judge [--judge-model M]` is triage only (never changes pass/fail)
-  - Baselines: `--save-baseline <name>` writes `app/agent/eval/baselines/<name>.json`; `--compare <name>` diffs a run per case (status, latency, tokens); `--diff A B` diffs two saved reports. v2 baseline: `baselines/v2_2026-09-28.json`
+  - Baselines: `--save-baseline <name>` writes `app/agent/eval/baselines/<name>.json`; `--compare <name>` diffs a run per case (status, latency, tokens); `--diff A B` diffs two saved reports; `--rescore <name>` re-scores saved turns against current cases + live truth (no LLM). v2 baseline: `baselines/v2_2026-09-28.json`
   - The engine's DB connections are forced read-only during evals (`--allow-db-writes` to disable)
 - WS-level benchmark (legacy M0): `backend/venv/bin/python scripts/benchmark_chat.py` + `scripts/score_baseline.py`. Before/after summary in `docs/BENCHMARK_BEFORE_AFTER.md`
 
