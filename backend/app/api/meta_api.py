@@ -1,5 +1,5 @@
 """
-Meta API — small facts about the data the frontend needs (e.g. starter chips).
+Meta API: small facts about the data the frontend needs (e.g. starter chips).
 """
 import time
 import logging

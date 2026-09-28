@@ -246,7 +246,7 @@ def get_schema_docs(intent: Optional[str], entities: Optional[Dict[str, Any]] = 
       - `live_games` is added when no season is specified, or a named season is the
         latest known season (current-year queries commonly touch live/recent games).
       - `squiggle_predictions` is added only for tipping_advice (mostly for
-        documentation completeness — that intent is normally answered by
+        documentation completeness; that intent is normally answered by
         TippingTool, not generated SQL).
       - `team_stats` is added only for team_analysis queries whose metrics name a
         team-level advanced stat (inside 50s, clearances, etc.) not just scores.

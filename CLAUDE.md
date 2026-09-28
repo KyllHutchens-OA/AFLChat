@@ -187,7 +187,7 @@ Core tables:
 - **team_stats** — per-match team aggregates
 - **conversations** — JSONB chat history (UUID keyed)
 - **news_articles** — LLM-enriched AFL news
-- **betting_odds** — legacy, unused (odds feature cut; drop with `scripts/db/drop_betting_odds.sql`)
+- **betting_odds**: legacy, unused (odds feature cut; drop with `scripts/db/drop_betting_odds.sql`)
 - **api_usage** — LLM token/cost tracking
 - **page_views** — analytics
 - **live_games**, **live_game_events**, **live_game_milestones**, **quarter_snapshots** — live match data
@@ -202,7 +202,7 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 - `GET /api/health` — health check (DB + OpenAI)
 - `POST /api/chat/message` — non-streaming chat
 - `GET /api/conversations/<id>` — load history
-- `GET /api/meta/season` — current / latest completed season + `in_season` (drives chat starter chips; `api/meta_api.py`)
+- `GET /api/meta/season`: current / latest completed season + `in_season` (drives chat starter chips; `api/meta_api.py`)
 - `GET /api/admin/analytics/*` — admin dashboard
 
 **WebSocket** (`/socket.io` via `api/websocket.py`):

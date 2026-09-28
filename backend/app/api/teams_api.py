@@ -1,5 +1,5 @@
 """
-Teams API — team listing endpoint.
+Teams API: team listing endpoint.
 """
 import time
 import logging
