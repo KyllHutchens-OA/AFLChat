@@ -68,13 +68,10 @@ _SHAPE_TO_CHART = {
 _AGGREGATE_FUNCS = ("SUM(", "COUNT(", "AVG(", "MAX(", "MIN(")
 
 
-def _accumulate_usage(state: Dict[str, Any], usage: Any) -> None:
-    """Merge real OpenAI token usage into the per-request state accumulator."""
-    if not usage:
-        return
-    totals = state.setdefault("token_usage", {"input_tokens": 0, "output_tokens": 0})
-    totals["input_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
-    totals["output_tokens"] += getattr(usage, "completion_tokens", 0) or 0
+def _accumulate_usage(state: Dict[str, Any], usage: Any, model: Optional[str] = None) -> None:
+    """Merge real OpenAI token usage (per model) into the per-request state accumulator."""
+    from app.middleware.usage_tracker import record_llm_usage
+    record_llm_usage(state, usage, model)
 
 
 def _format_examples(examples: Optional[List[Dict[str, Any]]]) -> str:
@@ -238,7 +235,7 @@ def generate_sql(
             response_format={"type": "json_object"},
             reasoning_effort=reasoning_effort,
         )
-        _accumulate_usage(state, response.usage)
+        _accumulate_usage(state, response.usage, getattr(response, "model", None))
 
         raw = (response.choices[0].message.content or "").strip()
         data = json.loads(raw)
@@ -311,7 +308,7 @@ def generate_sql(
 
         logger.info(
             f"GENERATE_SQL: OK — intent={intent}, viz={requires_viz}, "
-            f"chart_hint={chart_type}, sql={sql[:80]}..."
+            f"chart_hint={chart_type}, sql_length={len(sql or '')}"
         )
 
     except Exception as e:

@@ -486,9 +486,12 @@ Important:
             # out again in _validate_and_enhance's returned public fields... no,
             # it's explicitly carried through — see _validate_and_enhance).
             usage = response.usage
+            details = getattr(usage, "prompt_tokens_details", None) if usage else None
             result["_usage"] = {
                 "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
                 "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
+                "cached_input_tokens": (getattr(details, "cached_tokens", 0) or 0) if details else 0,
+                "model": getattr(response, "model", None),
             } if usage else None
 
             logger.info(f"LLM chart selection: {result.get('chart_type')} (confidence: {result.get('confidence')})")

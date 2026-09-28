@@ -48,26 +48,14 @@ client = OpenAI(
     timeout=httpx.Timeout(60.0, connect=10.0)
 )
 
-def _accumulate_usage(state: "AgentState", usage: Optional[Any]) -> None:
+def _accumulate_usage(state: "AgentState", usage: Optional[Any], model: Optional[str] = None) -> None:
     """
-    Merge real OpenAI token usage into the per-request state accumulator.
-
-    Accepts either an OpenAI `response.usage` object (with prompt_tokens /
-    completion_tokens attributes) or a plain dict with input_tokens/output_tokens
-    (used by helper functions that return usage explicitly).
+    Merge real OpenAI token usage (per model) into the per-request state accumulator.
+    Accepts an OpenAI `response.usage` object or a dict with input_tokens/output_tokens
+    (and optionally model / cached_input_tokens).
     """
-    if not usage:
-        return
-
-    totals = state.setdefault("token_usage", {"input_tokens": 0, "output_tokens": 0})
-
-    if isinstance(usage, dict):
-        totals["input_tokens"] += usage.get("input_tokens", 0) or 0
-        totals["output_tokens"] += usage.get("output_tokens", 0) or 0
-    else:
-        # OpenAI SDK CompletionUsage object
-        totals["input_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
-        totals["output_tokens"] += getattr(usage, "completion_tokens", 0) or 0
+    from app.middleware.usage_tracker import record_llm_usage
+    record_llm_usage(state, usage, model)
 
 
 class AFLAnalyticsAgent:
@@ -383,7 +371,7 @@ class AFLAnalyticsAgent:
         state["thinking_message"] = "Reading your question..."
         self._emit_progress(state, "classify_resolve", "Reading your question...")
 
-        logger.info(f"CLASSIFY_RESOLVE: Processing query: {state['user_query']}")
+        logger.info(f"CLASSIFY_RESOLVE: Processing query (length={len(state['user_query'])})")
 
         from app.agent.classify_resolve import classify_and_resolve
 
@@ -421,7 +409,7 @@ class AFLAnalyticsAgent:
         state["thinking_message"] = "Looking up relevant AFL data..."
         self._emit_progress(state, "retrieve_context", "Looking up relevant AFL data...")
 
-        logger.info(f"RETRIEVE_CONTEXT: Processing query: {state['user_query']}")
+        logger.info("RETRIEVE_CONTEXT: Processing query")
 
         from app.agent.retrieve_context import retrieve_context
 
@@ -459,7 +447,7 @@ class AFLAnalyticsAgent:
         state["thinking_message"] = "🔨 Generating SQL query..."
         self._emit_progress(state, "generate_sql", "🔨 Generating SQL query...")
 
-        logger.info(f"GENERATE_SQL: Processing query: {state['user_query']}")
+        logger.info("GENERATE_SQL: Processing query")
 
         from app.agent.generate_sql import generate_sql
 
@@ -904,7 +892,7 @@ class AFLAnalyticsAgent:
                     failed_sql=None,
                 )
 
-            logger.info(f"EXECUTE: Using pre-generated SQL from generate_sql: {pre_sql[:80]}...")
+            logger.debug(f"EXECUTE: Using pre-generated SQL from generate_sql: {pre_sql}")
             state["sql_query"] = pre_sql
 
             # Fix common LLM SQL mistake: ILIKE 'Name%' should be ILIKE '%Name%'
@@ -916,7 +904,7 @@ class AFLAnalyticsAgent:
                 state["sql_query"]
             )
 
-            logger.info(f"Generated SQL: {state['sql_query']}")
+            logger.debug(f"Generated SQL: {state['sql_query']}")
 
             # Step 2: Execute query (check cache first)
             # Corrections (turn_type == "correction" → bypass_cache, set by
@@ -933,7 +921,7 @@ class AFLAnalyticsAgent:
             else:
                 state["thinking_message"] = "⚡ Querying AFL database (6,243 matches)..."
                 self._emit_progress(state, "execute", "⚡ Querying AFL database (6,243 matches)...")
-                logger.info(f"EXECUTE: Calling DatabaseTool.query_database with SQL: {state['sql_query'][:200]}...")
+                logger.info("EXECUTE: Calling DatabaseTool.query_database")
                 db_result = DatabaseTool.query_database(state["sql_query"])
                 logger.info(f"EXECUTE: Database query result: success={db_result.get('success')}, rows={db_result.get('rows_returned')}, error={db_result.get('error')}")
 
@@ -1429,7 +1417,7 @@ Rules:
                 messages=[{"role": "user", "content": prompt}],
                 max_completion_tokens=300,
             )
-            _accumulate_usage(state, response.usage)
+            _accumulate_usage(state, response.usage, getattr(response, "model", None))
 
             result = (response.choices[0].message.content or "").strip()
             if result:
@@ -2154,7 +2142,7 @@ Rules:
                 logger.info(f"NULL check (list): len(data)={len(data)}, all_null={all_null}")
             else:
                 all_null = data.isnull().all().all() if len(data) > 0 else False
-                logger.info(f"NULL check (DataFrame): len(data)={len(data)}, all_null={all_null}, data=\n{data}")
+                logger.info(f"NULL check (DataFrame): len(data)={len(data)}, all_null={all_null}")
 
             if all_null:
                 if state.get("diagnosis"):
@@ -2358,7 +2346,7 @@ Provide a concise analysis (3-5 sentences):"""
                 messages=[{"role": "user", "content": prompt}],
                 reasoning_effort="low",
             )
-            _accumulate_usage(state, response.usage)
+            _accumulate_usage(state, response.usage, getattr(response, "model", None))
 
             llm_response = (response.choices[0].message.content or "").strip()
             # Add data range disclaimer for all-time queries

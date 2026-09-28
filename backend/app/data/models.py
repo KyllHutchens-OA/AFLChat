@@ -296,6 +296,7 @@ class Conversation(Base):
     user_id = Column(String(100))
     chat_type = Column(String(20), nullable=False, default='afl', index=True)  # 'afl' or 'resume'
     messages = Column(JSONB, nullable=False, default=list)
+    owner_token_hash = Column(String(64))  # sha256 hex of the owner token; required to read/append
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -348,6 +349,7 @@ class APIUsage(Base):
     output_tokens = Column(Integer, default=0)
     estimated_cost_usd = Column(Numeric(10, 6))
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    request_id = Column(String(36), index=True)  # groups the per-model rows of one chat turn
 
     def __repr__(self):
         return f"<APIUsage {self.visitor_id} ${self.estimated_cost_usd}>"
