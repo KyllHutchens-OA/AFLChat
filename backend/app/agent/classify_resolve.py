@@ -50,13 +50,10 @@ VALID_TURN_TYPES = {
 }
 
 
-def _accumulate_usage(state: Dict[str, Any], usage: Any) -> None:
-    """Merge real OpenAI token usage into the per-request state accumulator."""
-    if not usage:
-        return
-    totals = state.setdefault("token_usage", {"input_tokens": 0, "output_tokens": 0})
-    totals["input_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
-    totals["output_tokens"] += getattr(usage, "completion_tokens", 0) or 0
+def _accumulate_usage(state: Dict[str, Any], usage: Any, model: Optional[str] = None) -> None:
+    """Merge real OpenAI token usage (per model) into the per-request state accumulator."""
+    from app.middleware.usage_tracker import record_llm_usage
+    record_llm_usage(state, usage, model)
 
 
 def _build_recent_context(conversation_history: Optional[List[Dict[str, Any]]]) -> str:
@@ -123,7 +120,7 @@ def classify_and_resolve(
             response_format={"type": "json_object"},
             reasoning_effort="low",
         )
-        _accumulate_usage(state, response.usage)
+        _accumulate_usage(state, response.usage, getattr(response, "model", None))
 
         raw = (response.choices[0].message.content or "").strip()
         data = json.loads(raw)
@@ -167,9 +164,9 @@ def classify_and_resolve(
             else:
                 logger.info("CLASSIFY: turn_type=correction but no prior assistant message found in history")
 
-        logger.info(
-            f"CLASSIFY: turn_type={turn_type}, entities={updates.get('entities')}, "
-            f"complaint_summary={complaint_summary!r}"
+        logger.info(f"CLASSIFY: turn_type={turn_type}")
+        logger.debug(
+            f"CLASSIFY: entities={updates.get('entities')}, complaint_summary={complaint_summary!r}"
         )
 
     except Exception as e:

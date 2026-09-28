@@ -5,8 +5,9 @@ from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 from app.data.database import Session
 from app.data.models import Match, Team, PageView
-from app.utils.validators import PageViewRequest, ChatMessageRequest
+from app.utils.validators import PageViewRequest
 from app.middleware.rate_limiter import limiter
+from app.api.admin_auth import require_admin_token
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import os
@@ -53,50 +54,19 @@ def health_check():
     return jsonify(health), status_code
 
 
-@bp.route('/chat/message', methods=['POST'])
-@limiter.limit("10 per minute")
-async def chat_message():
-    """
-    Handle chat messages (REST endpoint for non-streaming).
-    For streaming, use WebSocket instead.
-    """
-    try:
-        # Validate input
-        try:
-            data = ChatMessageRequest(**request.get_json())
-        except ValidationError as e:
-            details = [{'field': '.'.join(str(l) for l in err['loc']), 'message': err['msg']}
-                       for err in e.errors()]
-            return jsonify({'error': 'Invalid input', 'details': details}), 400
-
-        message = data.message
-        conversation_id = data.conversation_id
-
-        # Import agent
-        from app.agent import agent
-
-        # Run agent workflow
-        final_state = await agent.run(message, conversation_id)
-
-        # Return response
-        return jsonify({
-            'conversation_id': conversation_id or 'new-conv-id',
-            'status': 'complete',
-            'response': final_state.get('natural_language_summary', 'Unable to process query'),
-            'confidence': final_state.get('confidence', 0.0),
-            'sources': final_state.get('sources', [])
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Error processing message: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
-
-
 @bp.route('/conversations/<conversation_id>', methods=['GET'])
+@limiter.limit("60 per minute")
 def get_conversation(conversation_id):
-    """Get conversation history."""
+    """Get conversation history. Requires the owner token issued at creation (X-Conversation-Token)."""
     try:
         from app.services.conversation_service import ConversationService
+
+        owner_token = request.headers.get('X-Conversation-Token', '')
+        if not owner_token:
+            return jsonify({'error': 'Unauthorized'}), 401
+        # Same 404 for unknown id and wrong token: no existence oracle
+        if not ConversationService.verify_owner(conversation_id, owner_token):
+            return jsonify({'error': 'Conversation not found'}), 404
 
         data = ConversationService.get_conversation(conversation_id)
         if not data:
@@ -104,7 +74,7 @@ def get_conversation(conversation_id):
 
         return jsonify({
             'conversation_id': data['id'],
-            'messages': data['messages'],
+            'messages': ConversationService.public_messages(data['messages']),
             'created_at': data['created_at']
         }), 200
 
@@ -128,11 +98,8 @@ def track_page_view():
                        for err in e.errors()]
             return jsonify({'error': 'Invalid input', 'details': details}), 400
 
-        # Get client IP address (handles proxies via X-Forwarded-For)
-        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-        if ip_address:
-            # X-Forwarded-For can contain multiple IPs; take the first (client IP)
-            ip_address = ip_address.split(',')[0].strip()
+        # Client IP (ProxyFix in create_app resolves the trusted proxy hop)
+        ip_address = request.remote_addr
 
         session = Session()
         try:
@@ -156,6 +123,7 @@ def track_page_view():
 
 
 @bp.route('/analytics/summary', methods=['GET'])
+@require_admin_token
 def get_analytics_summary():
     """Get analytics summary."""
     try:

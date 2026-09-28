@@ -12,8 +12,11 @@ class Config:
     """Base configuration."""
 
     # Flask
-    SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
     FLASK_ENV = os.getenv("FLASK_ENV", "development")
+    # Dev fallback only; create_app() refuses to start without SECRET_KEY elsewhere
+    SECRET_KEY = os.getenv("SECRET_KEY") or (
+        "dev-secret-key-for-local-only" if FLASK_ENV == "development" else None
+    )
     DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
 
     # Database

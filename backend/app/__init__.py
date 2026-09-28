@@ -26,10 +26,12 @@ def create_app(config=None):
     secret_key = os.getenv("SECRET_KEY")
     flask_env = os.getenv("FLASK_ENV", "development")
 
-    if flask_env == "production" and not secret_key:
-        raise ValueError("SECRET_KEY environment variable is required in production")
+    if not secret_key:
+        if flask_env != "development":
+            raise ValueError("SECRET_KEY environment variable is required outside development")
+        secret_key = 'dev-secret-key-for-local-only'
 
-    app.config['SECRET_KEY'] = secret_key or 'dev-secret-key-for-local-only'
+    app.config['SECRET_KEY'] = secret_key
 
     if config:
         app.config.update(config)
@@ -39,6 +41,12 @@ def create_app(config=None):
 
     # Initialize SocketIO
     socketio.init_app(app)
+
+    # Trust exactly one proxy hop (Railway edge) for client IP / scheme; wraps the
+    # SocketIO middleware too, so request.remote_addr is correct in WS handlers.
+    # Nothing else may read X-Forwarded-For directly.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
     # Initialize rate limiter
     from app.middleware.rate_limiter import limiter, ratelimit_error_handler
@@ -102,19 +110,27 @@ def create_app(config=None):
     # Register WebSocket handlers
     from app.api import websocket
 
-    # Start background scheduler (news, odds, predictions refresh)
-    from app.services.scheduler import get_scheduler
+    # Fail fast on missing agent DB / unpriced models (both raise outside development)
+    from app.data.database import get_agent_engine
+    get_agent_engine()
+    from app.middleware.usage_tracker import validate_configured_models
+    validate_configured_models()
 
-    # Start SSE listener for live games
-    from app.services.sse_listener import get_sse_listener
-    sse_listener = get_sse_listener(socketio=socketio)
-    sse_listener.start()
-    logger.info("✓ SSE listener started for live games")
+    # Background scheduler + SSE listener only when RUN_SCHEDULER=true (one prod worker).
+    # Off by default so local runs and extra web replicas never ingest or poll.
+    if os.getenv("RUN_SCHEDULER", "false").lower() == "true":
+        from app.services.scheduler import get_scheduler
+        from app.services.sse_listener import get_sse_listener
 
-    # Start scheduler
-    scheduler = get_scheduler(sse_listener=sse_listener)
-    scheduler.start()
-    logger.info("✓ Background data scheduler started")
+        sse_listener = get_sse_listener(socketio=socketio)
+        sse_listener.start()
+        logger.info("✓ SSE listener started for live games")
+
+        scheduler = get_scheduler(sse_listener=sse_listener)
+        scheduler.start()
+        logger.info("✓ Background data scheduler started")
+    else:
+        logger.info("RUN_SCHEDULER is not true: scheduler and SSE listener not started")
 
     # Log env var status for scheduler-dependent APIs
     theoddsapi_key = os.getenv("THEODDSAPI_KEY")
@@ -132,15 +148,12 @@ def create_app(config=None):
         response.headers['X-XSS-Protection'] = '1; mode=block'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
 
-        # Content Security Policy for HTML responses
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+
+        # The API serves JSON only; lock down anything rendered from it
         if response.content_type and 'text/html' in response.content_type:
             response.headers['Content-Security-Policy'] = (
-                "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' cdn.plot.ly; "
-                "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data: blob:; "
-                "connect-src 'self' wss: ws:; "
-                "font-src 'self' data:;"
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
             )
 
         return response

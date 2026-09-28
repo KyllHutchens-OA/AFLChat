@@ -2,7 +2,7 @@
 Input validation models using Pydantic.
 Prevents invalid data from reaching the application.
 """
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 import re
 
@@ -32,9 +32,13 @@ class PageViewRequest(BaseModel):
 
 
 class ChatMessageRequest(BaseModel):
-    """Validation for chat message requests."""
+    """Validation for WS chat_message payloads. Strings only (no coercion); extra keys ignored."""
+    model_config = ConfigDict(strict=True)
+
     message: str = Field(..., min_length=1, max_length=2000)
     conversation_id: Optional[str] = Field(None, max_length=100)
+    owner_token: Optional[str] = Field(None, max_length=128)
+    source: Optional[str] = Field(None, max_length=20)
 
     @field_validator('message')
     @classmethod

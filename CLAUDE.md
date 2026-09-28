@@ -91,15 +91,20 @@ python -m scripts.ingest_data
 
 Defined in `backend/.env`. Required:
 ```
-DB_STRING=postgresql://...       # PostgreSQL connection string
+DB_STRING=postgresql://...       # App role (footynac_app), never a superuser
+AGENT_DB_STRING=postgresql://... # Read-only agent_ro role for LLM SQL (dev falls back to DB_STRING)
 OPENAI_API_KEY=...
-SECRET_KEY=...
+SECRET_KEY=...                   # Also signs visitor tokens; dev-only fallback
+ANALYTICS_ADMIN_TOKEN=...        # Bearer token for /api/analytics/*; unset = all 401
 ```
 
 Optional:
 ```
-OPENAI_MODEL=gpt-5-mini          # Main LLM
+RUN_SCHEDULER=false              # true only on the one process that runs jobs + SSE listener
+OPENAI_MODEL=gpt-5-mini          # Main LLM (every model must have a PRICING entry, usage_tracker.py)
 NEWS_ENRICHMENT_MODEL=gpt-5-nano # Cheap enrichment LLM
+DAILY_LIMIT_PER_VISITOR=50 / DAILY_LIMIT_PER_IP=150 / GLOBAL_DAILY_LIMIT_USD=5.00
+AGENT_STATEMENT_TIMEOUT_MS=5000 / AGENT_MAX_ROWS=5000
 API_SPORTS_KEY=...               # Live player stats
 THEODDSAPI_KEY=...               # Betting odds (16 req/day budget)
 CORS_ORIGINS=http://localhost:3000
@@ -201,14 +206,15 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 
 **REST** (`backend/app/api/routes.py`):
 - `GET /api/health` — health check (DB + OpenAI)
-- `POST /api/chat/message` — non-streaming chat
-- `GET /api/conversations/<id>` — load history
-- `GET /api/admin/analytics/*` — admin dashboard
+- `GET /api/conversations/<id>` — load history; needs `X-Conversation-Token` (owner token), returns no SQL/entities
+- `GET /api/analytics/*`, `/api/analytics/summary` — admin dashboard; `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
 
 **WebSocket** (`/socket.io` via `api/websocket.py`):
-- Event `chat_message` — runs agent, emits `thinking` progress events
-- `connect` / `disconnect` — lifecycle
-- Rate limited: 10 messages/min per IP; daily per-visitor budget enforced
+- `connect` — takes `auth.visitor_token` (server-signed) or issues one via `visitor_token`
+- Event `chat_message` — `{message (<=2000 chars), conversation_id?, owner_token?}`; runs agent, emits `thinking` progress events; a new conversation emits `conversation_started {conversation_id, owner_token}` (the only time the token is sent)
+- Rate limited: 10 messages/min per IP; daily per-visitor + per-IP + global budget, fail closed
+
+**Security model** (1A): agent SQL passes `SQLValidator` (sqlglot, full tree) and runs as `agent_ro` in a READ ONLY transaction with a row cap; roles in `scripts/db/roles.sql`. `ProxyFix(x_for=1)` is the only source of client IPs; never read `X-Forwarded-For` directly.
 
 ---
 

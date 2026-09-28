@@ -92,6 +92,10 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+# conversation_id -> owner token (server requires it to append to a conversation)
+OWNER_TOKENS = {}
+
+
 class TurnCapture:
     """Mutable bucket for events belonging to the turn currently in flight."""
 
@@ -126,6 +130,10 @@ def build_client(capture: TurnCapture):
 
     @sio.on("conversation_started")
     def on_conversation_started(data):
+        data = dict(data or {})
+        token = data.pop("owner_token", None)
+        if token and data.get("conversation_id"):
+            OWNER_TOKENS[data["conversation_id"]] = token
         capture.conversation_started = data
 
     @sio.on("visualization")
@@ -165,6 +173,7 @@ def run_turn(sio, capture: TurnCapture, message: str, conversation_id):
     sio.emit("chat_message", {
         "message": message,
         "conversation_id": conversation_id,
+        "owner_token": OWNER_TOKENS.get(conversation_id),
         "source": "aflagent",
     })
     finished = capture.done.wait(TURN_TIMEOUT_S)

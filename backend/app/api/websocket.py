@@ -4,18 +4,25 @@ AFL Analytics Agent - WebSocket Handlers
 from app import socketio
 from app.services.conversation_service import ConversationService
 from app.utils.json_serialization import make_json_serializable
+from app.utils.validators import ChatMessageRequest
 from app.middleware.usage_tracker import UsageTracker
+from app.middleware.visitor_identity import issue_visitor_token, verify_visitor_token
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pydantic import ValidationError
 import logging
 import asyncio
-import os
+import json
+import re
 
 logger = logging.getLogger(__name__)
 
 # In-memory WebSocket rate limiter (10 messages/minute per IP)
 _ws_rate_limit: dict = defaultdict(list)
 WS_RATE_LIMIT = 10  # messages per minute
+
+# sid -> server-issued visitor id (single worker, see Procfile)
+_sid_visitors: dict = {}
 
 
 def _check_ws_rate_limit(ip: str) -> bool:
@@ -30,16 +37,29 @@ def _check_ws_rate_limit(ip: str) -> bool:
 
 
 @socketio.on('connect')
-def handle_connect():
-    """Handle client connection."""
+def handle_connect(auth=None):
+    """
+    Handle client connection. Resolves the visitor from the signed token in the
+    connect `auth` payload, or issues a new one (sent back as 'visitor_token').
+    """
     from flask import request
+    from flask_socketio import emit
     session_id = request.sid
+
+    token = auth.get('visitor_token') if isinstance(auth, dict) else None
+    visitor_id = verify_visitor_token(token)
+    if not visitor_id:
+        visitor_id, token = issue_visitor_token()
+        emit('visitor_token', {'token': token})
+    _sid_visitors[session_id] = visitor_id
     logger.info(f"Client connected - Session ID: {session_id}")
 
 
 @socketio.on('disconnect')
-def handle_disconnect():
+def handle_disconnect(*_args):
     """Handle client disconnection."""
+    from flask import request
+    _sid_visitors.pop(request.sid, None)
     logger.info("Client disconnected")
 
 
@@ -48,58 +68,68 @@ def handle_chat_message(data):
     """
     Handle incoming chat messages via WebSocket.
 
-    Expected data:
+    Expected data (validated by ChatMessageRequest; anything else is ignored):
         {
-            "message": "user query",
-            "conversation_id": "uuid" (optional)
+            "message": "user query" (1-2000 chars),
+            "conversation_id": "uuid" (optional),
+            "owner_token": "token from conversation_started" (required to continue a conversation),
+            "source": "aflagent" (optional)
         }
     """
     from flask import request
     session_id = request.sid
-    logger.info(f"Received message from session {session_id}: {data}")
+
+    # Emit function - send only to the requesting client using their session ID
+    def session_emit(event, data):
+        """Emit to the requesting client only"""
+        socketio.emit(event, data, room=session_id)
 
     try:
-        user_query = data.get('message')
-        conversation_id = data.get('conversation_id')
-        visitor_id = data.get('visitor_id') or session_id
-        source = data.get('source')  # 'aflagent' from standalone app, or None
-
-        # Get client IP
-        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-        if ip_address:
-            ip_address = ip_address.split(',')[0].strip()
-
-        # Emit function - send only to the requesting client using their session ID
-        def session_emit(event, data):
-            """Emit to the requesting client only"""
-            socketio.emit(event, data, room=session_id)
-
-        if not user_query:
-            session_emit('error', {'message': 'No message provided'})
+        try:
+            if not isinstance(data, dict):
+                raise TypeError("payload must be an object")
+            payload = ChatMessageRequest(**data)
+        except (ValidationError, TypeError) as e:
+            logger.info(f"Rejected chat_message from session {session_id}: invalid payload ({type(e).__name__})")
+            session_emit('error', {'message': 'Invalid message. Messages must be text of at most 2000 characters.'})
             return
+
+        user_query = payload.message
+        conversation_id = payload.conversation_id
+        ip_address = request.remote_addr or ''  # ProxyFix resolves the trusted proxy hop
+        visitor_id = _sid_visitors.get(session_id)
+        if not visitor_id:
+            # Connected before identity was recorded (should not happen); quota on a per-session id
+            visitor_id = f"sid-{session_id}"
+
+        logger.info(
+            f"Received message from session {session_id}: length={len(user_query)}, "
+            f"conversation_id={conversation_id}"
+        )
+        logger.debug(f"Message content: {user_query}")
 
         # WebSocket rate limit check (10/min per IP)
         if not _check_ws_rate_limit(ip_address or session_id):
-            logger.warning(f"WebSocket rate limit exceeded for IP {ip_address}")
+            logger.warning(f"WebSocket rate limit exceeded for session {session_id}")
             session_emit('error', {'message': 'Rate limit exceeded. Please wait a moment before sending another message.'})
             return
 
-        # Daily usage limit check
-        allowed, error_msg = UsageTracker.check_limits(visitor_id, ip_address or '')
+        # Daily usage limit check (per visitor, per IP, global; fails closed)
+        allowed, error_msg = UsageTracker.check_limits(visitor_id, ip_address)
         if not allowed:
-            logger.warning(f"Usage limit exceeded for visitor {visitor_id[:8]}...")
+            logger.warning(f"Usage limit exceeded for visitor {visitor_id[:10]}...")
             session_emit('error', {'message': error_msg})
             return
 
         # Import agent
         from app.agent import agent
-        import asyncio
 
-        # Create or load conversation
-        chat_type = source if source in ('afl', 'aflagent') else 'afl'
-        if not conversation_id or not ConversationService.get_conversation(conversation_id):
-            conversation_id = ConversationService.create_conversation(chat_type=chat_type)
-            session_emit('conversation_started', {'conversation_id': conversation_id})
+        # Continue only a conversation this client owns; otherwise start a new one
+        chat_type = payload.source if payload.source in ('afl', 'aflagent') else 'afl'
+        if not conversation_id or not ConversationService.verify_owner(conversation_id, payload.owner_token):
+            conversation_id, owner_token = ConversationService.create_owned_conversation(chat_type=chat_type)
+            # The only time the owner token leaves the server
+            session_emit('conversation_started', {'conversation_id': conversation_id, 'owner_token': owner_token})
             logger.info(f"Created new {chat_type} conversation: {conversation_id}")
         else:
             logger.info(f"Continuing conversation: {conversation_id}")
@@ -121,72 +151,52 @@ def handle_chat_message(data):
         )
 
         # Run the async agent in a synchronous context
-        logger.info(f"Running agent for query: {user_query}")
+        logger.info(f"Running agent for conversation {conversation_id}")
         final_state = asyncio.run(agent.run(
             user_query=user_query,
             conversation_id=conversation_id,
             socketio_emit=session_emit,  # Pass session-specific emit
             conversation_history=conversation_history
         ))
-        logger.info(f"Agent completed, final state keys: {final_state.keys()}")
+        logger.info("Agent completed")
 
-        # Track API usage for cost control — real token counts accumulated across
-        # every OpenAI call made during this request (understand/SQL, retries,
-        # chart selection, response generation), not a fabricated estimate.
-        token_usage = final_state.get("token_usage") or {}
-        UsageTracker.track_usage(
+        # Track API usage for cost control: one row per model actually called,
+        # with real token counts accumulated across every OpenAI call in this turn.
+        UsageTracker.track_request(
             visitor_id=visitor_id,
-            ip_address=ip_address or '',
-            model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
-            input_tokens=token_usage.get("input_tokens", 0),
-            output_tokens=token_usage.get("output_tokens", 0),
-            endpoint="afl_chat"
+            ip_address=ip_address,
+            token_usage=final_state.get("token_usage") or {},
+            endpoint="afl_chat",
         )
 
         # Send visualization if available
         chart_sent = False
         if final_state.get('visualization_spec'):
-            logger.info("Emitting 'visualization' event to frontend")
             try:
-                import json
                 # Ensure visualization spec is JSON-serializable (convert numpy types, etc.)
                 viz_spec = make_json_serializable(final_state['visualization_spec'])
-                logger.info(f"Visualization spec type: {type(viz_spec)}")
-                logger.info(f"Visualization spec keys: {viz_spec.keys() if isinstance(viz_spec, dict) else 'N/A'}")
-
                 viz_data = {'spec': viz_spec}
-                # Test serialization
                 serialized = json.dumps(viz_data, ensure_ascii=True)
-                logger.info(f"Serialized viz length: {len(serialized)} bytes")
-                # Log chart data for debugging
-                if 'data' in viz_spec and viz_spec['data']:
-                    first_trace = viz_spec['data'][0]
-                    logger.info(f"Chart trace x values: {first_trace.get('x', [])[:5]}")
-                    logger.info(f"Chart trace y values: {first_trace.get('y', [])[:5]}")
-                if 'layout' in viz_spec:
-                    logger.info(f"Chart title: {viz_spec['layout'].get('title', {})}")
-
+                logger.info(f"Emitting 'visualization' event ({len(serialized)} bytes)")
                 session_emit('visualization', viz_data)
-                logger.info("Successfully emitted 'visualization' event")
                 chart_sent = True
             except Exception as e:
                 logger.error(f"Error with visualization: {e}")
-                logger.error(f"Visualization spec preview: {str(final_state['visualization_spec'])[:200]}")
                 # Skip visualization if it can't be serialized
                 chart_sent = False
 
         # Send response
         response_text = ""
-        logger.info(f"WebSocket: Checking final_state for response - errors={final_state.get('errors')}, execution_error={final_state.get('execution_error')}")
+        if final_state.get('execution_error') or final_state.get('errors'):
+            logger.info("WebSocket: final_state carries execution errors")
         if final_state.get('natural_language_summary') not in (None, ''):
             response_text = final_state['natural_language_summary']
             logger.info(f"Emitting 'response' event with text length={len(response_text)}")
-            logger.info(f"Response preview: {response_text[:200]}...")
+            logger.debug(f"Response text: {response_text}")
 
             # Ensure response text is clean and serializable
             try:
                 # Remove any control characters that might break WebSocket frames
-                import re
                 clean_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', response_text)
 
                 response_data = {
@@ -196,14 +206,11 @@ def handle_chat_message(data):
                 }
 
                 # Test JSON serialization before emitting
-                import json
                 json.dumps(response_data)
 
                 session_emit('response', response_data)
-                logger.info("Successfully emitted 'response' event")
             except Exception as e:
                 logger.error(f"Error serializing response: {e}")
-                logger.error(f"Response text preview: {response_text[:200]}")
                 session_emit('response', {
                     'text': 'I generated a response but encountered an encoding error. Please try rephrasing your question.',
                     'confidence': 0.0,
@@ -218,12 +225,9 @@ def handle_chat_message(data):
             })
 
         # Send completion IMMEDIATELY (before slow database save)
-        logger.info(f"Emitting 'complete' event with conversation_id={conversation_id}")
         session_emit('complete', {'conversation_id': conversation_id})
 
-        # Save assistant response to conversation (in background, after sending complete)
-        # Sanitize metadata to ensure JSON serializability (remove Timestamp objects, etc.)
-        logger.info(f"Preparing to save assistant response to conversation {conversation_id}")
+        # Save assistant response to conversation (after sending complete)
         # Enrich entities with team/player names from query results so follow-up
         # questions ("which teams are these?", "show me their stats") have context
         entities = make_json_serializable(final_state.get("entities", {}))
@@ -250,9 +254,9 @@ def handle_chat_message(data):
             logger.warning(f"Entity enrichment from results failed: {e}")
 
         # Persist the final SQL + row count alongside this turn so a future
-        # correction turn (turn_type == "correction", v2 pipeline) can load
-        # prior_sql/prior_row_count/prior_answer without re-running anything
-        # (see app/agent/classify_resolve.py).
+        # correction turn (turn_type == "correction") can load prior_sql /
+        # prior_row_count / prior_answer (see app/agent/classify_resolve.py).
+        # Server-side only: the public conversation GET strips these fields.
         row_count = None
         if query_results is not None:
             try:
@@ -274,41 +278,31 @@ def handle_chat_message(data):
         # Store visualization spec if chart was generated (for history restoration)
         if chart_sent and final_state.get("visualization_spec"):
             metadata["visualization"] = make_json_serializable(final_state["visualization_spec"])
-            logger.info(f"Saved visualization to metadata (keys: {metadata['visualization'].keys() if isinstance(metadata['visualization'], dict) else 'N/A'})")
-        else:
-            logger.info(f"No visualization saved: chart_sent={chart_sent}, has_spec={bool(final_state.get('visualization_spec'))}")
 
         # If this was a clarification, include the candidate options for easy retrieval
         if final_state.get("needs_clarification") and final_state.get("entities"):
             # The entities in a clarification contain all the candidates
             if final_state["entities"].get("players"):
                 metadata["clarification_candidates"] = final_state["entities"]["players"]
-                logger.info(f"Added clarification_candidates (players): {final_state['entities']['players']}")
             elif final_state["entities"].get("teams"):
                 metadata["clarification_candidates"] = final_state["entities"]["teams"]
-                logger.info(f"Added clarification_candidates (teams): {final_state['entities']['teams']}")
 
-        logger.info(f"Saving assistant message with metadata: needs_clarification={metadata['needs_clarification']}")
         success = ConversationService.add_message(
             conversation_id=conversation_id,
             role="assistant",
             content=response_text,
             metadata=metadata
         )
-        if success:
-            logger.info(f"Successfully saved assistant response to conversation {conversation_id}")
-        else:
+        if not success:
             logger.error(f"Failed to save assistant response to conversation {conversation_id}")
 
     except Exception as e:
-        logger.error(f"Error processing message: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error processing message: {e}", exc_info=True)
         # Send a generic error message — never expose raw exception details to users
         generic_error = "Something went wrong processing your request. Please try again, or rephrase your question."
         try:
             session_emit('error', {'message': generic_error})
-        except:
+        except Exception:
             socketio.emit('error', {'message': generic_error}, room=session_id)
 
 

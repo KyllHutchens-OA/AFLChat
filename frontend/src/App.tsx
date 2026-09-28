@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { SpoilerProvider } from './contexts/SpoilerContext';
 import { TeamProvider } from './contexts/TeamContext';
@@ -7,9 +8,11 @@ import SpoilerModal from './components/Modal/SpoilerModal';
 import AFLAgent from './pages/AFLAgent';
 import LiveGames from './pages/LiveGames';
 import About from './pages/About';
-import Analytics from './pages/Analytics';
 import TeamSelection from './pages/TeamSelection';
 import { useAnalytics } from './hooks/useAnalytics';
+
+// Admin dashboard stays out of the main bundle.
+const Analytics = lazy(() => import('./pages/Analytics'));
 
 function HomeRedirect() {
   const hasTeam = localStorage.getItem('footy-nac-team');
@@ -26,7 +29,7 @@ function AppRoutes() {
       <Route path="/aflagent/:conversationId?" element={<AFLAgent />} />
       <Route path="/live" element={<LiveGames />} />
       <Route path="/about" element={<About />} />
-      <Route path="/analytics" element={<Analytics />} />
+      <Route path="/analytics" element={<Suspense fallback={null}><Analytics /></Suspense>} />
     </Routes>
   );
 }

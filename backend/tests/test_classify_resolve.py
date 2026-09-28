@@ -64,7 +64,8 @@ class TestClassifyAndResolveHappyPath:
         ):
             classify_and_resolve(user_query="hi", conversation_history=[], state=state)
 
-        assert state["token_usage"] == {"input_tokens": 47, "output_tokens": 9}
+        assert state["token_usage"]["input_tokens"] == 47
+        assert state["token_usage"]["output_tokens"] == 9
 
     def test_unknown_turn_type_defaults_to_new_question(self):
         payload = {"turn_type": "something_bogus", "entities": {}, "complaint_summary": None, "chitchat_reply": None}

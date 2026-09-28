@@ -43,6 +43,51 @@ engine = create_engine(
     }
 )
 
+
+# ── Agent engine (LLM-generated SQL only) ─────────────────────────────────────
+# Separate pool on AGENT_DB_STRING, which should be the read-only `agent_ro`
+# role (scripts/db/roles.sql). Falls back to DB_STRING only in development.
+AGENT_STATEMENT_TIMEOUT_MS = int(os.getenv("AGENT_STATEMENT_TIMEOUT_MS", "5000"))
+_agent_engine = None
+
+
+def get_agent_engine():
+    """Lazily create the agent engine; raises outside development if AGENT_DB_STRING is unset."""
+    global _agent_engine
+    if _agent_engine is not None:
+        return _agent_engine
+
+    url = os.getenv("AGENT_DB_STRING")
+    if not url:
+        if os.getenv("FLASK_ENV", "development") != "development":
+            raise RuntimeError("AGENT_DB_STRING is required outside development")
+        logger.warning("AGENT_DB_STRING not set; agent SQL uses DB_STRING (development only)")
+        url = config.DATABASE_URL
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    _agent_engine = create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_size=int(os.getenv("AGENT_DB_POOL_SIZE", "2")),
+        max_overflow=int(os.getenv("AGENT_DB_MAX_OVERFLOW", "3")),
+        pool_timeout=30,
+        pool_recycle=1800,
+        connect_args={
+            "prepare_threshold": None,
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+            "options": (
+                f"-c statement_timeout={AGENT_STATEMENT_TIMEOUT_MS} "
+                "-c default_transaction_read_only=on"
+            ),
+        },
+    )
+    return _agent_engine
+
+
 # Create session factory
 # expire_on_commit=False keeps objects usable after commit (needed for live game updates)
 session_factory = sessionmaker(bind=engine, expire_on_commit=False)

@@ -36,6 +36,44 @@ let globalSocket: Socket | null = null;
 // Use environment variable or default to localhost for development
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
+// Server-signed visitor token (quota identity) and per-conversation owner tokens.
+// The owner token is issued once in `conversation_started`; the server needs it
+// to read or append to that conversation.
+const VISITOR_TOKEN_KEY = 'footy-nac-visitor-token';
+const CONVERSATION_TOKENS_KEY = 'footy-nac-conversation-tokens';
+
+const readStorage = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const writeStorage = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // storage unavailable (private mode); the session still works, history won't reload
+  }
+};
+
+const readConversationTokens = (): Record<string, string> => {
+  try {
+    const parsed = JSON.parse(readStorage(CONVERSATION_TOKENS_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const getConversationToken = (id: string | null): string | null =>
+  id ? readConversationTokens()[id] ?? null : null;
+
+const saveConversationToken = (id: string, token: string) => {
+  writeStorage(CONVERSATION_TOKENS_KEY, JSON.stringify({ ...readConversationTokens(), [id]: token }));
+};
+
 export const useAgentWebSocket = ({
   conversationId,
   onConversationCreated,
@@ -75,7 +113,15 @@ export const useAgentWebSocket = ({
     try {
       setIsLoadingHistory(true);
 
-      const response = await fetch(`${BACKEND_URL}/api/conversations/${convId}`);
+      const token = getConversationToken(convId);
+      if (!token) {
+        // Not ours (or storage cleared): the server would refuse it, start fresh
+        onConversationCreatedRef.current(null);
+        return;
+      }
+      const response = await fetch(`${BACKEND_URL}/api/conversations/${encodeURIComponent(convId)}`, {
+        headers: { 'X-Conversation-Token': token },
+      });
       if (!response.ok) {
         // Conversation not found — treat as fresh
         onConversationCreatedRef.current(null);
@@ -134,6 +180,8 @@ export const useAgentWebSocket = ({
       globalSocket = io(BACKEND_URL, {
         transports: ['websocket', 'polling'],
         autoConnect: true,
+        // Re-read on every (re)connect so a freshly issued token is reused
+        auth: (cb) => cb({ visitor_token: readStorage(VISITOR_TOKEN_KEY) }),
       });
     } else {
       if (globalSocket.connected) {
@@ -155,6 +203,18 @@ export const useAgentWebSocket = ({
     socket.off('response');
     socket.off('complete');
     socket.off('error');
+    socket.off('visitor_token');
+    socket.off('conversation_started');
+
+    socket.on('visitor_token', (data: { token?: string }) => {
+      if (data?.token) writeStorage(VISITOR_TOKEN_KEY, data.token);
+    });
+
+    socket.on('conversation_started', (data: { conversation_id?: string; owner_token?: string }) => {
+      if (data?.conversation_id && data.owner_token) {
+        saveConversationToken(data.conversation_id, data.owner_token);
+      }
+    });
 
     socket.on('connect', () => {
       setIsConnected(true);
@@ -211,7 +271,8 @@ export const useAgentWebSocket = ({
       }
 
       if (data.conversation_id) {
-        const isNew = !conversationIdRef.current;
+        // New when the server started a conversation other than the one we sent
+        const isNew = conversationIdRef.current !== data.conversation_id;
         // Update ref BEFORE triggering navigation to prevent reset effect
         conversationIdRef.current = data.conversation_id;
         hadConversationRef.current = true;
@@ -285,6 +346,7 @@ export const useAgentWebSocket = ({
     socketRef.current.emit('chat_message', {
       message,
       conversation_id: conversationIdRef.current,
+      owner_token: getConversationToken(conversationIdRef.current),
       source: 'aflagent',
     });
   }, [isConnected]);

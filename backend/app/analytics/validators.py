@@ -1,30 +1,33 @@
 """
 AFL Analytics Agent - SQL Validation
 
-Prevents SQL injection and ensures queries are safe to execute.
+Gate for LLM-generated SQL before it reaches the database. Parses with sqlglot
+(postgres dialect) and walks the full tree, so nested subqueries, CTEs and set
+operations are all checked. Defence in depth only: the agent also runs as the
+read-only `agent_ro` role inside a READ ONLY transaction (app/agent/tools.py).
 """
 import re
-import sqlparse
-from sqlparse.sql import IdentifierList, Identifier, Where
-from sqlparse.tokens import Keyword, DML
 from typing import Optional
 import logging
+
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import ParseError
 
 logger = logging.getLogger(__name__)
 
 
 class SQLValidator:
     """
-    Validates SQL queries to prevent injection attacks.
-
-    Security measures:
-    1. Only allows SELECT statements
-    2. Validates table names against allowlist
-    3. Blocks forbidden keywords (DROP, DELETE, UPDATE, INSERT)
-    4. Ensures query is properly parsed
+    Validates agent SQL:
+    1. Exactly one statement, and it is a query (SELECT / WITH ... SELECT / set op)
+    2. No write or DDL node anywhere in the tree (incl. data-modifying CTEs, SELECT INTO, FOR UPDATE)
+    3. Every referenced table is allowlisted (CTE names excepted), no foreign schemas
+    4. No denylisted functions (file access, sleep, dblink, large objects, config, query_to_xml...)
+    5. Forbidden keywords as a word-boundary backstop
     """
 
-    # Allowlisted tables
+    # Allowlisted tables (must match the SELECT grants of agent_ro in scripts/db/roles.sql)
     ALLOWED_TABLES = {
         "matches",
         "live_games",  # Live/recent games table (2026+)
@@ -37,165 +40,113 @@ class SQLValidator:
         "news_articles",  # AFL news from RSS feeds
     }
 
-    # Forbidden keywords
+    # Forbidden keywords (word-boundary backstop to the tree walk)
     FORBIDDEN_KEYWORDS = {
         "DROP", "DELETE", "UPDATE", "INSERT", "ALTER",
         "CREATE", "TRUNCATE", "GRANT", "REVOKE",
-        "EXEC", "EXECUTE", "CALL", "DECLARE"
+        "EXEC", "EXECUTE", "CALL", "DECLARE", "COPY", "MERGE",
     }
+
+    # Node types that must never appear anywhere in an agent query
+    FORBIDDEN_NODES = (
+        exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Create, exp.Drop,
+        exp.Alter, exp.TruncateTable, exp.Command, exp.Copy, exp.Set,
+        exp.Into, exp.Lock, exp.Grant,
+    )
+
+    # Denied function names (lowercase) and prefixes
+    FORBIDDEN_FUNCTIONS = {
+        "set_config", "current_setting", "copy", "loread", "lowrite",
+        "dblink", "dblink_exec", "dblink_connect", "dblink_send_query",
+        "query_to_xml", "query_to_xmlschema", "query_to_xml_and_xmlschema",
+        "cursor_to_xml", "cursor_to_xmlschema", "table_to_xml", "table_to_xmlschema",
+        "table_to_xml_and_xmlschema", "schema_to_xml", "database_to_xml",
+        "txid_current", "inet_server_addr", "inet_server_port",
+    }
+    FORBIDDEN_FUNCTION_PREFIXES = ("pg_", "lo_", "dblink", "_pg")
 
     @classmethod
     def validate(cls, sql: str) -> tuple[bool, Optional[str]]:
-        """
-        Validate SQL query for safety.
-
-        Args:
-            sql: SQL query string
-
-        Returns:
-            Tuple of (is_valid, error_message)
-        """
+        """Return (is_valid, error_message)."""
         try:
-            # Parse SQL
-            parsed = sqlparse.parse(sql)
+            if not sql or len(sql.strip()) < 10:
+                return False, "Query too short to be valid"
 
-            if not parsed:
+            try:
+                statements = [s for s in sqlglot.parse(sql, read="postgres") if s is not None]
+            except ParseError as e:
+                return False, f"Unable to parse SQL query: {str(e).splitlines()[0][:200]}"
+
+            if not statements:
                 return False, "Unable to parse SQL query"
+            if len(statements) > 1:
+                return False, "Only a single SQL statement is allowed"
 
-            statement = parsed[0]
+            tree = statements[0]
 
-            # 1. Check it's a SELECT statement
-            if not cls._is_select_statement(statement):
+            if not isinstance(tree, exp.Query):
                 return False, "Only SELECT statements are allowed"
 
-            # 2. Check for forbidden keywords
-            forbidden_found = cls._find_forbidden_keywords(statement)
+            for node in tree.walk():
+                if isinstance(node, cls.FORBIDDEN_NODES):
+                    return False, f"Forbidden operation: {type(node).__name__.upper()}"
+
+            forbidden_found = cls._find_forbidden_keywords(sql)
             if forbidden_found:
                 return False, f"Forbidden keyword found: {forbidden_found}"
 
-            # 3. Validate table names
-            tables = cls._extract_table_names(statement)
+            bad_func = cls._find_forbidden_function(tree)
+            if bad_func:
+                return False, f"Function not allowed: {bad_func}"
+
+            tables, bad_schema = cls._extract_tables(tree)
+            if bad_schema:
+                return False, f"Schema not allowed: {bad_schema}"
             invalid_tables = tables - cls.ALLOWED_TABLES
-
             if invalid_tables:
-                return False, f"Invalid table names: {', '.join(invalid_tables)}"
-
-            # 4. Basic structure check
-            if len(sql.strip()) < 10:
-                return False, "Query too short to be valid"
+                return False, f"Invalid table names: {', '.join(sorted(invalid_tables))}"
 
             return True, None
 
         except Exception as e:
             logger.error(f"SQL validation error: {e}")
-            return False, f"Validation error: {str(e)}"
+            return False, "Validation error"
 
     @classmethod
-    def _is_select_statement(cls, statement) -> bool:
-        """Check if statement is a SELECT query (including CTEs with WITH clause)."""
-        sql_upper = str(statement).upper().strip()
-        # Accept WITH...SELECT (CTEs) as valid SELECT statements
-        if sql_upper.startswith("WITH") and "SELECT" in sql_upper:
-            return True
-        for token in statement.tokens:
-            if token.ttype is DML and token.value.upper() == "SELECT":
-                return True
-        return False
-
-    @classmethod
-    def _find_forbidden_keywords(cls, statement) -> Optional[str]:
+    def _find_forbidden_keywords(cls, sql) -> Optional[str]:
         """
-        Find any forbidden keywords in the query using word-boundary matching.
-
-        Uses \\b regex boundaries rather than naive substring matching so that
-        identifiers like `created_at` or `updated_by` don't false-positive on
-        forbidden keywords like CREATE or UPDATE.
+        Word-boundary keyword match, so identifiers like `created_at` or
+        `updated_by` don't trip CREATE / UPDATE. String literals are ignored.
         """
-        sql_str = str(statement)
-
-        for keyword in cls.FORBIDDEN_KEYWORDS:
+        sql_str = re.sub(r"'(?:[^']|'')*'", "''", str(sql))
+        for keyword in sorted(cls.FORBIDDEN_KEYWORDS):
             if re.search(rf'\b{re.escape(keyword)}\b', sql_str, re.IGNORECASE):
                 return keyword
-
         return None
 
     @classmethod
-    def _extract_table_names(cls, statement) -> set[str]:
-        """Extract table names from SQL statement (excluding CTEs)."""
+    def _find_forbidden_function(cls, tree: exp.Expression) -> Optional[str]:
+        for func in tree.find_all(exp.Func):
+            if isinstance(func, exp.Anonymous):
+                name = str(func.this or "").lower()
+            else:
+                name = (func.sql_name() or "").lower()
+            if name in cls.FORBIDDEN_FUNCTIONS or name.startswith(cls.FORBIDDEN_FUNCTION_PREFIXES):
+                return name
+        return None
+
+    @classmethod
+    def _extract_tables(cls, tree: exp.Expression) -> tuple[set[str], Optional[str]]:
+        """Real table names referenced anywhere in the tree (CTE names removed), plus the first bad schema."""
+        cte_names = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
         tables = set()
-        cte_names = set()
-
-        # First, extract CTE names from WITH clauses
-        cte_names = cls._extract_cte_names(statement)
-
-        # Look for FROM and JOIN clauses
-        from_seen = False
-        for token in statement.tokens:
-            # Check for FROM keyword
-            if token.ttype is Keyword and token.value.upper() == "FROM":
-                from_seen = True
+        for table in tree.find_all(exp.Table):
+            # Table-valued functions (generate_series, unnest) are covered by the function check
+            if not isinstance(table.this, exp.Identifier):
                 continue
-
-            # Check for JOIN keyword
-            if token.ttype is Keyword and "JOIN" in token.value.upper():
-                from_seen = True
-                continue
-
-            # Extract table names after FROM or JOIN
-            if from_seen:
-                if isinstance(token, IdentifierList):
-                    for identifier in token.get_identifiers():
-                        table_name = cls._get_real_name(identifier)
-                        if table_name:
-                            tables.add(table_name.lower())
-                elif isinstance(token, Identifier):
-                    table_name = cls._get_real_name(token)
-                    if table_name:
-                        tables.add(table_name.lower())
-                    from_seen = False
-                elif token.ttype is Keyword:
-                    from_seen = False
-
-        # Remove CTE names from the table list (they're not real tables)
-        tables = tables - cte_names
-
-        return tables
-
-    @classmethod
-    def _extract_cte_names(cls, statement) -> set[str]:
-        """Extract CTE (Common Table Expression) names from WITH clauses."""
-        cte_names = set()
-        sql_str = str(statement).upper()
-
-        # Simple CTE detection - look for WITH ... AS pattern
-        if "WITH" in sql_str:
-            # Parse the query to find CTE names
-            tokens_str = str(statement)
-            # Extract names between WITH and AS, and between commas and AS
-            import re
-            # Pattern: WITH name AS or , name AS
-            pattern = r'(?:WITH|,)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+AS'
-            matches = re.findall(pattern, tokens_str, re.IGNORECASE)
-            for match in matches:
-                cte_names.add(match.lower())
-
-        return cte_names
-
-    @classmethod
-    def _get_real_name(cls, identifier) -> Optional[str]:
-        """Get the real name of an identifier (handling aliases and subqueries)."""
-        if isinstance(identifier, Identifier):
-            # Check if this is a subquery (has parentheses)
-            # e.g., "(SELECT ...) AS s" - we should ignore the alias "s"
-            identifier_str = str(identifier)
-            if identifier_str.strip().startswith('('):
-                # This is a subquery alias, not a table name - ignore it
-                return None
-
-            # Handle aliases (e.g., "teams AS t" -> "teams")
-            real_name = identifier.get_real_name()
-            if real_name:
-                return real_name
-            # Fallback to first token
-            return str(identifier.tokens[0]).strip()
-        return str(identifier).strip()
+            if table.catalog or (table.db and table.db.lower() != "public"):
+                return tables, ".".join(p for p in (table.catalog, table.db) if p)
+            name = table.name.lower()
+            if table.db or name not in cte_names:
+                tables.add(name)
+        return tables, None

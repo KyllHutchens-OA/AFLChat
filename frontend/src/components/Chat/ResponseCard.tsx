@@ -1,7 +1,23 @@
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ChartRenderer from '../Visualization/ChartRenderer';
 import ChartErrorBoundary from '../Common/ChartErrorBoundary';
+
+// LLM output is untrusted: no images (exfiltration beacons), links open isolated.
+const DISALLOWED_ELEMENTS = ['img'];
+const MARKDOWN_COMPONENTS: Components = {
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer nofollow" />,
+};
+
+const SafeMarkdown: React.FC<{ text: string }> = ({ text }) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    disallowedElements={DISALLOWED_ELEMENTS}
+    components={MARKDOWN_COMPONENTS}
+  >
+    {text}
+  </ReactMarkdown>
+);
 
 interface ResponseCardProps {
   text: string;
@@ -20,7 +36,7 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isErro
           <span className="text-sm font-medium">Something went wrong</span>
         </div>
         <div className="chat-markdown text-afl-warm-700">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+          <SafeMarkdown text={text} />
         </div>
       </div>
     );
@@ -29,7 +45,7 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isErro
   return (
     <div className="card-apple p-5 animate-fade-in">
       <div className="chat-markdown text-afl-warm-900">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        <SafeMarkdown text={text} />
       </div>
       {visualization && (
         <>

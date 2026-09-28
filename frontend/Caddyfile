@@ -1,0 +1,37 @@
+# Static SPA server for the frontend on Railway (Railpack / Nixpacks Caddy serve a
+# root-level Caddyfile instead of their default). Adds HSTS + a strict CSP.
+# API_ORIGIN / API_WS_ORIGIN must match VITE_BACKEND_URL (REST + Socket.IO).
+{
+	admin off
+	persist_config off
+	auto_https off
+	log {
+		format json
+	}
+	servers {
+		trusted_proxies static private_ranges 100.0.0.0/8
+	}
+}
+
+:{$PORT:80} {
+	log {
+		format json
+	}
+
+	respond /health 200
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' {$API_ORIGIN:https://api.footynac.com} {$API_WS_ORIGIN:wss://api.footynac.com}; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	root * {$STATIC_ROOT:dist}
+	encode gzip zstd
+	try_files {path} /index.html
+	file_server
+}
