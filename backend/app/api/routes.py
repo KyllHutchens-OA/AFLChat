@@ -54,6 +54,21 @@ def health_check():
     return jsonify(health), status_code
 
 
+@bp.route('/health/data', methods=['GET'])
+def data_health_check():
+    """Data freshness/integrity report (always 200; `status` is 'ok' or 'warn')."""
+    from app.services.data_health import data_health
+    try:
+        return jsonify(data_health()), 200
+    except Exception as e:
+        logger.error(f"Data health check failed: {e}")
+        return jsonify({'status': 'error', 'message': 'Data health unavailable'}), 503
+
+
+# NOTE: POST /api/chat/message was removed in 1A security hardening (#14). Streaming
+# WebSocket chat (api/websocket.py) is the only chat entry point.
+
+
 @bp.route('/conversations/<conversation_id>', methods=['GET'])
 @limiter.limit("60 per minute")
 def get_conversation(conversation_id):
@@ -392,9 +407,12 @@ def _attach_predictions(upcoming: list, season: int):
                 home = team_by_name.get(match['home_team'])
                 away = team_by_name.get(match['away_team'])
                 if home and away:
-                    round_str = str(match.get('round', ''))
-                    round_values.add(round_str)
-                    match_filters.append((home.id, away.id, round_str))
+                    try:
+                        round_num = int(match.get('round'))
+                    except (TypeError, ValueError):
+                        continue
+                    round_values.add(round_num)
+                    match_filters.append((home.id, away.id, round_num))
 
             if not match_filters:
                 return
@@ -403,13 +421,13 @@ def _attach_predictions(upcoming: list, season: int):
                 session.query(Match)
                 .filter(
                     Match.season == season,
-                    Match.round.in_(round_values),
+                    Match.round_number.in_(round_values),
                 )
                 .all()
             )
-            # Index by (home_team_id, away_team_id, round)
+            # Index by (home_team_id, away_team_id, round_number); Squiggle rounds are numbers
             match_by_key = {
-                (m.home_team_id, m.away_team_id, m.round): m
+                (m.home_team_id, m.away_team_id, m.round_number): m
                 for m in db_matches
             }
 

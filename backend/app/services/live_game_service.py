@@ -8,14 +8,15 @@ import time
 import threading
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.data.database import get_session
 from app.data.models import LiveGame, LiveGameEvent, Team, Match, QuarterSnapshot
 from app.analytics.entity_resolver import VenueResolver
-from app.services.round_naming import resolve_round_display, fallback_round_name
+from app.services.round_naming import resolve_round_display
+from app.data.rounds import round_fields_from_squiggle
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,8 @@ class LiveGameService:
             home_team_abbr = live_game.home_team.abbreviation
             away_team_abbr = live_game.away_team.abbreviation
 
+            prev_result = (live_game.home_score, live_game.away_score, live_game.complete_percent)
+
             # Update game state (this sets new scores)
             LiveGameService._update_game_state(live_game, game_data)
 
@@ -83,7 +86,14 @@ class LiveGameService:
                         home_team_abbr, away_team_abbr, socketio
                     )
 
-                LiveGameService._migrate_to_match(session, live_game)
+                LiveGameService._migrate_to_match(session, live_game, game_data)
+                session.commit()
+            elif live_game.status == "completed" and prev_result != (
+                live_game.home_score, live_game.away_score, live_game.complete_percent
+            ):
+                # Completed at 99% but the score/percent moved since (e.g. the 2026 GF
+                # was copied at 90 and finished 96): keep matches in step.
+                LiveGameService._migrate_to_match(session, live_game, game_data)
                 session.commit()
 
     @staticmethod
@@ -450,38 +460,52 @@ class LiveGameService:
 
 
     @staticmethod
-    def _migrate_to_match(session: Session, live_game: LiveGame):
-        """Migrate completed live game to Match table."""
+    def _migrate_to_match(session: Session, live_game: LiveGame, game_data: Optional[Dict] = None):
+        """Copy a completed live game's result into `matches` (safe to call repeatedly)."""
         try:
-            # Best-effort round name/number for this season/round (the 1C data
-            # pipeline backfills the authoritative names later; this just means
-            # a freshly-completed final never sits at "Round 29" until then)
-            round_name, is_final, round_number = fallback_round_name(live_game.season, live_game.round)
+            rf = round_fields_from_squiggle(game_data or {"round": live_game.round})
+            existing_match = session.get(Match, live_game.match_id) if live_game.match_id else None
+            if existing_match is None and rf:
+                # season + same two teams + round number (live_game.round is Squiggle's number)
+                existing_match = session.query(Match).filter(
+                    Match.season == live_game.season,
+                    Match.round_number == rf["round_number"],
+                    or_(
+                        and_(Match.home_team_id == live_game.home_team_id,
+                             Match.away_team_id == live_game.away_team_id),
+                        and_(Match.home_team_id == live_game.away_team_id,
+                             Match.away_team_id == live_game.home_team_id),
+                    ),
+                ).first()
 
-            # Check if match already exists
-            existing_match = session.query(Match).filter_by(
-                season=live_game.season,
-                round=live_game.round,
-                home_team_id=live_game.home_team_id,
-                away_team_id=live_game.away_team_id,
-            ).first()
-
-            if existing_match:
-                # Update existing match
-                existing_match.home_score = live_game.home_score
-                existing_match.away_score = live_game.away_score
-                existing_match.match_status = "completed"
-                if not existing_match.round_name:
-                    existing_match.round_name = round_name
-                    existing_match.is_final = is_final
-                    existing_match.round_number = round_number
+            if existing_match and existing_match.home_q4_goals is not None:
+                # AFL Tables result already recorded by the stats ingester: that wins
                 live_game.match_id = existing_match.id
-                logger.info(f"Updated existing match {existing_match.id}")
-            else:
+            elif existing_match:
+                hs, as_ = live_game.home_score, live_game.away_score
+                if existing_match.home_team_id != live_game.home_team_id:
+                    hs, as_ = as_, hs
+                if (existing_match.home_score, existing_match.away_score) != (hs, as_):
+                    logger.info(
+                        f"Match {existing_match.id} result {existing_match.home_score}-"
+                        f"{existing_match.away_score} -> {hs}-{as_} (live game {live_game.id})"
+                    )
+                existing_match.home_score = hs
+                existing_match.away_score = as_
+                existing_match.match_status = "completed"
+                if not existing_match.round_name and rf:
+                    existing_match.round_name = rf["round_name"]
+                    existing_match.is_final = rf["is_final"]
+                    existing_match.round_number = rf["round_number"]
+                live_game.match_id = existing_match.id
+            elif rf:
                 # Create new match
                 match = Match(
                     season=live_game.season,
-                    round=live_game.round,
+                    round=rf["round"],
+                    round_number=rf["round_number"],
+                    round_name=rf["round_name"],
+                    is_final=rf["is_final"],
                     match_date=live_game.match_date,
                     venue=live_game.venue,
                     home_team_id=live_game.home_team_id,
@@ -501,6 +525,33 @@ class LiveGameService:
         except Exception as e:
             logger.error(f"Error migrating live game to match: {e}")
 
+
+    @staticmethod
+    def sync_completed_to_matches() -> int:
+        """Copy 100%-complete live_games scores into linked matches that disagree.
+
+        Skips matches whose result AFL Tables has already confirmed (quarter scores set).
+        Returns the number of matches updated.
+        """
+        fixed = 0
+        with get_session() as session:
+            rows = (
+                session.query(LiveGame, Match)
+                .join(Match, Match.id == LiveGame.match_id)
+                .filter(LiveGame.status == "completed", LiveGame.complete_percent >= 100,
+                        Match.home_q4_goals.is_(None))
+                .all()
+            )
+            for lg, m in rows:
+                hs, as_ = lg.home_score, lg.away_score
+                if m.home_team_id != lg.home_team_id:
+                    hs, as_ = as_, hs
+                if (m.home_score, m.away_score) != (hs, as_):
+                    logger.info(f"Match {m.id}: {m.home_score}-{m.away_score} -> {hs}-{as_} from live game {lg.id}")
+                    m.home_score, m.away_score, m.match_status = hs, as_, "completed"
+                    fixed += 1
+            session.commit()
+        return fixed
 
     @staticmethod
     def get_active_games(hours=2) -> list:
