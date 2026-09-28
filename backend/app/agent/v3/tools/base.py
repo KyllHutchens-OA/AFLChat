@@ -11,6 +11,7 @@ import contextvars
 import datetime as dt
 import logging
 import math
+import re
 import threading
 import time
 from decimal import Decimal
@@ -234,6 +235,17 @@ def strict_schema(model: Type[BaseModel]) -> Dict[str, Any]:
         return node
 
     return walk(raw)
+
+
+_SQLISH = re.compile(r";|--|/\*|\)|\(|\b(drop|delete|insert|update|select|alter|truncate)\b", re.I)
+
+
+def plain_names(values: List[str]) -> List[str]:
+    """Pydantic validator body: names are data, never SQL or instructions."""
+    for v in values:
+        if _SQLISH.search(v or ""):
+            raise ValueError(f"'{v}' is not a player or team name; ask the user who they mean")
+    return values
 
 
 def season_bounds() -> Dict[str, int]:

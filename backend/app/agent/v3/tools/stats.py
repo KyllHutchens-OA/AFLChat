@@ -8,12 +8,12 @@ cut-off are kept (RANK, not LIMIT).
 """
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agent.v3.coverage import coverage, missing_rounds_text
 from app.agent.v3.tools.base import (
     AFL_TEAM_IDS, STAT_FIRST_SEASON, ResultStore, check_seasons, finals_clause,
-    normalise_round_name, query, result, round_name,
+    normalise_round_name, plain_names, query, result, round_name,
 )
 from app.agent.v3.tools.entities import load_name_cache, resolve_player_ids, resolve_team_id
 from app.analytics.entity_resolver import VenueResolver
@@ -94,6 +94,11 @@ class PlayerStatsArgs(BaseModel):
     finals: Finals = Field(description="include / exclude / only finals")
     per: Literal["match", "season", "career"] = Field(description="Row granularity: each game, per season, or career total")
     agg: Literal["total", "average", "both"] = Field(description="For season/career rows: totals, per-game averages, or both")
+
+    @field_validator("players")
+    @classmethod
+    def _plain_players(cls, v: List[str]) -> List[str]:
+        return plain_names(v)
 
 
 def player_stats(args: PlayerStatsArgs, store: Optional[ResultStore] = None) -> Dict[str, Any]:

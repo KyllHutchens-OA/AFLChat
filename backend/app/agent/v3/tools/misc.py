@@ -145,6 +145,7 @@ def make_chart(args: MakeChartArgs, store: Optional[ResultStore] = None) -> Dict
 _TREND_WORDS = re.compile(r"\b(chart|graph|plot|trend|over time|over the years|by season|each season|per season|"
                           r"by year|each year|by round|each round|visuali[sz]e|compare|vs|versus)\b", re.I)
 _NOT_METRICS = {"rank", "position", "games", "played", "first_season", "last_season", "id", "margin_rank"}
+_CONTEXT_COLS = {"venue", "date", "home_away", "result", "opponent", "score", "opponent_score", "clubs"}
 
 
 def fallback_chart(question: str, store: ResultStore) -> Optional[Dict[str, Any]]:
@@ -157,7 +158,10 @@ def fallback_chart(question: str, store: ResultStore) -> Optional[Dict[str, Any]
     from app.visualization.recharts_builder import RechartsBuilder
 
     # Never plot bookkeeping columns (B1: charts of `games` instead of the metric).
-    data = df.drop(columns=[c for c in df.columns if c in _NOT_METRICS]).copy()
+    # Context columns (venue, date, ...) and single-valued labels must not become series.
+    drop = [c for c in df.columns if c in _NOT_METRICS or c in _CONTEXT_COLS
+            or (df[c].dtype == object and c not in ("round", "season") and df[c].nunique() <= 1)]
+    data = df.drop(columns=drop).copy()
     if "season" in data.columns and data["season"].nunique() == 1:
         data = data.drop(columns=["season"])
     numeric = [c for c in data.columns if pd.api.types.is_numeric_dtype(data[c]) and c not in ("season", "year")]

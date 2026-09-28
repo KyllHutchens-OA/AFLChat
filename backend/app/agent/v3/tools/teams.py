@@ -115,6 +115,13 @@ def team_results(args: TeamResultsArgs, store: Optional[ResultStore] = None) -> 
                    f"FROM tm{outer} GROUP BY tt.name" + (", tm.season ORDER BY tm.season, tt.name" if per_season
                                                          else " ORDER BY tt.name"), params)
     notes = [_early_note(args.season_from, args.season_to)]
+    if len(df) and "season" in df.columns:
+        # One team record covers both eras; name it as fans knew it.
+        for col in ("team", "opponent"):
+            if col in df.columns:
+                df.loc[(df[col] == "Brisbane Lions") & (df["season"] <= 1996), col] = "Brisbane Bears"
+    if any(t[1] == "Brisbane Lions" for t in teams) and (args.season_from or 1990) <= 1996:
+        notes.append("Brisbane played as the Brisbane Bears from 1990 to 1996; call them the Bears for those seasons.")
     if args.finals == "include" and args.per != "match":
         notes.append("Win/loss counts include finals; ladder position uses the ladder tool (home-and-away only).")
     return result(store, df, why_empty="no played matches for that team with those filters", notes=notes)

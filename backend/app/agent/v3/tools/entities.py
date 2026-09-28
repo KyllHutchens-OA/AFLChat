@@ -13,9 +13,9 @@ import unicodedata
 from typing import Any, Dict, List, Literal, Optional
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from app.agent.v3.tools.base import AFL_TEAM_IDS, ResultStore, query, result
+from app.agent.v3.tools.base import AFL_TEAM_IDS, ResultStore, plain_names, query, result
 from app.analytics.entity_resolver import EntityResolver
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,12 @@ def find_players(text: str, season: Optional[int] = None) -> tuple[pd.DataFrame,
     if not q:
         return players.head(0), "none"
     alias = _cache["aliases"].get(q)
+    parts = q.split()
+    if not alias and len(parts) >= 2:
+        # "Buddy Franklin", "Dusty Martin": nickname + real surname.
+        target = _cache["aliases"].get(parts[0])
+        if target and _norm(target).split()[-1] == parts[-1]:
+            alias = target
     if alias:
         return players[players["name"] == alias], "alias"
     for label, hits in (
@@ -106,7 +112,6 @@ def find_players(text: str, season: Optional[int] = None) -> tuple[pd.DataFrame,
             active = _active_in(hits, season)
             return (active if len(active) else hits).sort_values("games", ascending=False), label
     # Partial first name ("Nick Daicos" vs "Nicholas Daicos"), then fuzzy.
-    parts = q.split()
     if len(parts) >= 2:
         hits = players[(players["surname"] == parts[-1]) & players["norm"].str.startswith(parts[0][:3])]
         if len(hits):
@@ -166,6 +171,11 @@ class ResolveEntitiesArgs(BaseModel):
     names: List[str] = Field(description="Player or team names as the user wrote them (nicknames, surnames, typos ok)")
     kind: Literal["auto", "player", "team"] = Field(description="What the names refer to; 'auto' tries team then player")
     season: Optional[int] = Field(description="Season in question, used to disambiguate namesakes; null if none")
+
+    @field_validator("names")
+    @classmethod
+    def _plain_names(cls, v: List[str]) -> List[str]:
+        return plain_names(v)
 
 
 def resolve_entities(args: ResolveEntitiesArgs, store: Optional[ResultStore] = None) -> Dict[str, Any]:
