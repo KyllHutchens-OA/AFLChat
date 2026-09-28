@@ -5,13 +5,13 @@
 For rows matched to a page entry (work_1c_row_map):
   team   : team_id := the club the page lists the player under (team-swapped rows,
            e.g. Tom Green 2024 under Hawthorn, Jesse Hogan under Melbourne)
-  zeroed : rows whose counting stats are all 0/NULL while the page has real numbers
-           (2024 rows written on 2026-03-16) get every stat from the page
-  nulls  : NULL stat := page value (a recorded blank on the page is 0; never invent 0
-           for a column the page does not record)
-  --overwrite-seasons: for these seasons non-NULL values that differ from the page are
-           replaced too, and rows for players the page does not list are archived and
-           removed (2026 R0-R15 rows came from a live feed, not AFL Tables)
+  values : every stat the page records replaces the DB value when they differ: NULLs
+           (2024 goals), zeros the page contradicts (2024 rows written on 2026-03-16,
+           finals advanced stats 2008-2023), stat lines swapped between same-name
+           players in one match (Josh Kennedy SYD v WCE). Columns the page does not
+           record are left alone (step 09 handles those).
+  --overwrite-seasons: in these seasons rows for players the page does not list are
+           also archived and removed (2026 R0-R15 rows came from a live feed)
 Page players with no row in a match that has stats get a row (players by AFL Tables key).
 Every touched row is first copied to archive_1c_player_stats_pre (once per row).
 Dry run unless --apply.
@@ -19,11 +19,9 @@ Dry run unless --apply.
 import sys
 
 from app.data.fixes_1c import db
+from app.data.fixes_1c.identity import remove_emptied_players
 from app.data.ingestion.afltables_pages import STAT_FIELDS
 from app.data.ingestion.stats_ingester import _calculate_fantasy_points
-
-COUNTING = ("kicks", "handballs", "disposals", "marks", "tackles", "goals", "behinds", "hitouts")
-
 
 def season_counts(conn, label):
     print(f"\n{label}:")
@@ -51,26 +49,22 @@ def main():
     db.exec_(conn, "CREATE TABLE IF NOT EXISTS archive_1c_player_stats_pre (LIKE player_stats)")
     db.exec_(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ux_archive_1c_ps_pre ON archive_1c_player_stats_pre (id)")
 
-    zero_db = " AND ".join(f"coalesce(ps.{f}, 0) = 0" for f in COUNTING)
-    page_has = " OR ".join(f"coalesce((r.stats->>'{f}')::numeric, 0) <> 0" for f in COUNTING)
-    null_or_diff = " OR ".join(
-        f"(ps.{f} IS NULL AND r.stats->>'{f}' IS NOT NULL)" for f in STAT_FIELDS)
     diff_any = " OR ".join(
         f"(r.stats->>'{f}' IS NOT NULL AND ps.{f} IS DISTINCT FROM (r.stats->>'{f}')::numeric)" for f in STAT_FIELDS)
-
     db.exec_(conn, f"""
         CREATE TEMP TABLE touch AS
         SELECT ps.id,
                ps.team_id IS DISTINCT FROM r.page_team_id AS fix_team,
-               ({zero_db}) AND ({page_has}) AS zeroed,
-               ({null_or_diff}) AS has_nulls,
-               (r.season = ANY(%s) AND ({diff_any})) AS overwrite
-        FROM work_1c_row_map r JOIN player_stats ps ON ps.id = r.ps_id""", (overwrite,))
-    db.exec_(conn, "DELETE FROM touch WHERE NOT (fix_team OR zeroed OR has_nulls OR overwrite)")
-    for r in db.rows(conn, """SELECT count(*) FILTER (WHERE fix_team) team, count(*) FILTER (WHERE zeroed) zeroed,
-                              count(*) FILTER (WHERE has_nulls) nulls, count(*) FILTER (WHERE overwrite) overwrite,
+               ({diff_any}) AS fix_values
+        FROM work_1c_row_map r JOIN player_stats ps ON ps.id = r.ps_id""")
+    db.exec_(conn, "DELETE FROM touch WHERE NOT (fix_team OR fix_values)")
+    for r in db.rows(conn, """SELECT count(*) FILTER (WHERE fix_team) team, count(*) FILTER (WHERE fix_values) stat_values,
                               count(*) total FROM touch"""):
         print("\nrows to change:", dict(r))
+    for r in db.rows(conn, "SELECT " + ", ".join(
+            f"count(*) FILTER (WHERE r.stats->>'{f}' IS NOT NULL AND ps.{f} IS DISTINCT FROM (r.stats->>'{f}')::numeric) AS {f}"
+            for f in STAT_FIELDS) + " FROM work_1c_row_map r JOIN player_stats ps ON ps.id = r.ps_id"):
+        print("values to change per column:", {k: v for k, v in r.items() if v})
 
     db.exec_(conn, """INSERT INTO archive_1c_player_stats_pre
         SELECT ps.* FROM player_stats ps JOIN touch t ON t.id = ps.id
@@ -79,14 +73,10 @@ def main():
     db.exec_(conn, """UPDATE player_stats ps SET team_id = r.page_team_id, updated_at = now()
         FROM work_1c_row_map r JOIN touch t ON t.id = r.ps_id
         WHERE ps.id = r.ps_id AND t.fix_team""")
-    full = ", ".join(f"{f} = (r.stats->>'{f}')::numeric" for f in STAT_FIELDS)
-    db.exec_(conn, f"""UPDATE player_stats ps SET {full}, updated_at = now()
+    sets = ", ".join(f"{f} = coalesce((r.stats->>'{f}')::numeric, ps.{f})" for f in STAT_FIELDS)
+    db.exec_(conn, f"""UPDATE player_stats ps SET {sets}, updated_at = now()
         FROM work_1c_row_map r JOIN touch t ON t.id = r.ps_id
-        WHERE ps.id = r.ps_id AND (t.zeroed OR t.overwrite)""")
-    fill = ", ".join(f"{f} = coalesce(ps.{f}, (r.stats->>'{f}')::numeric)" for f in STAT_FIELDS)
-    db.exec_(conn, f"""UPDATE player_stats ps SET {fill}, updated_at = now()
-        FROM work_1c_row_map r JOIN touch t ON t.id = r.ps_id
-        WHERE ps.id = r.ps_id AND t.has_nulls""")
+        WHERE ps.id = r.ps_id AND t.fix_values""")
 
     # rebuilt seasons: rows for players the page does not list (live-feed leftovers such as
     # 'Unknown' or a second row under another player's name) are archived and removed
@@ -132,6 +122,7 @@ def main():
                  (u["match_id"], pid, u["page_team_id"], *stats.values(), _calculate_fantasy_points(stats)))
         added += 1
     print(f"\nmissing page players inserted: {added} (of {len(missing)})")
+    remove_emptied_players(conn)
     season_counts(conn, "after")
     db.finish(conn, apply)
 

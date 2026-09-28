@@ -18,7 +18,7 @@ import time
 from typing import Callable, Dict, List, Optional
 
 import requests
-from sqlalchemy import exists
+from sqlalchemy import exists, null
 
 from app.data.database import get_session
 from app.data.ingestion.afltables_pages import (
@@ -169,8 +169,10 @@ def apply_match_page(session, match: Match, game: Dict, page: Dict, team_ids: Di
                         changed = True
                 result["stats_updated"] += int(changed)
             else:
+                # null(): a plain None would be replaced by the model's default 0
                 session.add(PlayerStat(match_id=match.id, player_id=player_id, team_id=team_id,
-                                       fantasy_points=_calculate_fantasy_points(stats), **stats))
+                                       fantasy_points=_calculate_fantasy_points(stats),
+                                       **{f: (null() if v is None else v) for f, v in stats.items()}))
                 result["stats_created"] += 1
 
 
@@ -210,7 +212,7 @@ def ingest_from_afl_tables(season: int = None, limit: int = None,
                     season_games[match.season] = parse_season_page(html, match.season) if html else []
                 game = find_page_game(match, season_games[match.season], team_ids)
                 page_html = fetch(game['stats_url']) if game and game.get('stats_url') else None
-                page = parse_match_page(page_html) if page_html else None
+                page = parse_match_page(page_html, match.season) if page_html else None
                 if not page or not any(t['players'] for t in page['teams']):
                     result["unavailable"].append(label)
                     continue

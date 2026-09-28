@@ -6,9 +6,11 @@ Match page (afl/stats/games/{year}/{id}.html): one stats table per club with eac
 player's AFL Tables id (players/X/First_Last[N].html) and stat columns.
 
 Blank cells: AFL Tables leaves zero values blank. A column counts as recorded for a
-match when either club's Totals cell for it is non-blank; recorded blanks become 0,
-unrecorded columns stay None (e.g. contested possessions before 1999, TOG before
-2003, Brownlow votes in finals).
+match when the season is at or after the first season AFL Tables records it
+(FIRST_RECORDED) or either club's Totals cell for it is non-blank; recorded blanks
+become 0, unrecorded columns stay None (contested possessions before 1999, clearances
+before 1998, TOG and goal assists before 2003). Brownlow votes are recorded only when
+the match's Totals show votes (none in finals).
 """
 import re
 from datetime import datetime
@@ -33,6 +35,16 @@ CLUB_ALIASES = {
     'Footscray': 'Western Bulldogs',
     'Kangaroos': 'North Melbourne',
     'South Melbourne': 'Sydney',
+}
+
+# First season each stat appears on AFL Tables match pages (checked against every page 1990-2026)
+FIRST_RECORDED = {
+    **{f: 1990 for f in ('kicks', 'marks', 'handballs', 'disposals', 'goals', 'behinds',
+                         'hitouts', 'tackles', 'free_kicks_for', 'free_kicks_against')},
+    **{f: 1998 for f in ('rebound_50s', 'inside_50s', 'clearances', 'clangers')},
+    **{f: 1999 for f in ('contested_possessions', 'uncontested_possessions', 'contested_marks',
+                         'marks_inside_50', 'one_percenters', 'bounces')},
+    'goal_assist': 2003, 'time_on_ground_pct': 2003,
 }
 
 FINALS_LABELS = ("Qualifying", "Elimination", "Semi", "Preliminary", "Grand", "Wildcard")
@@ -117,7 +129,7 @@ def _cell_value(text: str, field: str):
         return None
 
 
-def parse_match_page(html: str) -> Optional[Dict]:
+def parse_match_page(html: str, season: Optional[int] = None) -> Optional[Dict]:
     """{'date', 'attendance', 'teams': [{'club', 'players': [...]}, ...]} or None.
 
     Each player: {'name', 'afltables_id', **stats}. Recorded blank cells are 0.
@@ -175,10 +187,14 @@ def parse_match_page(html: str) -> Optional[Dict]:
                 val = _cell_value(tds[i].get_text(), field) if i < len(tds) else None
                 rec[field] = val
             players.append(rec)
-        out['teams'].append({'club': club, 'players': players, 'recorded': totals})
+        out['teams'].append({'club': club, 'players': players, 'recorded': totals, 'columns': list(cols)})
 
-    # a column is recorded for the match if either club's total is non-blank
+    # recorded: the season records it, or either club's total is non-blank
+    season = season or (out['date'].year if out['date'] else None)
     recorded = {f for t in out['teams'] for f, ok in t['recorded'].items() if ok}
+    if season:
+        in_header = {f for t in out['teams'] for f in t['columns']}
+        recorded |= {f for f in in_header if f in FIRST_RECORDED and season >= FIRST_RECORDED[f]}
     for t in out['teams']:
         for p in t['players']:
             for f in STAT_FIELDS:

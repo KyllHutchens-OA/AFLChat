@@ -21,7 +21,7 @@ from collections import Counter, defaultdict
 from app.data.fixes_1c import db
 from app.data.fixes_1c.map_rows import PLACEHOLDER_NAMES, norm
 
-STRONG = ("name", "stats+surname")
+STRONG = ("key", "name", "stats+surname")
 
 
 def player_fk_refs(conn):
@@ -30,6 +30,28 @@ def player_fk_refs(conn):
         SELECT c.conrelid::regclass::text AS tbl, a.attname AS col
         FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
         WHERE c.contype = 'f' AND c.confrelid = 'players'::regclass""") if r["tbl"] != "player_stats"]
+
+
+def remove_emptied_players(conn) -> int:
+    """Archive + delete players that had rows in this 1C run (work tables) but now have
+    no player_stats and no other references (e.g. 'Unknown', duplicate namesake ids)."""
+    db.exec_(conn, "CREATE TABLE IF NOT EXISTS archive_1c_merged_players (LIKE players)")
+    db.exec_(conn, "ALTER TABLE archive_1c_merged_players ADD COLUMN IF NOT EXISTS merged_into int")
+    refs = player_fk_refs(conn)
+    cands = [r["player_id"] for r in db.rows(conn, """
+        SELECT DISTINCT x.player_id FROM (
+          SELECT player_id FROM work_1c_row_map UNION SELECT player_id FROM work_1c_db_unmatched) x
+        JOIN players p ON p.id = x.player_id
+        WHERE NOT EXISTS (SELECT 1 FROM player_stats ps WHERE ps.player_id = x.player_id)""")]
+    removed = 0
+    for pid in cands:
+        if any(db.one(conn, f"SELECT count(*) FROM {t} WHERE {c} = %s", (pid,)) for t, c in refs):
+            continue
+        db.exec_(conn, "INSERT INTO archive_1c_merged_players SELECT p.*, NULL FROM players p WHERE id = %s", (pid,))
+        db.exec_(conn, "DELETE FROM players WHERE id = %s", (pid,))
+        removed += 1
+    print(f"players left without rows removed (archived): {removed}")
+    return removed
 
 
 def main():
@@ -77,6 +99,17 @@ def main():
                 continue
             key_rows = [r for r in prs if r["afltables_id"] == key]
             target = key_owner.get(key)
+            if target is None:
+                # reuse an unclaimed same-name player left without rows (e.g. the second
+                # 'Gary Ablett' id once its duplicate copies are gone)
+                name = next(r["page_name"] for r in key_rows)
+                target = db.one(conn, """SELECT p.id FROM players p WHERE lower(p.name) = lower(%s)
+                    AND p.afltables_id IS NULL AND p.id <> %s
+                    AND NOT EXISTS (SELECT 1 FROM player_stats ps WHERE ps.player_id = p.id)
+                    ORDER BY p.id LIMIT 1""", (name, pid))
+                if target is not None:
+                    db.exec_(conn, "UPDATE players SET afltables_id = %s WHERE id = %s", (key, target))
+                    key_owner[key] = target
             if target is None:
                 latest = max(key_rows, key=lambda r: r["match_date"])
                 name = latest["page_name"]
@@ -144,14 +177,7 @@ def main():
             merged += 1
             print(f"merge {key}: player {old} -> {keep}")
 
-    # --- split sources left with no rows (e.g. 'Unknown') ------------------------
-    for pid in split_sources:
-        left = db.one(conn, "SELECT count(*) FROM player_stats WHERE player_id = %s", (pid,))
-        other = sum(db.one(conn, f"SELECT count(*) FROM {t} WHERE {c} = %s", (pid,)) for t, c in refs)
-        if left == 0 and other == 0:
-            db.exec_(conn, "INSERT INTO archive_1c_merged_players SELECT p.*, NULL FROM players p WHERE id = %s", (pid,))
-            db.exec_(conn, "DELETE FROM players WHERE id = %s", (pid,))
-            print(f"removed empty player {pid}")
+    remove_emptied_players(conn)
 
     # --- labels ---------------------------------------------------------------
     rows = db.rows(conn, """

@@ -303,7 +303,7 @@ Automatically ingests player-level match statistics into the `player_stats` tabl
 - **Blank cells** on AFL Tables are 0 when the column is recorded for that match; unrecorded columns stay NULL (e.g. CP before 1999, TOG before 2003)
 - **Rounds**: `matches.round_number` (Opening Round = 0, finals continue after the last H&A round), `is_final`, `round_name` ('Grand Final', 'Wildcard Round', ...). Legacy `round` = str(round_number) for H&A, round_name for finals. See `app/data/rounds.py`
 - **match_date** is the venue-local kick-off
-- **Respectful scraping** — 1.5s between requests to `afltables.com`
+- **Respectful scraping**: 1.5s between requests to `afltables.com`
 - **Data health**: `GET /api/health/data`; `app.services.data_health.data_coverage()` gives the "latest match with stats" date
 - One-off data repairs (1C) live in `backend/app/data/fixes_1c/` + `scripts/db/1c_*.sql`; see `scripts/db/1C_RUNBOOK.md`
 
@@ -353,8 +353,8 @@ Chat pipeline restructure (Milestones 0–5, complete):
 2. **Supabase pooler** — prepared statements must be disabled (`prepare=False` in psycopg3)
 3. **React StrictMode** — socket hook uses singleton pattern to prevent double-connect
 4. **The Odds API quota** — only 16 req/day; fetcher guards against overcalling
-5. **Round field is a string** — legacy `round` is "0"–"24" for H&A or a finals name ("Wildcard Round", "Qualifying Final", ... "Grand Final") in every season; prefer `round_number` / `is_final` / `round_name`
+5. **Round field is a string**: legacy `round` is "0" to "24" for H&A or a finals name ("Wildcard Round", "Qualifying Final", ... "Grand Final") in every season; prefer `round_number` / `is_final` / `round_name`
 6. **LLM model env vars** — always use `OPENAI_MODEL` / `NEWS_ENRICHMENT_MODEL` env vars, never hardcode model strings
 7. **Single gunicorn worker** — WebSocket state is in-process; scaling to multiple workers requires Redis adapter
-8. **AFL Tables round numbering** — AFL Tables folds the Opening Round into its Round 1; Squiggle numbers it 0. `matches.round_number` follows Squiggle. The stats ingester matches by club pair + date window, not round number
-9. **AFL Tables update delay** — player stats appear on afltables.com 1–3 days after a round completes. The 6 AM daily job + 3-hourly retry pick them up automatically once available
+8. **AFL Tables round numbering**: AFL Tables folds the Opening Round into its Round 1; Squiggle numbers it 0. `matches.round_number` follows Squiggle. The stats ingester matches by club pair + date window, not round number
+9. **AFL Tables update delay**: player stats appear on afltables.com 1 to 3 days after a round completes. The 6 AM daily job + 3-hourly retry pick them up automatically once available

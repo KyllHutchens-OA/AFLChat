@@ -10,7 +10,7 @@ Builds (per season: delete + rebuild; derived data only, no AFL rows are changed
   work_1c_match_pages     match_id -> stats_url + recorded columns
 Later steps (identity, team fixes, NULL fills, phantom removal) read these tables.
 
-Row matching inside one match: same name + identical stat line
+Row matching inside one match: the player's AFL Tables key (once labelled); same name + identical stat line
 (kicks/handballs/marks/goals/behinds/tackles/hitouts); identical stat line with the
 same surname (or, for rows stored as 'Unknown', a unique non-trivial line); same
 name; unique surname. Anything else stays unmatched.
@@ -67,11 +67,19 @@ def map_match(db_rows, page_players):
         left_db.remove(r)
         left_pg.remove(p)
 
-    # 1. same name and identical stat line
+    # 0. player already labelled with this AFL Tables key (after step 07)
     for r in list(left_db):
-        hits = [p for p in left_pg if norm(p["name"]) == norm(r["name"]) and fingerprint(p) == fingerprint(r)]
+        hits = [p for p in left_pg if r.get("key") and p["afltables_id"] == r["key"]]
         if len(hits) == 1:
-            take(r, hits[0], "name")
+            take(r, hits[0], "key")
+    # 1. same name and identical stat line (if several rows qualify, prefer the row
+    #    already on the page's club, then the older player id)
+    for p in list(left_pg):
+        cands = [r for r in left_db if norm(r["name"]) == norm(p["name"]) and fingerprint(r) == fingerprint(p)]
+        same_pg = [x for x in left_pg if norm(x["name"]) == norm(p["name"]) and fingerprint(x) == fingerprint(p)]
+        if cands and len(same_pg) == 1:
+            best = min(cands, key=lambda r: (r.get("team_id") != p.get("team_id"), r["player_id"]))
+            take(best, p, "name")
     # 2. identical stat line; prefer the same surname when several rows share it
     #    (catches truncated DB names: 'Jacob Rooyen' = 'Jacob van Rooyen')
     for p in list(left_pg):
@@ -126,7 +134,7 @@ def main():
         matches = db.rows(conn, "SELECT * FROM matches WHERE season = %s", (season,))
         mapping, _, _ = match_db_rows(matches, ref)
         ps = db.rows(conn, """
-            SELECT ps.*, p.name FROM player_stats ps JOIN players p ON p.id = ps.player_id
+            SELECT ps.*, p.name, p.afltables_id AS key FROM player_stats ps JOIN players p ON p.id = ps.player_id
             JOIN matches m ON m.id = ps.match_id WHERE m.season = %s""", (season,))
         by_match = {}
         for r in ps:

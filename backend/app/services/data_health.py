@@ -22,6 +22,11 @@ CACHE_SECONDS = 300
 # when its player_stats row count is outside [2*side - 4, 2*side + 2].
 SIDE_SIZE = [(1990, 20), (1994, 21), (1998, 22), (2021, 23)]
 
+# Verified against AFL Tables team lists; not errors
+KNOWN_ROW_COUNT_EXCEPTIONS = {
+    (1996, "St Kilda", "Essendon", "1996-06-08"): "AFL Tables lists 25 + 26 players",
+}
+
 NULL_RATE_COLUMNS = (
     "disposals", "goals", "behinds", "tackles", "hitouts", "clearances", "inside_50s",
     "contested_possessions", "uncontested_possessions", "brownlow_votes", "time_on_ground_pct",
@@ -84,11 +89,15 @@ def compute_data_health(session) -> Dict:
         ORDER BY 1, 2""")
 
     per_match = _rows(session, """
-        SELECT m.id, m.season, m.round_name, count(ps.id) AS n
+        SELECT m.id, m.season, m.round_name, h.name AS home, a.name AS away,
+               m.match_date::date::text AS date, count(ps.id) AS n
         FROM matches m JOIN player_stats ps ON ps.match_id = m.id
-        GROUP BY m.id, m.season, m.round_name""")
+        JOIN teams h ON h.id = m.home_team_id JOIN teams a ON a.id = m.away_team_id
+        GROUP BY m.id, m.season, m.round_name, h.name, a.name""")
     outliers = []
     for r in per_match:
+        if (r["season"], r["home"], r["away"], r["date"]) in KNOWN_ROW_COUNT_EXCEPTIONS:
+            continue
         side = _side_size(r["season"])
         if not (2 * side - 4 <= r["n"] <= 2 * side + 2):
             outliers.append({**r, "expected": f"{2 * side - 4}-{2 * side + 2}"})

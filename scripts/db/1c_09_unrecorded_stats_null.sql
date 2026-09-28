@@ -27,7 +27,7 @@ SELECT ps.id, r.season,
   (ps.clangers = 0 AND r.stats->>'clangers' IS NULL) AS cg,
   (ps.time_on_ground_pct = 0 AND r.stats->>'time_on_ground_pct' IS NULL) AS tog
 FROM work_1c_row_map r JOIN player_stats ps ON ps.id = r.ps_id;
-DELETE FROM unrec WHERE NOT (cp OR up OR cm OR mi OR op OR bo OR ga OR cl OR i50 OR rb OR cg OR tog);
+DELETE FROM unrec WHERE (cp OR up OR cm OR mi OR op OR bo OR ga OR cl OR i50 OR rb OR cg OR tog) IS NOT TRUE;
 
 SELECT season, count(*) AS rows, count(*) FILTER (WHERE cp) AS cp, count(*) FILTER (WHERE cl) AS clearances,
        count(*) FILTER (WHERE ga) AS goal_assist, count(*) FILTER (WHERE tog) AS tog
