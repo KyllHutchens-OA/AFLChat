@@ -712,10 +712,11 @@ class RechartsBuilder:
 
 # ── Helpers ─────────────────────────────────────────────────────
 
-def _convert_annotations(plotly_annotations: List[Dict]) -> List[Dict]:
-    """Convert Plotly-format annotations to simplified {x, y, label, color} format."""
+def _convert_annotations(raw_annotations: List[Dict]) -> List[Dict]:
+    """Convert data_preprocessor's annotation dicts (Plotly-annotation-shaped:
+    x/y/text/xref) to the simplified {x, y, label, color} format the chart spec uses."""
     result = []
-    for ann in plotly_annotations:
+    for ann in raw_annotations:
         # Skip paper-ref annotations (missing rounds, etc.) — they don't map to data points
         if ann.get("xref") == "paper":
             continue

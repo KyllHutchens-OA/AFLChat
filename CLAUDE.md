@@ -40,9 +40,7 @@ AFL App/
 │
 ├── database/migrations/         # SQL migrations V1–V6
 ├── scripts/                     # ingest_data.py, init_db.py, benchmark_chat.py + benchmark_results/
-├── docs/                        # CONTEXT.md, BENCHMARK_BEFORE_AFTER.md, plans/
-├── eval_queries.txt             # 128 exploratory eval queries (parsed by the eval harness)
-├── TODO.md
+├── docs/                        # BENCHMARK_BEFORE_AFTER.md, plans/, archive/ (superseded docs)
 └── CLAUDE.md                    # This file
 ```
 
@@ -294,7 +292,7 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 2. `data_preprocessor.py` — aggregation, pivoting, null handling
 3. `recharts_builder.py` — the single seam that translates internal chart types into the wire contract and builds the spec (e.g. `horizontal_bar` → `bar` + `orientation: "horizontal"`, `stacked_bar` → `groupedBar` + per-series `stackId`, `box` → `groupedBar` median/range)
 4. `spec.py` — `ChartSpecV1` pydantic contract (mirrored by zod in `frontend/src/types/chartSpec.ts`). Every spec is validated before emission; on validation failure nothing is sent
-5. `layout_config.py` / `layout_optimizer.py` — sizing, axis formatting, legend placement
+5. `layout_config.py` — sizing, axis formatting, legend placement
 
 Wire-format chart types (`ChartSpecV1.chartType`, camelCase): `line`, `bar`, `groupedBar`, `pie`, `scatter`, `area`, `table`
 

@@ -18,7 +18,7 @@ Sources, merged here:
 3. SALVAGED: the old `app/agent/eval/test_cases.py` suite, recovered from
    its bytecode in M5. Static string checks only; kept as a legacy subset.
 
-4. eval_queries.txt (repo root): 128 exploratory queries, auto-tagged, no
+4. eval_queries.txt (this directory): 128 exploratory queries, auto-tagged, no
    ground truth (only meaningful with --judge).
 
 Subsets (see build_subsets): smoke, full, dev, heldout, adversarial, plus
@@ -33,9 +33,7 @@ from app.agent.eval.case_bank import BANK, T, TR
 from app.agent.eval.models import ChartExpect, EvalCase, Fact, PairCheck
 from app.agent.eval.sqlkit import CUR, grand_final, leaders, per_season_wins, player_total, record
 
-# Repo root: backend/app/agent/eval/cases.py -> up 4 levels.
-REPO_ROOT = Path(__file__).resolve().parents[4]
-EVAL_QUERIES_PATH = REPO_ROOT / "eval_queries.txt"
+EVAL_QUERIES_PATH = Path(__file__).resolve().parent / "eval_queries.txt"
 
 
 # ---------------------------------------------------------------------------
