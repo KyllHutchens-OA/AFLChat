@@ -49,21 +49,27 @@ Gotchas:
 ### matches
 Purpose: Historical + backfilled match results, one row per completed/scheduled game.
 Columns: id (int, PK), season (int), round (varchar — see gotcha below),
-  match_date (timestamp), venue (varchar), home_team_id/away_team_id (int, FK teams),
-  home_score/away_score (int), attendance (int),
-  home_q1_goals/home_q1_behinds..home_q4_goals/home_q4_behinds (int, per quarter),
-  away_q1_goals/away_q1_behinds..away_q4_goals/away_q4_behinds (int, per quarter).
+  round_number (int: Opening Round = 0, home-and-away 1..N, finals continue after the last
+  H&A round), is_final (bool), round_name (text: 'Opening Round', 'Round 5', 'Wildcard Round',
+  'Qualifying Final', 'Elimination Final', 'Semi Final', 'Preliminary Final', 'Grand Final';
+  replays of drawn finals are 'Grand Final Replay' / 'Qualifying Final Replay'),
+  match_date (timestamp, venue-local kick-off), venue (varchar), home_team_id/away_team_id
+  (int, FK teams), home_score/away_score (int), attendance (int),
+  home_q1_goals/home_q1_behinds..home_q4_goals/home_q4_behinds (int, CUMULATIVE at each break),
+  away_q1_goals/away_q1_behinds..away_q4_goals/away_q4_behinds (int, CUMULATIVE).
 Join key: matches.home_team_id/away_team_id -> teams.id; matches.id <- player_stats.match_id,
   team_stats.match_id, betting_odds.match_id, squiggle_predictions.match_id, live_games.match_id.
-Season coverage: 1990-2026 (season 2026 is a fully completed 207-game season in this DB
+Season coverage: 1990-2026 (season 2026 is a fully completed 218-game season incl. finals in this DB
   even though it's the "current" season — do not assume 2026 is partial/in-progress).
 Gotchas:
-  - `round` is a VARCHAR, not a number: regular rounds are the strings '0'-'24'; finals
-    are the literal strings 'Qualifying Final', 'Elimination Final', 'Semi Final',
-    'Preliminary Final', 'Grand Final'. Always quote round values: WHERE m.round = '5',
-    never WHERE m.round = 5. Ladder/regular-season aggregates MUST exclude finals with
-    `m.round NOT IN ('Qualifying Final','Elimination Final','Semi Final','Preliminary Final','Grand Final')`.
-  - Quarter score = q_goals*6 + q_behinds; cumulative running score = sum of all quarters so far.
+  - Prefer `round_number` / `is_final` / `round_name`. Regular season = `NOT m.is_final`;
+    grand final = `m.round_name = 'Grand Final'`; "round 20" = `m.round_number = 20 AND NOT m.is_final`.
+  - Legacy `round` is a VARCHAR: H&A rounds are the strings '0'-'24' (Opening Round = '0');
+    finals are the literal strings 'Wildcard Round', 'Qualifying Final', 'Elimination Final',
+    'Semi Final', 'Preliminary Final', 'Grand Final' (same in every season, 2026 included).
+    Always quote round values: WHERE m.round = '5', never WHERE m.round = 5.
+  - Quarter columns are cumulative (AFL Tables style): score at 3/4 time = q3_goals*6 + q3_behinds;
+    points scored IN quarter 3 = (q3_goals*6+q3_behinds) - (q2_goals*6+q2_behinds).
   - A team can be on either the home or away side in any given match — NEVER select raw
     home_score/away_score when the question is about a specific team; always use
     `CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END`.
@@ -146,8 +152,9 @@ Gotchas:
 Purpose: Live/recent-game tracking table populated from the Squiggle SSE feed for the
   current season, used as a stopgap for games not yet backfilled into `matches`.
 Columns: id (int, PK), squiggle_game_id (int), match_id (int, FK matches — set once the
-  completed game has been backfilled), season (int), round (varchar, same string
-  conventions as matches.round), home_team_id/away_team_id (FK teams),
+  completed game has been backfilled), season (int), round (varchar: Squiggle round
+  NUMBER as text, even for finals, e.g. '29' = 2026 GF; use matches.round_name via
+  match_id for names), home_team_id/away_team_id (FK teams),
   home_score/away_score, home_goals/home_behinds/away_goals/away_behinds (int),
   home_q1_score..away_q4_score (int, cumulative per quarter), status (varchar:
   'scheduled'|'playing'|'completed'|'post_match'), complete_percent (int 0-100),

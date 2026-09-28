@@ -10,8 +10,12 @@ import time
 import logging
 from datetime import datetime
 
+from sqlalchemy import and_, or_
+
+from app.analytics.entity_resolver import VenueResolver
 from app.data.database import Session
 from app.data.models import Team, Player, Match, PlayerStat, TeamStat
+from app.data.rounds import round_fields_from_squiggle
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -169,6 +173,8 @@ class AFLTablesIngester:
         Squiggle provides JSON API for AFL stats: https://api.squiggle.com.au
         """
         base_url = "https://api.squiggle.com.au"
+        if not self.teams_cache:
+            self._load_teams_cache()  # the nightly job calls this method directly
 
         # Fetch games for the season
         logger.info(f"Fetching matches for {year}...")
@@ -221,7 +227,10 @@ class AFLTablesIngester:
             # Extract match data
             home_team = game_data.get("hteam")
             away_team = game_data.get("ateam")
-            round_num = str(game_data.get("round"))  # Convert to string (round column is VARCHAR)
+            rf = round_fields_from_squiggle(game_data)
+            if rf is None:
+                return
+            round_num = rf["round"]
 
             # Get team IDs
             home_team_id = self.get_team_id(home_team)
@@ -231,36 +240,52 @@ class AFLTablesIngester:
                 logger.warning(f"Could not find team IDs for {home_team} vs {away_team}")
                 return
 
-            # Parse date
-            date_str = game_data.get("date")
+            # Venue-local kick-off (Squiggle `date` is Melbourne time, `localtime` is venue time)
+            date_str = game_data.get("localtime") or game_data.get("date")
             match_date = datetime.fromisoformat(date_str.replace("Z", "+00:00")) if date_str else datetime.now()
+            if match_date.tzinfo:
+                match_date = match_date.replace(tzinfo=None)
 
-            # Check if match already exists
-            existing_match = self.session.query(Match).filter_by(
-                season=year,
-                round=round_num,
-                home_team_id=home_team_id,
-                away_team_id=away_team_id
+            # Same season + same two teams (either orientation) + same round number
+            existing_match = self.session.query(Match).filter(
+                Match.season == year,
+                Match.round_number == rf["round_number"],
+                or_(
+                    and_(Match.home_team_id == home_team_id, Match.away_team_id == away_team_id),
+                    and_(Match.home_team_id == away_team_id, Match.away_team_id == home_team_id),
+                ),
             ).first()
 
             if existing_match:
-                # If match was previously scheduled and is now complete, update scores
-                if (existing_match.match_status != "completed"
-                        and game_data.get("complete") == 100
-                        and game_data.get("hscore") is not None):
-                    existing_match.home_score = game_data.get("hscore")
-                    existing_match.away_score = game_data.get("ascore")
-                    existing_match.match_status = "completed"
-                    logger.info(f"Updated result: {year} R{round_num} {home_team} vs {away_team} "
-                                f"({existing_match.home_score}-{existing_match.away_score})")
+                # Keep fixture times current (placeholder dates get replaced once scheduled)
+                if date_str and existing_match.match_date != match_date:
+                    existing_match.match_date = match_date
+                # Once AFL Tables quarter scores are in (stats ingester), they are the
+                # authority for the result; Squiggle only fills results before that.
+                confirmed = existing_match.home_q4_goals is not None
+                if (game_data.get("complete") == 100 and game_data.get("hscore") is not None
+                        and not confirmed):
+                    swapped = existing_match.home_team_id != home_team_id
+                    hs, as_ = game_data.get("hscore"), game_data.get("ascore")
+                    if swapped:
+                        hs, as_ = as_, hs
+                    if (existing_match.home_score, existing_match.away_score) != (hs, as_) \
+                            or existing_match.match_status != "completed":
+                        existing_match.home_score, existing_match.away_score = hs, as_
+                        existing_match.match_status = "completed"
+                        logger.info(f"Updated result: {year} {rf['round_name']} {home_team} vs {away_team} "
+                                    f"({existing_match.home_score}-{existing_match.away_score})")
                 return
 
             # Create match
             match = Match(
                 season=year,
                 round=round_num,
+                round_number=rf["round_number"],
+                round_name=rf["round_name"],
+                is_final=rf["is_final"],
                 match_date=match_date,
-                venue=game_data.get("venue"),
+                venue=VenueResolver.normalize_venue(game_data.get("venue") or ""),
                 home_team_id=home_team_id,
                 away_team_id=away_team_id,
                 home_score=game_data.get("hscore"),

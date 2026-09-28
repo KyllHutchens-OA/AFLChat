@@ -88,8 +88,14 @@ class Match(Base):
 
     id = Column(Integer, primary_key=True)
     season = Column(Integer, nullable=False)
-    round = Column(String(50), nullable=False)  # Changed to String to support finals (e.g., "Qualifying Final")
-    match_date = Column(DateTime, nullable=False)
+    # Legacy label: str(round_number) for H&A (Opening Round = '0'), round_name for finals
+    round = Column(String(50), nullable=False)
+    # Opening Round = 0, H&A 1..N, finals continue numerically after the last H&A round
+    round_number = Column(Integer)
+    is_final = Column(Boolean, nullable=False, default=False)
+    # 'Opening Round' | 'Round N' | 'Wildcard Round' | 'Qualifying Final' | ... | 'Grand Final'
+    round_name = Column(Text)
+    match_date = Column(DateTime, nullable=False)  # venue-local kick-off
     venue = Column(String(100))
     home_team_id = Column(
         Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False

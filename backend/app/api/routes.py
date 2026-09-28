@@ -368,9 +368,12 @@ def _attach_predictions(upcoming: list, season: int):
                 home = team_by_name.get(match['home_team'])
                 away = team_by_name.get(match['away_team'])
                 if home and away:
-                    round_str = str(match.get('round', ''))
-                    round_values.add(round_str)
-                    match_filters.append((home.id, away.id, round_str))
+                    try:
+                        round_num = int(match.get('round'))
+                    except (TypeError, ValueError):
+                        continue
+                    round_values.add(round_num)
+                    match_filters.append((home.id, away.id, round_num))
 
             if not match_filters:
                 return
@@ -379,13 +382,13 @@ def _attach_predictions(upcoming: list, season: int):
                 session.query(Match)
                 .filter(
                     Match.season == season,
-                    Match.round.in_(round_values),
+                    Match.round_number.in_(round_values),
                 )
                 .all()
             )
-            # Index by (home_team_id, away_team_id, round)
+            # Index by (home_team_id, away_team_id, round_number); Squiggle rounds are numbers
             match_by_key = {
-                (m.home_team_id, m.away_team_id, m.round): m
+                (m.home_team_id, m.away_team_id, m.round_number): m
                 for m in db_matches
             }
 
