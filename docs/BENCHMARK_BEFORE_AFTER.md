@@ -56,11 +56,12 @@ deterministic check outcome (✓ = pass) plus the judge verdict.
 | salv_top_disposals | Top 5 disposals 2024 | facts | — | — | ✓ | partially_correct⁴ |
 | salv_chart_trend | Carlton avg score/season chart | chart+facts | — | — | ✓ | correct |
 
-¹ Response says "Marcus Bontempelli had 29 votes in 2023"; the DB's top 2023
-brownlow_votes aggregate is Lachie Neale (31) — who also won the real-world 2023
-medal. The deterministic check accepts either name because the baseline flagged
-this as a pre-existing data-quality ambiguity; the judge (correctly) does not.
-Residual issue, unchanged from baseline behaviour.
+¹ Response says "Marcus Bontempelli had 29 votes in 2023", which is wrong.
+Lachie Neale won the 2023 Brownlow with 31 votes and Bontempelli was runner-up
+on 29; the DB's brownlow_votes agree. The M5 check accepted either name (its
+case comment wrongly called Bontempelli the real-world winner), so this row was
+a false pass; the judge was right. Fixed in 1D: single_02 now takes the winner
+and vote count from live verification SQL and fails this answer.
 ² This run's pie charted *points from* goals (2196 = 366×6) vs behinds (239)
 rather than raw counts — internally consistent and DB-traceable (unlike the
 baseline's untraceable 871/742), but an interpretation the judge marked partial.
@@ -68,9 +69,12 @@ The previous day's identical query charted raw 366/239.
 ³ The M5 scorer grades correction pairs on the final turn (facts + changed
 answer); turn-1 responses are recorded in `m5_smoke15.json` but not separately
 axis-scored.
-⁴ Names/order match at #1–2 but Tom Green totals 719 vs 770 by name — the agent
-groups by `player_id` and the registry holds duplicate player rows (known data
-issue, see `archive/backend/analyze_player_duplicates.py`).
+⁴ Names/order match at #1-2 but Tom Green shows 719 instead of 770. The cause is
+team-swapped stat rows, not duplicate players: 51 of Green's 2024 disposals are
+stored with `team_id` = Hawthorn, and the agent's SQL groups by player AND team,
+which splits his total (the same bug turns Jesse Hogan's 77 goals into 73 and
+drops Treloar from the top 5). Fix: repair the rows (1C) and group leaderboards
+by player only.
 
 ---
 
@@ -127,7 +131,7 @@ magnitude. Token cost for the full 18-turn smoke15 run: ~68.0k input /
 
 ## Residual known issues
 
-1. **Brownlow answers** (single_02): agent names Bontempelli (29 votes) for 2023; the DB's `brownlow_votes` aggregate and the real-world medal say Neale (31). Present since baseline.
+1. **Brownlow answers** (single_02): agent names Bontempelli (29 votes, runner-up) for 2023; the winner was Neale (31), per both the DB and the real-world medal. Present since baseline; the M5 gate counted it as a pass.
 2. **Aggregate interpretation nondeterminism** (single_06): "scoring sources" charted as points one day, raw counts the next — both DB-consistent, but labels don't disambiguate.
-3. **Duplicate player registry rows** (salv_top_disposals): grouping by `player_id` vs name changes top-N totals (Tom Green 719 vs 770).
+3. **Team-swapped stat rows** (salv_top_disposals): rows tagged with the wrong `team_id` split a player's total when the SQL groups by player and team (Tom Green 719 vs 770).
 4. `pair_01` turn 1 ("last round" relative-time resolution) still returns 0 rows before the correction — though it now explains itself instead of falling back generically.
