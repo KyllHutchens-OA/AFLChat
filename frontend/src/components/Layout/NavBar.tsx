@@ -1,5 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useSpoilerMode } from '../../hooks/useSpoilerMode';
+import LogoMark from './LogoMark';
+import ClubPicker from './ClubPicker';
 
 interface NavLink {
   path: string;
@@ -10,60 +12,64 @@ interface NavLink {
 const NavBar = () => {
   const location = useLocation();
   const { hideScores, toggleSpoilerMode } = useSpoilerMode();
+  const isLanding = location.pathname === '/';
   const navLinks: NavLink[] = [
-    { path: '/aflagent', label: 'Chat', aliases: ['/', '/afl'] },
+    { path: '/ask', label: 'Ask', aliases: ['/afl', '/aflagent'] },
     { path: '/live', label: 'Live' },
     { path: '/about', label: 'About' },
   ];
 
   const isActive = (link: NavLink) => {
-    if (link.aliases?.includes(location.pathname)) return true;
+    if (link.aliases?.some((a) => location.pathname.startsWith(a))) return true;
     return location.pathname.startsWith(link.path);
   };
 
   return (
-    <nav className="glass sticky top-0 z-30 border-b border-afl-warm-200/50">
-      <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo/Brand */}
-          <Link to="/" className="flex items-center gap-2">
-            <span className="text-xl font-semibold text-afl-warm-900">
-              Footy-NAC
-            </span>
-            <span className="hidden sm:inline text-sm text-afl-warm-500">
-              Not Another Commentator
+    <nav className="sticky top-0 z-30 bg-paper/90 backdrop-blur-brand border-b border-warm-200/60">
+      <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-10">
+        <div className="flex items-center justify-between h-14">
+          <Link to="/" className="flex items-center gap-2 shrink-0">
+            <LogoMark className="w-7 h-7" />
+            <span className="font-display text-lg tracking-wide text-ink leading-none">
+              FOOTY-NAC
             </span>
           </Link>
 
-          {/* Navigation */}
           <div className="flex items-center gap-1">
             {navLinks.map((link) => (
               <Link
                 key={link.path}
                 to={link.path}
                 className={`
-                  px-3 sm:px-4 py-2 rounded-apple text-sm font-medium transition-all duration-200
+                  px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
                   ${isActive(link)
-                    ? 'bg-afl-accent text-white shadow-apple-sm'
-                    : 'text-afl-warm-700 hover:bg-afl-warm-100'
+                    ? 'bg-sherrin text-white shadow-card-sm'
+                    : 'text-warm-700 hover:bg-warm-100'
                   }
                 `}
               >
                 {link.label}
               </Link>
             ))}
+            {isLanding && (
+              <a
+                href="#how-it-thinks"
+                className="hidden sm:inline-block px-3 py-2 rounded-lg text-sm font-medium text-warm-700 hover:bg-warm-100 transition-all"
+              >
+                How it thinks
+              </a>
+            )}
 
-            {/* Spoiler Toggle */}
+            <ClubPicker />
+
             <button
               onClick={toggleSpoilerMode}
-              className={`
-                ml-2 sm:ml-4 p-2 rounded-apple transition-all duration-200
-                ${hideScores
-                  ? 'bg-afl-accent text-white'
-                  : 'text-afl-warm-500 hover:bg-afl-warm-100'
-                }
-              `}
+              aria-label={hideScores ? 'Scores hidden. Click to show scores.' : 'Scores visible. Click to hide scores.'}
               title={hideScores ? 'Scores hidden - click to show' : 'Scores visible - click to hide'}
+              className={`
+                ml-1 p-2 rounded-lg transition-all duration-200
+                ${hideScores ? 'bg-sherrin text-white' : 'text-warm-500 hover:bg-warm-100'}
+              `}
             >
               {hideScores ? (
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
