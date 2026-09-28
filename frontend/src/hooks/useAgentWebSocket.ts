@@ -11,6 +11,10 @@ interface Message {
   sources?: string[];
   isError?: boolean;
   errorType?: 'rate_limit' | 'usage_limit' | 'processing' | 'network' | 'unknown';
+  // Latest match date with player stats (YYYY-MM-DD), sent by the v3 engine.
+  dataAsOf?: string;
+  // True while `response_delta` text is still arriving.
+  isStreaming?: boolean;
 }
 
 interface UseAgentWebSocketOptions {
@@ -55,6 +59,8 @@ export const useAgentWebSocket = ({
   // visualization (arrives after `response` already fired) can still be
   // attached via `complete`.
   const lastAgentMessageIdRef = useRef<string | null>(null);
+  // Id of the agent message currently receiving `response_delta` text.
+  const streamingIdRef = useRef<string | null>(null);
   const conversationIdRef = useRef<string | null>(conversationId || null);
   const historyLoadedRef = useRef(false);
   const hadConversationRef = useRef(!!conversationId);
@@ -89,9 +95,11 @@ export const useAgentWebSocket = ({
           type: msg.role === 'user' ? 'user' : 'agent',
           text: msg.content,
           timestamp: new Date(msg.timestamp || Date.now()),
-          confidence: msg.metadata?.confidence,
-          sources: msg.metadata?.sources,
-          visualization: msg.metadata?.visualization,
+          confidence: msg.metadata?.confidence ?? msg.confidence,
+          sources: msg.metadata?.sources ?? msg.sources,
+          // The backend flattens metadata into the message (B3), so read both.
+          visualization: msg.metadata?.visualization ?? msg.visualization,
+          dataAsOf: msg.metadata?.data_as_of ?? msg.data_as_of,
         }));
 
         setMessages(loadedMessages);
@@ -150,7 +158,10 @@ export const useAgentWebSocket = ({
     // singleton socket.)
     socket.off('connect');
     socket.off('disconnect');
+    socket.off('received');
     socket.off('thinking');
+    socket.off('response_delta');
+    socket.off('response_reset');
     socket.off('visualization');
     socket.off('response');
     socket.off('complete');
@@ -166,31 +177,74 @@ export const useAgentWebSocket = ({
       setThinkingStep('');
     });
 
+    // v3 emits `received` before any server work, so the thinking card shows at once.
+    socket.on('received', (data: { step?: string }) => {
+      setIsThinking(true);
+      setThinkingStep(data.step || 'Received your question...');
+    });
+
     socket.on('thinking', (data: { step: string }) => {
       setIsThinking(true);
       setThinkingStep(data.step);
+    });
+
+    // Streamed answer text (v3): the first delta creates the agent message.
+    socket.on('response_delta', (data: { delta: string }) => {
+      setIsThinking(false);
+      setThinkingStep('');
+      const streamingId = streamingIdRef.current;
+      if (!streamingId) {
+        const id = crypto.randomUUID();
+        streamingIdRef.current = id;
+        lastAgentMessageIdRef.current = id;
+        setMessages((prev) => [
+          ...prev,
+          { id, type: 'agent', text: data.delta, timestamp: new Date(), isStreaming: true },
+        ]);
+      } else {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === streamingId ? { ...m, text: m.text + data.delta } : m)),
+        );
+      }
+    });
+
+    // Text streamed before a tool call was a preamble, not the answer: drop it.
+    socket.on('response_reset', () => {
+      const streamingId = streamingIdRef.current;
+      if (streamingId) {
+        streamingIdRef.current = null;
+        setMessages((prev) => prev.filter((m) => m.id !== streamingId));
+      }
     });
 
     socket.on('visualization', (data: { spec: any }) => {
       pendingVizRef.current = data.spec;
     });
 
-    socket.on('response', (data: { text: string; confidence?: number; sources?: string[] }) => {
+    socket.on('response', (data: { text: string; confidence?: number; sources?: string[]; data_as_of?: string }) => {
       setIsThinking(false);
       setThinkingStep('');
 
-      const agentMessage: Message = {
-        id: crypto.randomUUID(),
-        type: 'agent',
+      const final = {
         text: data.text,
-        timestamp: new Date(),
         confidence: data.confidence,
         sources: data.sources,
         visualization: pendingVizRef.current ?? undefined,
+        dataAsOf: data.data_as_of,
+        isStreaming: false,
       };
       pendingVizRef.current = null;
-      lastAgentMessageIdRef.current = agentMessage.id;
 
+      // The full text replaces whatever was streamed.
+      const streamingId = streamingIdRef.current;
+      streamingIdRef.current = null;
+      if (streamingId) {
+        setMessages((prev) => prev.map((m) => (m.id === streamingId ? { ...m, ...final } : m)));
+        return;
+      }
+
+      const agentMessage: Message = { id: crypto.randomUUID(), type: 'agent', timestamp: new Date(), ...final };
+      lastAgentMessageIdRef.current = agentMessage.id;
       setMessages((prev) => [...prev, agentMessage]);
     });
 
@@ -224,6 +278,7 @@ export const useAgentWebSocket = ({
     socket.on('error', (data: { message: string }) => {
       setIsThinking(false);
       setThinkingStep('');
+      streamingIdRef.current = null;
 
       // Categorize error type for better UX
       const errorMsg = data.message.toLowerCase();
@@ -281,11 +336,24 @@ export const useAgentWebSocket = ({
     // Clear any leftover pending visualization from a previous turn (e.g. one
     // that never got flushed because that turn ended in an error).
     pendingVizRef.current = null;
+    streamingIdRef.current = null;
+
+    // Show progress straight away; the server confirms with `received`.
+    setIsThinking(true);
+    setThinkingStep('Received your question...');
+
+    let spoilerMode = false;
+    try {
+      spoilerMode = localStorage.getItem('afl-nac-spoiler-mode') === 'true';
+    } catch {
+      // storage unavailable: default to spoilers shown
+    }
 
     socketRef.current.emit('chat_message', {
       message,
       conversation_id: conversationIdRef.current,
       source: 'aflagent',
+      spoiler_mode: spoilerMode,
     });
   }, [isConnected]);
 

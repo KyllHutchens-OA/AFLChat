@@ -7,9 +7,18 @@ interface ResponseCardProps {
   text: string;
   visualization?: any;
   isError?: boolean;
+  dataAsOf?: string;
 }
 
-const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isError }) => {
+// 'YYYY-MM-DD' -> '26 Sep 2026' (parsed as a local date so it never shifts a day).
+const formatDataAsOf = (iso: string): string | null => {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isError, dataAsOf }) => {
+  const asOf = dataAsOf ? formatDataAsOf(dataAsOf) : null;
   if (isError) {
     return (
       <div className="card-apple border-l-4 border-l-red-400 p-5">
@@ -42,6 +51,7 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isErro
           </ChartErrorBoundary>
         </>
       )}
+      {asOf && <p className="mt-3 text-xs text-afl-warm-600">Data as of {asOf}</p>}
     </div>
   );
 };

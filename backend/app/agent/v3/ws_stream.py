@@ -9,6 +9,7 @@ and the trace row happen after `complete`.
 """
 import logging
 import re
+import time
 from typing import Any, Callable, Dict, Optional
 
 from app.agent.v3 import llm
@@ -20,6 +21,29 @@ logger = logging.getLogger(__name__)
 
 _CONTROL = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
 GENERIC_ERROR = "Something went wrong processing your request. Please try again, or rephrase your question."
+
+
+class _DeltaBuffer:
+    """Coalesces token deltas into ~50ms chunks so a long answer is tens of
+    socket events, not hundreds. Other events pass through (after a flush)."""
+
+    def __init__(self, emit, interval_s: float = 0.05):
+        self._emit, self._interval, self._buf, self._last = emit, interval_s, [], 0.0
+
+    def emit(self, event: str, payload: Dict[str, Any]) -> None:
+        if event != "response_delta":
+            self.flush()
+            self._emit(event, payload)
+            return
+        self._buf.append(payload["delta"])
+        if time.monotonic() - self._last >= self._interval:
+            self.flush()
+
+    def flush(self) -> None:
+        if self._buf:
+            self._emit("response_delta", {"delta": "".join(self._buf)})
+            self._buf = []
+        self._last = time.monotonic()
 
 
 def handle_chat_message_v3(data: Dict[str, Any], *, emit: Callable[[str, Dict[str, Any]], None],
@@ -56,7 +80,9 @@ def handle_chat_message_v3(data: Dict[str, Any], *, emit: Callable[[str, Dict[st
         emit("conversation_started", {"conversation_id": conversation_id})
     ConversationService.add_message(conversation_id=conversation_id, role="user", content=user_query)
 
-    out = AgentLoop().run(user_query, history, spoiler_mode=bool(data.get("spoiler_mode")), emit=emit)
+    stream = _DeltaBuffer(emit)
+    out = AgentLoop().run(user_query, history, spoiler_mode=bool(data.get("spoiler_mode")), emit=stream.emit)
+    stream.flush()
 
     chart = None
     if out.chart_spec:
