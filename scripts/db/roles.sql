@@ -99,7 +99,8 @@ BEGIN
     'live_games', 'live_game_events', 'quarter_snapshots', 'match_lineups',
     'match_previews', 'match_weather', 'betting_odds', 'squiggle_predictions',
     'news_articles', 'conversations', 'api_usage', 'page_views', 'user_reports',
-    'api_sports_players', 'api_sports_team_mappings', 'api_request_logs', 'admin_users'
+    'api_sports_players', 'api_sports_team_mappings', 'api_request_logs', 'admin_users',
+    'chat_traces'
   ] LOOP
     IF to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO footynac_app', t);
