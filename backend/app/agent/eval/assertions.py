@@ -186,10 +186,13 @@ def rows_have_value(rows: List[Dict[str, Any]], v: Any, tol: Optional[float] = N
 
 
 def row_pair_match(
-    rows: List[Dict[str, Any]], key: Any, value: Any, series: Any = None, tol: Optional[float] = None
+    rows: List[Dict[str, Any]], key: Any, value: Any, series: Any = None, tol: Optional[float] = None,
+    abs_value: bool = False,
 ) -> bool:
     """Some agent row identifies `key` and holds `value` (under `series` if given)."""
     num = as_number(value)
+    if abs_value and num is not None:
+        num = abs(num)
     for r in rows:
         if not any(label_matches(c, key) for c in r.values() if c is not None):
             continue
@@ -201,7 +204,8 @@ def row_pair_match(
         else:
             cand = list(r.values())
         for c in cand:
-            if num is not None and cell_matches_number(c, num, tol):
+            cv = as_number(c)
+            if num is not None and cv is not None and cell_matches_number(abs(cv) if abs_value else cv, num, tol):
                 return True
             if num is None and isinstance(c, str) and label_matches(c, value):
                 return True
@@ -260,12 +264,15 @@ def chart_has_value(spec: Dict[str, Any], v: Any, tol: Optional[float] = None) -
 
 
 def chart_pair_match(
-    spec: Dict[str, Any], key: Any, value: Any, series: Any = None, tol: Optional[float] = None
+    spec: Dict[str, Any], key: Any, value: Any, series: Any = None, tol: Optional[float] = None,
+    abs_value: bool = False,
 ) -> bool:
     """A plotted point at x=key (series=series) has y=value; either orientation."""
     num = as_number(value)
     if num is None:
         return False
+    if abs_value:
+        num = abs(num)
     for p in chart_points(spec):
         x_is_key = label_matches(p["x"], key)
         s_is_key = any(label_matches(s, key) for s in p["series"])
@@ -275,7 +282,8 @@ def chart_pair_match(
             ok = (x_is_key and any(label_matches(s, series) for s in p["series"])) or (
                 s_is_key and label_matches(p["x"], series)
             )
-        if ok and cell_matches_number(p["value"], num, tol):
+        pv = as_number(p["value"])
+        if ok and pv is not None and cell_matches_number(abs(pv) if abs_value else pv, num, tol):
             return True
     return False
 

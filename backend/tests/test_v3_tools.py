@@ -156,6 +156,19 @@ def test_make_chart_pie_from_one_row_of_totals():
     assert sorted(d["name"] for d in store.charts[0]["data"]) == ["Behinds", "Goals"]
 
 
+def test_make_chart_player_series_highlights_by_most_common_club():
+    # 2A #4: a player series_by resolves each player's club via the DB
+    # (most_common_team), unlike the team case which just echoes the key.
+    store = ResultStore()
+    data = run("player_stats", store, **{**PS, "players": ["Patrick Cripps", "Marcus Bontempelli"],
+                                         "stats": ["disposals"], "season_from": 2024, "season_to": 2024})
+    run("make_chart", store, result_id=data["result_id"], chart_type="line", x="season", y=["disposals"],
+        series_by="player", title="Cripps vs Bontempelli disposals, 2024")
+    highlights = {s["key"]: s.get("highlight") for s in store.charts[0]["series"]}
+    assert highlights.get("Patrick Cripps") == "Carlton"
+    assert highlights.get("Marcus Bontempelli") == "Western Bulldogs"
+
+
 def test_news_returns_rows_or_reason():
     out = run("news", query=None, teams=[], injury_only=False, days_back=60)
     assert out["row_count"] > 0 or out["why_empty"]

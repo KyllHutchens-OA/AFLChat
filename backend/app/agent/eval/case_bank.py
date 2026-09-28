@@ -344,16 +344,25 @@ BANK: List[EvalCase] = [
       truth=[T("team", all_rows=True), T("wins")]),
 
     # ── wl: win/loss by season (both series, not wins only) ──
+    # abs_value=True: a diverging_bar plots losses negated (below zero) by
+    # design (2A), so the sign legitimately differs from the truth's positive count.
     C("wl_01", "Show me Carlton's win/loss record by season since 2015", tags=["chart", "win_loss"],
       verification_sql=per_season_wins({13: "Carlton"}, 2015, losses=True),
       chart=ChartExpect(types=["groupedBar", "bar", "line", "area"], min_series=2,
-                        pairs=[PairCheck(key="season", series="metric", value="value", min_frac=0.9)])),
+                        pairs=[PairCheck(key="season", series="metric", value="value", min_frac=0.9, abs_value=True)])),
     C("wl_02", "What was Richmond's win-loss record in 2017?", tags=["win_loss"],
       verification_sql=record(24, "2017"), truth=[T("wins", alts=["wins_ha"]), T("losses", alts=["losses_ha"])]),
     C("wl_03", "Chart Hawthorn's wins and losses per season from 2012 to 2016", tags=["chart", "win_loss", "heldout"],
       verification_sql=per_season_wins({20: "Hawthorn"}, 2012, "2016", losses=True),
       chart=ChartExpect(types=["groupedBar", "bar", "line", "area"], min_series=2,
-                        pairs=[PairCheck(key="season", series="metric", value="value")])),
+                        pairs=[PairCheck(key="season", series="metric", value="value", abs_value=True)])),
+
+    # ── cap: categorical x cap (2A: >25 categories -> top-N or a table, never an unreadable bar) ──
+    C("cap_01", "Chart every player's total disposals for Richmond in the 2024 season", tags=["chart", "cap"],
+      verification_sql=(
+          "select count(distinct p.id) n from player_stats ps join players p on p.id=ps.player_id "
+          "join matches m on m.id=ps.match_id where m.season=2024 and ps.team_id=24 and ps.disposals is not null"),
+      chart=ChartExpect(max_points=25, optional=True)),
 
     # ── nd: no data (explain why) ──
     C("nd_01", "Show me the top goal kickers in 1985", tags=["nodata"], expects_no_data=True,

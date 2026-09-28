@@ -170,17 +170,24 @@ class ChartSelector:
         intent_upper = str(intent).upper() if intent else ""
 
         # Helper: detect grouping column (non-numeric, non-temporal, with >1 unique value)
-        # Excludes team columns — SQL often JOINs home_team/away_team as context, not as chart dimension
         TEAM_COLS = {'home_team', 'away_team', 'team', 'team_name', 'opponent'}
         NAME_COLS = {'name', 'player', 'player_name'}
         requested_players = [p for p in (entities or {}).get("players", []) if p]
 
-        def _find_group_col():
-            candidates = [c for c in non_numeric
-                          if c not in ['season', 'year', 'match_date', 'round']
-                          and c.lower() not in TEAM_COLS]
+        def _find_group_col(x_col: str = None):
+            """A team column is normally SQL join context, not a chart
+            dimension — but when x repeats across 2+ teams (e.g. two teams'
+            scores per season) it IS the series to pivot on, or the line/bar
+            builder silently overwrites points into one zig-zag series (B1)."""
+            candidates = [c for c in non_numeric if c not in ['season', 'year', 'match_date', 'round']]
             for c in candidates:
-                if 1 < data[c].nunique() <= 20:
+                n = data[c].nunique()
+                if c.lower() in TEAM_COLS:
+                    if (x_col and 2 <= n <= 8 and data.duplicated(subset=[x_col]).any()
+                            and not data.duplicated(subset=[x_col, c]).any()):
+                        return c
+                    continue
+                if 1 < n <= 20:
                     # If the user asked for exactly one player, don't split a name column into
                     # multiple lines — the SQL returned more players than requested.
                     if c.lower() in NAME_COLS and len(requested_players) == 1:
@@ -194,7 +201,7 @@ class ChartSelector:
                 "chart_type": "line",
                 "x_col": temporal_cols[0],
                 "y_col": numeric_cols[0],
-                "group_col": _find_group_col(),
+                "group_col": _find_group_col(temporal_cols[0]),
                 "reasoning": "Single metric over time - line chart",
                 "confidence": "high"
             }
@@ -255,7 +262,7 @@ class ChartSelector:
                 "chart_type": "line",
                 "x_col": temporal_col,
                 "y_col": y_col,
-                "group_col": _find_group_col(),
+                "group_col": _find_group_col(temporal_col),
                 "reasoning": "Trend analysis - line chart over time",
                 "confidence": "high"
             }
@@ -326,7 +333,7 @@ class ChartSelector:
                     "chart_type": "line",
                     "x_col": t_col,
                     "y_col": y_col,
-                    "group_col": None,
+                    "group_col": _find_group_col(t_col),
                     "reasoning": "Team analysis over time - line chart",
                     "confidence": "high"
                 }
@@ -365,7 +372,7 @@ class ChartSelector:
                 "chart_type": "line",
                 "x_col": t_col,
                 "y_col": y_col,
-                "group_col": _find_group_col(),
+                "group_col": _find_group_col(t_col),
                 "reasoning": "Time series data - line chart",
                 "confidence": "medium"
             }
