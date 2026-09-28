@@ -67,6 +67,9 @@ const seriesItemSchema = z
     color: z.string().optional(),
     dashed: z.boolean().optional(),
     stackId: z.string().optional(),
+    // 2A: team or player club id ("COL", "GEE", ...) this series belongs to.
+    // Optional and additive -- old specs without it render exactly as before.
+    highlight: z.string().optional(),
   })
   .passthrough();
 

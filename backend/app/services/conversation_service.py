@@ -115,7 +115,10 @@ class ConversationService:
 
     @staticmethod
     def public_messages(messages: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-        """Client-safe view of stored messages: no SQL, entities, intent or other internals."""
+        """Client-safe view of stored messages. This is only ever returned to the
+        verified owner (GET /api/conversations/<id> requires the owner token), so
+        the "Show your working" trace -- including SQL -- is safe to include here;
+        it is never exposed to anyone else."""
         public = []
         for msg in messages or []:
             public.append({
@@ -127,6 +130,7 @@ class ConversationService:
                     "sources": msg.get("sources") or [],
                     "visualization": msg.get("visualization"),
                     "data_as_of": msg.get("data_as_of"),
+                    "trace": msg.get("trace"),
                 },
             })
         return public

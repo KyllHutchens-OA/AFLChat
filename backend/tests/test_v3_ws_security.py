@@ -16,7 +16,8 @@ from app.utils.validators import ChatMessageRequest
 def _out():
     return SimpleNamespace(chart_spec=None, answer="ok", error=None, data_as_of="2026-09-19",
                            model="gpt-6-luna", memory=[], usage={"input_tokens": 1, "output_tokens": 1},
-                           cost_usd=0.0)
+                           cost_usd=0.0, tool_calls=[], sql=[], llm_calls=[], row_count=0,
+                           columns=[], rows=[], latency_s=0.1, ttft_s=None)
 
 
 def _run(payload, *, owner_ok, allowed=(True, "")):
@@ -57,6 +58,11 @@ def test_owner_token_continues_conversation_and_uses_signed_visitor():
     m.limits.assert_called_once_with("v-signed", "1.2.3.4")
     assert m.record.call_args.kwargs["visitor_id"] == "v-signed"
     assert events[0][0] == "received"
+    # 2C: a trace event (for the "Show your working" drawer) fires before complete, with no PII.
+    trace_events = [p for e, p in events if e == "trace"]
+    assert len(trace_events) == 1
+    assert set(trace_events[0]) >= {"model", "entities", "tool_calls", "sql", "retries", "tokens", "cost_usd"}
+    assert [e for e, _ in events].index("trace") < [e for e, _ in events].index("complete")
 
 
 def test_budget_refusal_stops_before_any_conversation_work():

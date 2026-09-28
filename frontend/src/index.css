@@ -33,6 +33,14 @@
     scroll-behavior: smooth;
   }
 
+  /* Default focus ring for anything that doesn't set its own focus-visible
+     style (chat buttons/links set their own `focus-visible:ring-*` classes;
+     this is the fallback so nothing relies only on the browser default). */
+  :focus-visible {
+    outline: 2px solid #C8102E;
+    outline-offset: 2px;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     html {
       scroll-behavior: auto;

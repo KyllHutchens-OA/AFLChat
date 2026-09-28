@@ -94,14 +94,17 @@ def handle_chat_message_v3(payload: Any, *, emit: Callable[[str, Dict[str, Any]]
     text = _CONTROL.sub("", out.answer) if not out.error else (out.answer or GENERIC_ERROR)
     emit("response", {"text": text, "confidence": 0.0 if out.error else 1.0, "sources": [],
                       "data_as_of": out.data_as_of})
+
+    from app.agent.v3.trace import build_trace_payload, write_trace
+    trace = make_json_serializable(build_trace_payload(out))
+    emit("trace", trace)
     emit("complete", {"conversation_id": conversation_id, "data_as_of": out.data_as_of})
 
     metadata = {"engine": "v3", "model": out.model, "tool_calls": make_json_serializable(out.memory),
-                "data_as_of": out.data_as_of}
+                "data_as_of": out.data_as_of, "trace": trace}
     if chart:
         metadata["visualization"] = chart
     ConversationService.add_message(conversation_id=conversation_id, role="assistant", content=text, metadata=metadata)
     llm.record_usage(out.model, llm.Usage(**out.usage), out.cost_usd, endpoint="afl_chat_v3",
                      visitor_id=visitor_id, ip_address=ip_address or "")
-    from app.agent.v3.trace import write_trace
     write_trace(out, question=user_query, conversation_id=conversation_id, visitor_id=visitor_id)

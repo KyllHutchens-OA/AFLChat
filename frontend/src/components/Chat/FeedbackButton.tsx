@@ -6,9 +6,12 @@ const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 interface FeedbackButtonProps {
   conversationId: string | null;
   messageText: string;
+  // A small per-answer flag icon instead of the permanent "Report an issue"
+  // footer (2C: the footer cost ~50px on every screen, including mobile).
+  compact?: boolean;
 }
 
-const FeedbackButton: React.FC<FeedbackButtonProps> = ({ conversationId, messageText }) => {
+const FeedbackButton: React.FC<FeedbackButtonProps> = ({ conversationId, messageText, compact }) => {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<'form' | 'submitting' | 'done'>('form');
   const [whatHappened, setWhatHappened] = useState('');
@@ -165,6 +168,25 @@ const FeedbackButton: React.FC<FeedbackButtonProps> = ({ conversationId, message
     </div>,
     document.body
   ) : null;
+
+  if (compact) {
+    return (
+      <>
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="Flag this answer as wrong or unhelpful"
+          title="Flag this answer"
+          className="p-1.5 rounded-lg text-warm-300 hover:text-sherrin-500 hover:bg-warm-100 transition-colors
+                     focus-visible:ring-2 focus-visible:ring-sherrin/50 focus-visible:outline-none"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+          </svg>
+        </button>
+        {modal}
+      </>
+    );
+  }
 
   return (
     <>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ResponsiveContainer,
   LineChart, Line,
@@ -10,11 +10,14 @@ import {
   ReferenceDot, Label,
   ComposedChart,
 } from 'recharts';
-import { chartSpecSchema, ChartSpec, DEFAULT_COLORS } from '../../types/chartSpec';
+import { chartSpecSchema, ChartSpec, SeriesItem, DEFAULT_COLORS } from '../../types/chartSpec';
+import { CLUBS } from '../../constants/clubs';
 import DataTable from './DataTable';
 
 interface ChartRendererProps {
   spec: any;
+  // Embedded inside a ResponseCard, which is already a card — no nested card chrome.
+  bare?: boolean;
 }
 
 // ── Warm tooltip styling ────────────────────────────────────────
@@ -37,9 +40,56 @@ const integerFormatter = (value: any) => {
   return String(value);
 };
 
+// ── Club colours (2A `highlight`: a team/player's club abbreviation) ────
+// When any series names a club, series without one are muted so the
+// highlighted subject(s) stand out — e.g. Daicos (COL) vs Bontempelli (WB)
+// in real club colours, or one club highlighted in an otherwise grey ranking.
+
+const CLUB_BY_ABBR: Record<string, (typeof CLUBS)[number]> = Object.fromEntries(
+  CLUBS.map((c) => [c.abbreviation, c]),
+);
+const MUTED_SERIES_COLOR = '#C3AC87'; // warm-300 — recedes behind club colours
+
+function resolveSeriesColors(series: SeriesItem[], palette: string[]): string[] {
+  const anyHighlight = series.some((s) => s.highlight);
+  return series.map((s, i) => {
+    const club = s.highlight ? CLUB_BY_ABBR[s.highlight.toUpperCase()] : undefined;
+    if (club) return club.primaryColor;
+    if (anyHighlight) return MUTED_SERIES_COLOR; // has a highlight elsewhere, this one isn't the subject
+    return s.color || palette[i % palette.length];
+  });
+}
+
+// ── Responsive height: shorter on phones so a two-bar chart isn't a tall sliver ──
+
+function useChartHeight(): number {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 640,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return narrow ? 260 : 400;
+}
+
+// ── A short text summary for screen readers (charts have no text alternative
+// otherwise — the table behind "Show the numbers" covers the rest) ──────────
+
+function chartSummary(s: ChartSpec): string {
+  const kind = s.orientation === 'horizontal' ? 'horizontal bar' : s.chartType;
+  const seriesNames = s.series.map((x) => x.name || x.key).filter(Boolean).join(', ');
+  const title = s.title ? `${s.title}. ` : '';
+  return `${title}${kind} chart, ${s.data.length} data point${s.data.length === 1 ? '' : 's'}${seriesNames ? `, series: ${seriesNames}` : ''}.`;
+}
+
 // ── Main Component ──────────────────────────────────────────────
 
-const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
+const ChartRenderer: React.FC<ChartRendererProps> = ({ spec, bare = true }) => {
+  const height = useChartHeight();
   if (!spec) return null;
 
   const result = chartSpecSchema.safeParse(spec);
@@ -50,7 +100,7 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
     // to show, otherwise render nothing — never crash on a bad spec.
     const rawData = Array.isArray(spec?.data) ? spec.data : null;
     if (rawData && rawData.length > 0) {
-      return <DataTable data={rawData} title={typeof spec?.title === 'string' ? spec.title : undefined} />;
+      return <DataTable data={rawData} title={typeof spec?.title === 'string' ? spec.title : undefined} bare={bare} />;
     }
     return null;
   }
@@ -65,21 +115,25 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
   // `table` isn't a Recharts chart at all — render the plain table directly
   // rather than routing it through ResponsiveContainer/renderChart.
   if (s.chartType === 'table') {
-    return <DataTable data={s.data} title={s.title} />;
+    return <DataTable data={s.data} title={s.title} bare={bare} />;
   }
 
-  const colors = s.colors && s.colors.length ? s.colors : DEFAULT_COLORS;
+  const colors = resolveSeriesColors(s.series, s.colors && s.colors.length ? s.colors : DEFAULT_COLORS);
 
   return (
-    <div className="w-full card p-6 my-4">
+    <div className={bare ? 'w-full tabular-nums' : 'w-full card p-6 my-4 tabular-nums'}>
       {s.title && (
-        <h3 className="text-base font-semibold text-[#3D2E1F] mb-4 text-center">
+        <h3 className="text-base font-semibold text-[#3D2E1F] mb-3 text-center">
           {s.title}
         </h3>
       )}
-      <ResponsiveContainer width="100%" height={400}>
-        {renderChart(s, colors)}
-      </ResponsiveContainer>
+      {/* role="img" + aria-label: Recharts' SVG internals are not meaningful to
+          screen readers on their own. */}
+      <div role="img" aria-label={chartSummary(s)}>
+        <ResponsiveContainer width="100%" height={height}>
+          {renderChart(s, colors)}
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 };
