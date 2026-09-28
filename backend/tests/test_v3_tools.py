@@ -147,6 +147,15 @@ def test_make_chart_builds_valid_spec_and_reports_errors():
     assert "not in result" in bad["output"]["error"]
 
 
+def test_make_chart_pie_from_one_row_of_totals():
+    store = ResultStore()
+    data = run("team_results", store, teams=["Sydney"], season_from=2024, season_to=2024, opponent=None, venue=None,
+               finals="include", per="total")
+    run("make_chart", store, result_id=data["result_id"], chart_type="pie", x="team", y=["goals", "behinds"],
+        series_by=None, title="Sydney scoring sources 2024")
+    assert sorted(d["name"] for d in store.charts[0]["data"]) == ["Behinds", "Goals"]
+
+
 def test_news_returns_rows_or_reason():
     out = run("news", query=None, teams=[], injury_only=False, days_back=60)
     assert out["row_count"] > 0 or out["why_empty"]

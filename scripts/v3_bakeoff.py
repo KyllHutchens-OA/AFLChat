@@ -1,43 +1,38 @@
 """
-1E model bake-off for the v3 engine (roadmap D3): run the same eval cases
-through AgentLoop for each model and report facts / charts / no-data /
-corrections, latency (TTFT, total) and real cost.
+1E model bake-off (roadmap D3): run the 1D eval harness on the v3 engine
+once per model and compare facts, charts, no-data, latency and real cost.
 
-Cases: SMOKE15 plus the first 5 SALVAGED cases from app/agent/eval/cases.py
-(20 cases, 23 turns), scored with the existing deterministic scorer. Once the
-1D harness lands (`python -m app.agent.eval --engine v3`), prefer that; this
-script stays as the quick multi-model comparison.
+    backend/venv/bin/python scripts/v3_bakeoff.py                          # all three models, smoke subset
+    backend/venv/bin/python scripts/v3_bakeoff.py --models gpt-6-luna --subset full
 
-    backend/venv/bin/python scripts/v3_bakeoff.py                      # all three models
-    backend/venv/bin/python scripts/v3_bakeoff.py --models gpt-6-luna  # one model
-    backend/venv/bin/python scripts/v3_bakeoff.py --out scripts/benchmark_results/v3_bakeoff.json
-
-Models whose API key is not set are skipped with a message.
+Each model runs `python -m app.agent.eval --engine v3` with AGENT_MODEL set;
+reports land in scripts/benchmark_results/v3_<subset>_<model>.json and the
+comparison table is printed (and saved with --out). Models whose API key is
+not set are skipped with a message.
 """
 import argparse
 import json
 import os
-import statistics
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-START_DIR = Path.cwd()
-sys.path.insert(0, str(ROOT / "backend"))
-os.chdir(ROOT / "backend")
-
-from dotenv import load_dotenv  # noqa: E402
-
-load_dotenv(".env")
-
-from app.agent.eval.cases import SALVAGED, SMOKE15  # noqa: E402
-from app.agent.eval.models import CHECK_NAMES, TurnResult  # noqa: E402
-from app.agent.eval.scorer import score_case  # noqa: E402
-from app.agent.v3 import llm  # noqa: E402
-from app.agent.v3.runner import history_entry, run_turn_sync  # noqa: E402
-
+BACKEND = ROOT / "backend"
+RESULTS = ROOT / "scripts" / "benchmark_results"
 MODELS = ["gpt-6-luna", "gemini-3.5-flash-lite", "claude-sonnet-5"]
-KEY_ENV = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+KEY_ENV = {"gpt": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "claude": "ANTHROPIC_API_KEY"}
+
+
+def _env_value(name):
+    if os.getenv(name):
+        return os.getenv(name)
+    env_file = BACKEND / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if line.startswith(f"{name}="):
+                return line.split("=", 1)[1].strip().strip("'\"")
+    return None
 
 
 def pct(values, p):
@@ -49,68 +44,49 @@ def pct(values, p):
     return round(values[lo] + (values[hi] - values[lo]) * (k - lo), 2)
 
 
-def run_case(case, model):
-    history = [dict(m) for m in case.conversation_history]
-    turns, extra = [], []
-    for q in case.queries:
-        out = run_turn_sync(q, history, model=model)
-        turns.append(TurnResult(
-            query=q, response_text=out.answer, latency_s=out.latency_s, chart_spec=out.chart_spec,
-            sql="\n".join(out.sql) or None, row_count=len(out.rows), error=out.error,
-            input_tokens=out.usage["input_tokens"], output_tokens=out.usage["output_tokens"]))
-        extra.append({"ttft_s": out.ttft_s, "cost_usd": out.cost_usd, "tools": [c["name"] for c in out.tool_calls]})
-        history += [{"role": "user", "content": q}, history_entry(out)]
-    checks, passed = score_case(case, turns)
-    return {"case_id": case.id, "passed": passed, "checks": checks,
-            "turns": [{**t.model_dump(exclude={"chart_spec", "sql"}), "chart": t.chart_spec is not None, **e}
-                      for t, e in zip(turns, extra)]}
+def axis(summary, name):
+    c = summary["checks"].get(name) or {}
+    return f"{c.get('passed', 0)}/{c.get('n', 0)}" if c else "n/a"
 
 
-def summarise(model, results):
-    turns = [t for r in results for t in r["turns"]]
-    axis = {}
-    for name in CHECK_NAMES:
-        vals = [r["checks"].get(name) for r in results if r["checks"].get(name) is not None]
-        axis[name] = f"{sum(vals)}/{len(vals)}" if vals else "n/a"
-    cost = sum(t["cost_usd"] for t in turns)
+def summarise(model, report):
+    s = report["summary"]
+    turns = [t for c in report["cases"] for t in c.get("turns", [])]
+    cost = sum((t.get("engine_meta") or {}).get("cost_usd", 0) for t in turns)
     return {
-        "model": model, "cases": len(results), "passed": sum(r["passed"] for r in results), **axis,
-        "ttft_p50": pct([t["ttft_s"] for t in turns], 0.5), "ttft_p90": pct([t["ttft_s"] for t in turns], 0.9),
-        "total_p50": pct([t["latency_s"] for t in turns], 0.5), "total_p90": pct([t["latency_s"] for t in turns], 0.9),
-        "cost_total_usd": round(cost, 5), "cost_per_turn_usd": round(cost / max(len(turns), 1), 6),
-        "errors": sum(1 for t in turns if t["error"]),
+        "model": model, "passed": f"{s['passed']}/{s['scored']}",
+        "facts": axis(s, "truth_text"), "rows": axis(s, "truth_rows"), "charts": axis(s, "chart"),
+        "chart_values": axis(s, "chart_values"), "no_data": axis(s, "no_data"), "behaviour": axis(s, "behaviour"),
+        "ttft_p50": pct([t.get("ttft_s") for t in turns], 0.5), "ttft_p90": pct([t.get("ttft_s") for t in turns], 0.9),
+        "total_p50": s["latency_s"]["p50"], "total_p90": s["latency_s"]["p90"],
+        "cost_per_turn_usd": round(cost / max(len(turns), 1), 6), "cost_total_usd": round(cost, 5),
     }
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="*", default=MODELS)
+    ap.add_argument("--subset", default="smoke")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
-    cases = SMOKE15 + SALVAGED[:5]
 
-    report = {"cases": [c.id for c in cases], "models": {}}
+    rows = []
     for model in args.models:
-        key = KEY_ENV[llm.provider_for(model)]
-        if not os.getenv(key):
+        key = KEY_ENV[model.split("-")[0]]
+        if not _env_value(key):
             print(f"SKIP {model}: {key} is not set")
-            report["models"][model] = {"skipped": f"{key} not set"}
+            rows.append({"model": model, "skipped": f"{key} not set"})
             continue
-        print(f"== {model}")
-        results = []
-        for case in cases:
-            r = run_case(case, model)
-            failed = [k for k, v in r["checks"].items() if v is False]
-            print(f"  {'PASS' if r['passed'] else 'FAIL'} {case.id} {failed or ''}")
-            results.append(r)
-        summary = summarise(model, results)
-        print(json.dumps(summary, indent=2))
-        report["models"][model] = {"summary": summary, "results": results}
+        out = RESULTS / f"v3_{args.subset}_{model}.json"
+        print(f"== {model} ({args.subset}) -> {out.name}", flush=True)
+        env = {**os.environ, "AGENT_MODEL": model, "FLASK_ENV": os.getenv("FLASK_ENV", "production")}
+        subprocess.run([sys.executable, "-m", "app.agent.eval", "--engine", "v3", "--subset", args.subset,
+                        "--out", str(out)], cwd=BACKEND, env=env, check=False)
+        rows.append(summarise(model, json.loads(out.read_text())))
 
+    print(json.dumps(rows, indent=2))
     if args.out:
-        out = START_DIR / args.out
-        out.write_text(json.dumps(report, indent=2, default=str))
-        print(f"wrote {out}")
+        (Path.cwd() / args.out).write_text(json.dumps(rows, indent=2))
 
 
 if __name__ == "__main__":

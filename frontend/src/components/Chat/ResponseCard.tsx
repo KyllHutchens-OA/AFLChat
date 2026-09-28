@@ -10,11 +10,13 @@ interface ResponseCardProps {
   dataAsOf?: string;
 }
 
-// 'YYYY-MM-DD' -> '26 Sep 2026' (parsed as a local date so it never shifts a day).
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// 'YYYY-MM-DD' -> '26 Sep 2026' (string parsing, so no timezone shift).
 const formatDataAsOf = (iso: string): string | null => {
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (!y || !m || !d || m > 12) return null;
+  return `${d} ${MONTHS[m - 1]} ${y}`;
 };
 
 const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isError, dataAsOf }) => {

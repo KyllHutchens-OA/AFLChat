@@ -93,10 +93,16 @@ def make_chart(args: MakeChartArgs, store: Optional[ResultStore] = None) -> Dict
     non_numeric = [c for c in ys if not pd.api.types.is_numeric_dtype(df[c])]
     if non_numeric:
         return {"error": f"y columns must be numeric: {non_numeric}"}
-    if len(df) < 2:
-        return {"error": "need at least 2 rows to chart; answer in text instead"}
+    if len(df) < 2 and not (args.chart_type == "pie" and len(ys) > 1):
+        return {"error": "need at least 2 rows to chart (or a pie of several columns of one row)"}
     data = df.copy()
     ct = args.chart_type
+    if ct == "pie" and len(ys) > 1 and len(data) == 1:
+        # One row of several totals (e.g. goals vs behinds): each column is a slice.
+        data = data[ys].melt(var_name="category", value_name="value")
+        data["category"] = data["category"].str.replace("_", " ").str.title()
+        args = args.model_copy(update={"x": "category", "series_by": None})
+        ys = ["value"]
     data[args.x] = _intify(data[args.x])
     if ct != "scatter":
         # Categorical/ordinal x as text: builders iterate rows, which would upcast 2015 to "2015.0".
