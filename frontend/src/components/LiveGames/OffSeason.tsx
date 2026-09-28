@@ -18,20 +18,20 @@ const OffSeason: React.FC<OffSeasonProps> = ({ premiers, premiersLoading, nextSe
   return (
     <div className="space-y-6">
       {/* Premiers banner */}
-      <div className="glass rounded-apple-xl p-8 shadow-apple-lg text-center">
+      <div className="glass rounded-xl p-8 shadow-card-lg text-center">
         {premiersLoading ? (
-          <div className="animate-shimmer h-20 bg-afl-warm-200 rounded-apple" />
+          <div className="animate-shimmer h-20 bg-warm-200 rounded-md" />
         ) : hideScores ? (
           <>
-            <p className="text-sm font-medium text-afl-warm-500 uppercase tracking-wide mb-2">Season done and dusted</p>
-            <p className="text-lg text-afl-warm-700">Spoiler mode is on - turn it off to see the premiers.</p>
+            <p className="text-sm font-medium text-warm-600 uppercase tracking-wide mb-2">Season done and dusted</p>
+            <p className="text-lg text-warm-700">Spoiler mode is on - turn it off to see the premiers.</p>
           </>
         ) : premiers ? (
           <>
-            <p className="text-sm font-medium text-afl-warm-500 uppercase tracking-wide mb-2">
+            <p className="text-sm font-medium text-warm-600 uppercase tracking-wide mb-2">
               {premiers.season} Premiers
             </p>
-            <h2 className="text-3xl font-semibold text-afl-warm-900 mb-3">
+            <h2 className="text-3xl font-semibold text-warm-900 mb-3">
               {premiers.winner.name}
             </h2>
             {(() => {
@@ -45,7 +45,7 @@ const OffSeason: React.FC<OffSeasonProps> = ({ premiers, premiersLoading, nextSe
               const secondBehinds = homeWon ? premiers.away_behinds : premiers.home_behinds;
               const secondScore = homeWon ? premiers.away_score : premiers.home_score;
               return (
-                <p className="text-afl-warm-700 tabular-nums">
+                <p className="text-warm-700 tabular-nums">
                   {first.abbreviation} {firstGoals != null ? `${firstGoals}.${firstBehinds}` : ''} ({firstScore})
                   {' d. '}
                   {second.abbreviation} {secondGoals != null ? `${secondGoals}.${secondBehinds}` : ''} ({secondScore})
@@ -55,8 +55,8 @@ const OffSeason: React.FC<OffSeasonProps> = ({ premiers, premiersLoading, nextSe
           </>
         ) : (
           <>
-            <p className="text-3xl font-semibold text-afl-warm-900 mb-2">Season's over</p>
-            <p className="text-afl-warm-500">No games on right now</p>
+            <p className="text-3xl font-semibold text-warm-900 mb-2">Season's over</p>
+            <p className="text-warm-600">No games on right now</p>
           </>
         )}
       </div>
@@ -65,34 +65,34 @@ const OffSeason: React.FC<OffSeasonProps> = ({ premiers, premiersLoading, nextSe
       {premiers && premiers.live_game_id != null && (
         <button
           onClick={onRelive}
-          className="w-full glass rounded-apple-xl p-6 shadow-apple-lg text-left hover:shadow-apple-lg transition-shadow active:scale-[0.99]"
+          className="w-full glass rounded-xl p-6 shadow-card-lg text-left hover:shadow-card-lg transition-shadow active:scale-[0.99]"
         >
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-semibold text-afl-warm-900">Relive the Grand Final</h3>
-              <p className="text-sm text-afl-warm-500 mt-1">
+              <h3 className="text-lg font-semibold text-warm-900">Relive the Grand Final</h3>
+              <p className="text-sm text-warm-600 mt-1">
                 Quarter-by-quarter scores, the scoring worm, stats and the wrap.
               </p>
             </div>
-            <span className="text-afl-accent text-2xl">&rarr;</span>
+            <span className="text-sherrin text-2xl">&rarr;</span>
           </div>
         </button>
       )}
 
       {/* Countdown to next season */}
-      <div className="glass rounded-apple-xl p-8 shadow-apple-lg text-center">
-        <h3 className="text-xl font-semibold text-afl-warm-900 mb-4">
+      <div className="glass rounded-xl p-8 shadow-card-lg text-center">
+        <h3 className="text-xl font-semibold text-warm-900 mb-4">
           {nextSeasonMatch ? `Season ${nextSeasonMatch.season ?? nextSeason} kicks off` : 'Next season'}
         </h3>
         {nextSeasonMatch ? (
           <>
-            <p className="text-afl-warm-700 mb-4">
+            <p className="text-warm-700 mb-4">
               {nextSeasonMatch.home_team} vs {nextSeasonMatch.away_team} &middot; {nextSeasonMatch.venue}
             </p>
             <Countdown targetDate={nextSeasonMatch.date} />
           </>
         ) : (
-          <p className="text-lg text-afl-warm-500">
+          <p className="text-lg text-warm-600">
             Season {nextSeason ?? new Date().getFullYear() + 1} fixture coming soon
           </p>
         )}

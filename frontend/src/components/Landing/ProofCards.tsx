@@ -30,7 +30,7 @@ const ProofCards = () => {
               <button onClick={() => ask(goalkicker.askQuestion)} className="btn-secondary text-sm py-2 px-4">
                 Ask this
               </button>
-              <span className="text-xs text-warm-500">299,975 player-game rows</span>
+              <span className="text-xs text-warm-600">299,975 player-game rows</span>
             </div>
           </div>
 
@@ -49,7 +49,7 @@ const ProofCards = () => {
               <button onClick={() => ask(headToHead.askQuestion)} className="btn-secondary text-sm py-2 px-4">
                 Ask this
               </button>
-              <span className="text-xs text-warm-500">Here's the SQL, too</span>
+              <span className="text-xs text-warm-600">Here's the SQL, too</span>
             </div>
           </div>
 

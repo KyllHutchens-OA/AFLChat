@@ -152,8 +152,8 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
 
   if (loading) {
     return (
-      <div className="card-apple p-8 animate-shimmer">
-        <div className="h-64 bg-afl-warm-200 rounded-apple"></div>
+      <div className="card p-8 animate-shimmer">
+        <div className="h-64 bg-warm-200 rounded-md"></div>
       </div>
     );
   }
@@ -166,17 +166,17 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
   if (game.status === 'scheduled') {
     return (
       <div className="space-y-6">
-        <div className="glass rounded-apple-xl p-8 shadow-apple-lg">
+        <div className="glass rounded-xl p-8 shadow-card-lg">
           <div className="text-center mb-6">
-            <p className="text-sm font-medium text-afl-warm-500 uppercase tracking-wide">
+            <p className="text-sm font-medium text-warm-600 uppercase tracking-wide">
               {game.round_name || `Round ${game.round}`} • {game.venue}
             </p>
           </div>
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-semibold text-afl-warm-900">
+            <h2 className="text-3xl font-semibold text-warm-900">
               {game.home_team.name} vs {game.away_team.name}
             </h2>
-            <p className="text-lg text-afl-warm-500 mt-2">
+            <p className="text-lg text-warm-600 mt-2">
               {new Date(game.match_date).toLocaleString('en-AU', {
                 weekday: 'long',
                 day: 'numeric',
@@ -186,7 +186,7 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
               })}
             </p>
           </div>
-          <div className="border-t border-afl-warm-200 pt-6">
+          <div className="border-t border-warm-200 pt-6">
             <Countdown targetDate={game.match_date} />
           </div>
         </div>
@@ -197,10 +197,10 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
   return (
     <div className="space-y-6">
       {/* Scoreboard */}
-      <div className="glass rounded-apple-xl p-8 shadow-apple-lg">
+      <div className="glass rounded-xl p-8 shadow-card-lg">
         {/* Round and Venue */}
         <div className="text-center mb-6">
-          <p className="text-sm font-medium text-afl-warm-500 uppercase tracking-wide">
+          <p className="text-sm font-medium text-warm-600 uppercase tracking-wide">
             {game.round_name || `Round ${game.round}`} • {game.venue}
           </p>
         </div>
@@ -209,26 +209,26 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
         <div className="grid grid-cols-2 gap-8 mb-6">
           {/* Home Team */}
           <div className="text-center">
-            <h2 className="text-2xl font-semibold text-afl-warm-900 mb-2">
+            <h2 className="text-2xl font-semibold text-warm-900 mb-2">
               {game.home_team.name}
             </h2>
-            <p className={`text-6xl font-bold text-afl-warm-900 mb-1 ${hideScores ? 'blur-md select-none' : ''}`}>
+            <p className={`text-6xl font-bold text-warm-900 mb-1 ${hideScores ? 'blur-md select-none' : ''}`}>
               {displayScore(game.home_score)}
             </p>
-            <p className={`text-sm text-afl-warm-500 ${hideScores ? 'blur-sm select-none' : ''}`}>
+            <p className={`text-sm text-warm-600 ${hideScores ? 'blur-sm select-none' : ''}`}>
               {displayBreakdown(game.home_goals, game.home_behinds)}
             </p>
           </div>
 
           {/* Away Team */}
           <div className="text-center">
-            <h2 className="text-2xl font-semibold text-afl-warm-900 mb-2">
+            <h2 className="text-2xl font-semibold text-warm-900 mb-2">
               {game.away_team.name}
             </h2>
-            <p className={`text-6xl font-bold text-afl-warm-900 mb-1 ${hideScores ? 'blur-md select-none' : ''}`}>
+            <p className={`text-6xl font-bold text-warm-900 mb-1 ${hideScores ? 'blur-md select-none' : ''}`}>
               {displayScore(game.away_score)}
             </p>
-            <p className={`text-sm text-afl-warm-500 ${hideScores ? 'blur-sm select-none' : ''}`}>
+            <p className={`text-sm text-warm-600 ${hideScores ? 'blur-sm select-none' : ''}`}>
               {displayBreakdown(game.away_goals, game.away_behinds)}
             </p>
           </div>
@@ -236,7 +236,7 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
 
         {/* Game Time */}
         <div className="text-center mb-4">
-          <p className="text-xl font-semibold text-afl-warm-700">
+          <p className="text-xl font-semibold text-warm-700">
             {game.status === 'live' && game.time_str
               ? game.time_str
               : 'Final'}
@@ -256,7 +256,7 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
 
       {/* Quarter-by-quarter scoreboard + scoring worm - completed games only */}
       {!hideScores && game.status === 'completed' && (
-        <div className="glass rounded-apple-xl p-6 shadow-apple-lg space-y-6">
+        <div className="glass rounded-xl p-6 shadow-card-lg space-y-6">
           <QuarterBreakdown
             homeAbbr={game.home_team.abbreviation}
             awayAbbr={game.away_team.abbreviation}
@@ -270,6 +270,8 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
             awayAbbr={game.away_team.abbreviation}
             homeColor={game.home_team.primary_color}
             awayColor={game.away_team.primary_color}
+            finalHomeScore={game.home_score}
+            finalAwayScore={game.away_score}
           />
         </div>
       )}
@@ -286,11 +288,11 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
 
       {/* AI Summary for completed games - hidden when spoiler mode is on */}
       {!hideScores && game.status === 'completed' && game.ai_summary && (
-        <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
-          <h3 className="text-xl font-semibold text-afl-warm-900 mb-3">
+        <div className="glass rounded-xl p-6 shadow-card-lg">
+          <h3 className="text-xl font-semibold text-warm-900 mb-3">
             Match Summary
           </h3>
-          <p className="text-afl-warm-700 leading-relaxed">
+          <p className="text-warm-700 leading-relaxed">
             {game.ai_summary}
           </p>
         </div>
@@ -298,13 +300,13 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
 
       {/* Post-game stats analysis - hidden when spoiler mode is on */}
       {!hideScores && game.status === 'completed' && game.post_game_analysis && (
-        <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
-          <h3 className="text-xl font-semibold text-afl-warm-900 mb-3">
+        <div className="glass rounded-xl p-6 shadow-card-lg">
+          <h3 className="text-xl font-semibold text-warm-900 mb-3">
             Match Stats Analysis
           </h3>
           <div className="space-y-3">
             {game.post_game_analysis.split('\n\n').map((paragraph, i) => (
-              <p key={i} className="text-afl-warm-700 leading-relaxed">
+              <p key={i} className="text-warm-700 leading-relaxed">
                 {paragraph}
               </p>
             ))}
@@ -314,8 +316,8 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
 
       {/* Scoring event log - completed games only, when captured for this game */}
       {!hideScores && game.status === 'completed' && game.events.length > 0 && (
-        <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
-          <h3 className="text-xl font-semibold text-afl-warm-900 mb-3">
+        <div className="glass rounded-xl p-6 shadow-card-lg">
+          <h3 className="text-xl font-semibold text-warm-900 mb-3">
             Scoring Timeline
           </h3>
           <EventTimeline

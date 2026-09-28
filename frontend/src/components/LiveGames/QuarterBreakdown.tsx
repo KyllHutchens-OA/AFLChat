@@ -36,7 +36,7 @@ const QuarterBreakdown: React.FC<QuarterBreakdownProps> = ({ homeAbbr, awayAbbr,
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-afl-warm-500">
+          <tr className="text-warm-600">
             <th className="text-left font-medium py-1 pr-3"></th>
             {[1, 2, 3, 4].map(q => (
               <th key={q} className="text-right font-medium py-1 px-2 tabular-nums">Q{q}</th>
@@ -45,12 +45,12 @@ const QuarterBreakdown: React.FC<QuarterBreakdownProps> = ({ homeAbbr, awayAbbr,
         </thead>
         <tbody>
           {(['home', 'away'] as const).map(side => (
-            <tr key={side} className="border-t border-afl-warm-100">
-              <td className="py-2 pr-3 font-semibold text-afl-warm-900">
+            <tr key={side} className="border-t border-warm-100">
+              <td className="py-2 pr-3 font-semibold text-warm-900">
                 {side === 'home' ? homeAbbr : awayAbbr}
               </td>
               {[1, 2, 3, 4].map(q => (
-                <td key={q} className="text-right py-2 px-2 tabular-nums text-afl-warm-700">
+                <td key={q} className="text-right py-2 px-2 tabular-nums text-warm-700">
                   {cell(q)[side]}
                 </td>
               ))}

@@ -50,56 +50,6 @@ export default {
           primary: 'var(--club-primary, #C8102E)',
           secondary: 'var(--club-secondary, #16130F)',
         },
-
-        // --- Legacy tokens (kept as-is; LiveGames/** and pages/LiveGames.tsx
-        // still use these and are owned by another workstream) ---
-        'brand-blue': '#3b82f6',
-        'brand-red': '#ef4444',
-        'brand-green': '#10b981',
-        'apple-blue': {
-          50: '#E5F1FF',
-          100: '#CCE4FF',
-          500: '#007AFF',
-          600: '#0051D5',
-          700: '#0040A8',
-        },
-        'apple-gray': {
-          50: '#F5F5F7',
-          100: '#E8E8ED',
-          200: '#D1D1D6',
-          300: '#C7C7CC',
-          500: '#8E8E93',
-          700: '#636366',
-          900: '#1C1C1E',
-        },
-        'apple-green': '#34C759',
-        'apple-red': '#FF3B30',
-        'apple-orange': '#FF9500',
-        'afl-accent': {
-          DEFAULT: '#CC2936',
-          50: '#FEF2F2',
-          100: '#FDE6E7',
-          200: '#FACDD0',
-          300: '#F5A3A9',
-          400: '#E8636C',
-          500: '#CC2936',
-          600: '#B8232F',
-          700: '#9A1D28',
-          800: '#7D1821',
-          900: '#60121A',
-        },
-        'afl-warm': {
-          50: '#FAF7F2',
-          100: '#F0EBE3',
-          200: '#E0D5C8',
-          300: '#C8B9A8',
-          400: '#A89888',
-          500: '#8A7B6B',
-          600: '#706354',
-          700: '#574D42',
-          800: '#3E3732',
-          900: '#2A2522',
-        },
       },
 
       fontFamily: {
@@ -132,27 +82,14 @@ export default {
         'card-md': '0 10px 20px rgba(22, 19, 15, 0.10), 0 4px 6px rgba(22, 19, 15, 0.06)',
         'card-lg': '0 20px 30px rgba(22, 19, 15, 0.12), 0 10px 10px rgba(22, 19, 15, 0.05)',
         'card-xl': '0 25px 50px rgba(22, 19, 15, 0.16), 0 12px 18px rgba(22, 19, 15, 0.07)',
-        // Legacy (LiveGames)
-        'apple-sm': '0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06)',
-        'apple': '0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05)',
-        'apple-md': '0 10px 15px rgba(0, 0, 0, 0.08), 0 4px 6px rgba(0, 0, 0, 0.05)',
-        'apple-lg': '0 20px 25px rgba(0, 0, 0, 0.10), 0 10px 10px rgba(0, 0, 0, 0.04)',
-        'apple-xl': '0 25px 50px rgba(0, 0, 0, 0.12), 0 12px 18px rgba(0, 0, 0, 0.06)',
       },
 
       backdropBlur: {
         brand: '20px',
-        // Legacy (LiveGames)
-        'apple': '20px',
-        'apple-sm': '10px',
-        'apple-lg': '40px',
       },
 
       transitionTimingFunction: {
         brand: 'cubic-bezier(0.25, 0.1, 0.25, 1)',
-        // Legacy (LiveGames)
-        'apple': 'cubic-bezier(0.25, 0.1, 0.25, 1)',
-        'apple-spring': 'cubic-bezier(0.5, 1.5, 0.5, 1)',
       },
 
       transitionDuration: {
@@ -165,11 +102,6 @@ export default {
         'md': '12px',
         'lg': '16px',
         'xl': '20px',
-        // Legacy (LiveGames)
-        'apple': '12px',
-        'apple-sm': '8px',
-        'apple-lg': '16px',
-        'apple-xl': '20px',
       },
 
       spacing: {

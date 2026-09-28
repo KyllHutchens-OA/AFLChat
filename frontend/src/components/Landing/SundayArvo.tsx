@@ -30,7 +30,7 @@ const SundayArvo = () => {
                 onClick={() => navigate('/live')}
                 className="card p-4 text-left hover:shadow-card-md transition-shadow"
               >
-                <div className="text-xs text-warm-500 mb-2">{g.round} &middot; {g.venue}</div>
+                <div className="text-xs text-warm-600 mb-2">{g.round} &middot; {g.venue}</div>
                 <div className="flex items-center justify-between font-display text-2xl text-ink tabular-nums">
                   <span>{g.home_team.abbreviation}</span>
                   <span>{hideScores ? '• •' : `${g.home_goals}.${g.home_behinds} (${g.home_score})`}</span>

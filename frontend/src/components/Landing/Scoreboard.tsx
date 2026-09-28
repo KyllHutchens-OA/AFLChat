@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import scoreboardAnswers from '../../data/landingScoreboard.json';
 import MiniQuarterChart from './MiniQuarterChart';
+import { contrastText } from '../../utils/color';
 
 interface TeamScore {
   abbr: string;
@@ -40,7 +41,7 @@ const ScoreRow = ({ team }: { team: TeamScore }) => (
   <div className="flex items-center gap-3">
     <span
       className="w-9 text-center text-xs font-display tracking-wide rounded-sm py-1"
-      style={{ backgroundColor: team.primary, color: team.secondary }}
+      style={{ backgroundColor: team.primary, color: contrastText(team.primary) }}
     >
       {team.abbr}
     </span>
