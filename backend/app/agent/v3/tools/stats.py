@@ -27,6 +27,7 @@ Stat = Literal[
 ]
 Finals = Literal["include", "exclude", "only"]
 DEFAULT_STATS = ["disposals", "kicks", "handballs", "marks", "tackles", "goals", "behinds"]
+MAX_SEASON_GAMES = 28  # 24 rounds + Opening Round + up to 4 finals (incl. wildcard) is the ceiling in practice
 
 
 def _filters(season_from, season_to, round_name_arg, finals, opponent, venue, team=None) -> Tuple[str, Dict, List[str]]:
@@ -140,6 +141,16 @@ def player_stats(args: PlayerStatsArgs, store: Optional[ResultStore] = None) -> 
                f"GROUP BY {group} ORDER BY p.name{', m.season' if args.per == 'season' else ''}")
     df = query(sql, params)
     notes = coverage_notes(stats, args.season_from, args.season_to) + problems
+    if args.per == "season" and len(df) and (df["games"] > MAX_SEASON_GAMES).any():
+        seasons = [int(s) for s in df.loc[df["games"] > MAX_SEASON_GAMES, "season"]]
+        split = query("SELECT m.season, t.name AS team, COUNT(*) AS games FROM player_stats ps "
+                      "JOIN matches m ON m.id = ps.match_id JOIN teams t ON t.id = ps.team_id "
+                      "WHERE ps.player_id = ANY(:pids) AND m.season = ANY(:seasons) GROUP BY 1, 2 ORDER BY 1, 3 DESC",
+                      {"pids": ids, "seasons": seasons})
+        by_club = "; ".join(f"{r['season']} {r['team']} {r['games']}" for r in split.to_dict("records"))
+        notes.append(f"More than {MAX_SEASON_GAMES} games in a season is impossible: this record likely merges "
+                     f"namesakes who played for different clubs (games by club: {by_club}). Tell the user and ask "
+                     "which club's player they mean.")
     why = None
     if df.empty:
         why = _why_no_player_rows(ids, args)
