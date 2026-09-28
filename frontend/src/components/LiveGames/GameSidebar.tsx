@@ -34,6 +34,7 @@ interface LiveGame {
 interface UpcomingMatch {
   id: number;
   round: string | number;
+  round_name?: string;
   home_team: string;
   away_team: string;
   venue: string;
@@ -313,7 +314,7 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
 
           {/* Upcoming with preview - shown above results */}
           {upcomingWithPreview.length > 0 && (
-            <UpcomingList matches={upcomingWithPreview} label={`Round ${upcomingWithPreview[0].round} Preview`} />
+            <UpcomingList matches={upcomingWithPreview} label={`${upcomingWithPreview[0].round_name || `Round ${upcomingWithPreview[0].round}`} Preview`} />
           )}
 
           {/* Results this round */}
@@ -353,7 +354,7 @@ const GameSidebar: React.FC<GameSidebarProps> = ({ games, selectedGameId, onSele
           {nextRoundUpcoming.length > 0 && (
             <UpcomingList
               matches={nextRoundUpcoming}
-              label={`Round ${nextRoundUpcoming[0].round}`}
+              label={nextRoundUpcoming[0].round_name || `Round ${nextRoundUpcoming[0].round}`}
             />
           )}
         </div>

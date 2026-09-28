@@ -6,6 +6,10 @@ import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 import ProgressBar from './ProgressBar';
 import GameStats from './GameStats';
 import Countdown from './Countdown';
+import QuarterBreakdown from './QuarterBreakdown';
+import ScoringWorm from './ScoringWorm';
+import QuarterSummaries from './QuarterSummaries';
+import EventTimeline from './EventTimeline';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
@@ -165,7 +169,7 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
         <div className="glass rounded-apple-xl p-8 shadow-apple-lg">
           <div className="text-center mb-6">
             <p className="text-sm font-medium text-afl-warm-500 uppercase tracking-wide">
-              Round {game.round} • {game.venue}
+              {game.round_name || `Round ${game.round}`} • {game.venue}
             </p>
           </div>
           <div className="text-center mb-8">
@@ -197,7 +201,7 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
         {/* Round and Venue */}
         <div className="text-center mb-6">
           <p className="text-sm font-medium text-afl-warm-500 uppercase tracking-wide">
-            Round {game.round} • {game.venue}
+            {game.round_name || `Round ${game.round}`} • {game.venue}
           </p>
         </div>
 
@@ -250,15 +254,35 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
 
       </div>
 
+      {/* Quarter-by-quarter scoreboard + scoring worm - completed games only */}
+      {!hideScores && game.status === 'completed' && (
+        <div className="glass rounded-apple-xl p-6 shadow-apple-lg space-y-6">
+          <QuarterBreakdown
+            homeAbbr={game.home_team.abbreviation}
+            awayAbbr={game.away_team.abbreviation}
+            breakdown={game.quarter_breakdown}
+            quarterScores={game.quarter_scores}
+          />
+          <ScoringWorm
+            events={game.events}
+            quarterScores={game.quarter_scores}
+            homeAbbr={game.home_team.abbreviation}
+            awayAbbr={game.away_team.abbreviation}
+            homeColor={game.home_team.primary_color}
+            awayColor={game.away_team.primary_color}
+          />
+        </div>
+      )}
+
       {/* Top Performers - shown for both live and completed games */}
       {!hideScores && (
         <GameStats gameId={game.id} gameStatus={game.status} />
       )}
 
-      {/* Quarter Summaries - temporarily hidden while quality is improved */}
-      {/* {!hideScores && hasQuarterSummaries && (
-        <QuarterSummaries quarterSummaries={game.quarter_summaries!} quarterScores={game.quarter_scores} />
-      )} */}
+      {/* Quarter Summaries - AI text per quarter, completed games only */}
+      {!hideScores && game.status === 'completed' && game.quarter_summaries && Object.keys(game.quarter_summaries).length > 0 && (
+        <QuarterSummaries quarterSummaries={game.quarter_summaries} quarterScores={game.quarter_scores} />
+      )}
 
       {/* AI Summary for completed games - hidden when spoiler mode is on */}
       {!hideScores && game.status === 'completed' && game.ai_summary && (
@@ -285,6 +309,20 @@ const LiveDashboard: React.FC<LiveDashboardProps> = ({ gameId }) => {
               </p>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Scoring event log - completed games only, when captured for this game */}
+      {!hideScores && game.status === 'completed' && game.events.length > 0 && (
+        <div className="glass rounded-apple-xl p-6 shadow-apple-lg">
+          <h3 className="text-xl font-semibold text-afl-warm-900 mb-3">
+            Scoring Timeline
+          </h3>
+          <EventTimeline
+            events={game.events}
+            homeTeamAbbr={game.home_team.abbreviation}
+            awayTeamAbbr={game.away_team.abbreviation}
+          />
         </div>
       )}
 

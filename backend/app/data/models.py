@@ -123,6 +123,13 @@ class Match(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Structured round info (1C): round_number is a plain int for ordering,
+    # is_final flags finals weeks, round_name is the display name
+    # ("Grand Final" instead of "29"). Backfilled for all seasons.
+    round_number = Column(Integer, nullable=True)
+    is_final = Column(Boolean, nullable=False, default=False)
+    round_name = Column(Text, nullable=True)
+
     # Unique constraint
     __table_args__ = (
         UniqueConstraint("season", "round", "home_team_id", "away_team_id"),

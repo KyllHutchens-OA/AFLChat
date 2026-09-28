@@ -247,12 +247,46 @@ def get_live_game_detail(game_id):
                 'milestone_type': event.event_type.replace('milestone_', '') if event.event_type and event.event_type.startswith('milestone_') else None,
             })
 
+        # Finals get a real name ("Grand Final"), never "Round 29"
+        from app.services.round_naming import resolve_round_display
+        round_name, is_final, round_number = resolve_round_display(
+            game.season, game.round, game.match
+        )
+
+        # Quarter-by-quarter goals.behinds (total), from the migrated Match row.
+        # live_games only tracks cumulative *total* score per quarter, not the
+        # goals/behinds split, so this needs the completed Match record.
+        quarter_breakdown = None
+        if game.match:
+            m = game.match
+            home_q = [
+                (m.home_q1_goals, m.home_q1_behinds), (m.home_q2_goals, m.home_q2_behinds),
+                (m.home_q3_goals, m.home_q3_behinds), (m.home_q4_goals, m.home_q4_behinds),
+            ]
+            away_q = [
+                (m.away_q1_goals, m.away_q1_behinds), (m.away_q2_goals, m.away_q2_behinds),
+                (m.away_q3_goals, m.away_q3_behinds), (m.away_q4_goals, m.away_q4_behinds),
+            ]
+            quarters = []
+            for i, ((hg, hb), (ag, ab)) in enumerate(zip(home_q, away_q)):
+                if hg is None or ag is None:
+                    continue
+                quarters.append({
+                    'quarter': i + 1,
+                    'home_goals': hg, 'home_behinds': hb or 0, 'home_total': hg * 6 + (hb or 0),
+                    'away_goals': ag, 'away_behinds': ab or 0, 'away_total': ag * 6 + (ab or 0),
+                })
+            quarter_breakdown = quarters or None
+
         # Game data
         game_data = {
             'id': game.id,
             'squiggle_id': game.squiggle_game_id,
             'season': game.season,
             'round': game.round,
+            'round_name': round_name,
+            'is_final': is_final,
+            'round_number': round_number,
             'home_team': {
                 'id': game.home_team.id,
                 'name': game.home_team.name,
@@ -287,11 +321,14 @@ def get_live_game_detail(game_id):
             'post_game_analysis': game.post_game_analysis if game.status == 'completed' else None,
             # Quarter summaries
             'quarter_summaries': game.quarter_summaries or {},
-            # Quarter scores
+            # Quarter scores (cumulative total only; always available)
             'quarter_scores': {
                 'home': [game.home_q1_score, game.home_q2_score, game.home_q3_score, game.home_q4_score],
                 'away': [game.away_q1_score, game.away_q2_score, game.away_q3_score, game.away_q4_score],
             },
+            # Quarter goals.behinds (total) breakdown; only set once the game
+            # has migrated to `matches` and has the full scoring split
+            'quarter_breakdown': quarter_breakdown,
         }
 
         session.close()
@@ -301,6 +338,25 @@ def get_live_game_detail(game_id):
     except Exception as e:
         logger.error(f"Error fetching live game detail: {e}")
         return jsonify({'error': 'Failed to fetch game detail'}), 500
+
+
+@bp.route('/live-games/premiers', methods=['GET'])
+@limiter.exempt  # Exempt from rate limiting (polled frequently)
+def get_premiers():
+    """Latest Grand Final result, for the off-season premiers banner."""
+    try:
+        from app.services.live_game_service import LiveGameService
+
+        premiers = LiveGameService.get_latest_premiers()
+        if not premiers:
+            return jsonify({'premiers': None}), 200
+
+        premiers['match_date'] = premiers['match_date'].isoformat() if premiers.get('match_date') else None
+        return jsonify({'premiers': premiers}), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching premiers: {e}")
+        return jsonify({'premiers': None}), 200
 
 
 def _attach_predictions(upcoming: list, season: int):
@@ -461,33 +517,59 @@ def get_upcoming_matches():
             except Exception as round_err:
                 logger.warning(f"Failed to fetch round {r} from Squiggle: {round_err}")
 
-        upcoming = []
-        for game in all_games:
-            date_str = game.get('date')
-            if not date_str:
-                continue
+        def parse_upcoming(games, season):
+            from app.services.round_naming import fallback_round_name
+            parsed = []
+            for game in games:
+                date_str = game.get('date')
+                if not date_str:
+                    continue
+                try:
+                    if 'Z' in date_str or '+' in date_str:
+                        game_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    else:
+                        naive_date = datetime.fromisoformat(date_str)
+                        game_date = naive_date.replace(tzinfo=aus_tz)
+                except (ValueError, AttributeError):
+                    continue
 
-            try:
-                if 'Z' in date_str or '+' in date_str:
-                    game_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                else:
-                    naive_date = datetime.fromisoformat(date_str)
-                    game_date = naive_date.replace(tzinfo=aus_tz)
-            except (ValueError, AttributeError):
-                continue
+                complete = game.get('complete', 0)
+                if complete == 0 and game_date > now:
+                    round_name, is_final, _ = fallback_round_name(season, game.get('round'))
+                    parsed.append({
+                        'id': game.get('id'),
+                        'season': season,
+                        'round': game.get('round'),
+                        'round_name': round_name,
+                        'home_team': game.get('hteam'),
+                        'away_team': game.get('ateam'),
+                        'venue': game.get('venue'),
+                        'date': game_date.isoformat(),
+                        'complete': complete,
+                        'is_final': game.get('is_final', False) or is_final,
+                    })
+            return parsed
 
-            complete = game.get('complete', 0)
-            if complete == 0 and game_date > now:
-                upcoming.append({
-                    'id': game.get('id'),
-                    'round': game.get('round'),
-                    'home_team': game.get('hteam'),
-                    'away_team': game.get('ateam'),
-                    'venue': game.get('venue'),
-                    'date': game_date.isoformat(),
-                    'complete': complete,
-                    'is_final': game.get('is_final', False),
-                })
+        upcoming = parse_upcoming(all_games, current_year)
+
+        # Current year's season is over (no more rounds) - check whether next
+        # season's fixture has been published yet, for the off-season countdown
+        if not upcoming:
+            next_year = current_year + 1
+            next_year_games = []
+            for r in (0, 1):
+                try:
+                    resp = requests.get(
+                        f"https://api.squiggle.com.au/?q=games;year={next_year};round={r}",
+                        headers={"User-Agent": "AFL-Analytics-App/1.0 (kyllhutchens@gmail.com)"},
+                        timeout=10
+                    )
+                    if resp.status_code == 200:
+                        next_year_games.extend(resp.json().get('games', []))
+                except Exception as round_err:
+                    logger.debug(f"No {next_year} fixture yet (round {r}): {round_err}")
+            upcoming = parse_upcoming(next_year_games, next_year)
+            current_year = next_year if upcoming else current_year
 
         upcoming.sort(key=lambda x: x['date'])
 
