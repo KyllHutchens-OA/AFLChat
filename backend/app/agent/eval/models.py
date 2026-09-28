@@ -72,6 +72,7 @@ class PairCheck(BaseModel):
 
     key: str
     value: str
+    alts: List[str] = Field(default_factory=list)  # other value cols that also satisfy
     series: Optional[str] = None
     where: Literal["rows", "chart"] = "rows"
     top: Optional[int] = None  # only the first N truth rows
@@ -229,6 +230,7 @@ class EvalResult(BaseModel):
     truth_rows: List[Dict[str, Any]] = Field(default_factory=list)
     passed: bool = False  # correctness axes only
     budget_ok: Optional[bool] = None
+    integrity_ok: Optional[bool] = None  # DB unchanged by the case (integrity_sql)
     judge: Optional[Dict[str, Any]] = None  # triage only, never gates
     error: Optional[str] = None  # harness-level failure
 

@@ -3,22 +3,22 @@ Eval case definitions and subsets.
 
 Sources, merged here:
 
-1. GATE — the original 15-case M5 gate set (same ids as the Milestone-0
+1. GATE: the original 15-case M5 gate set (same ids as the Milestone-0
    benchmark so before/after comparison stays trivial), rewritten in 1D to
    use LIVE ground truth: each case's `verification_sql` runs at eval time
    and `truth` / `chart` expectations point at its columns. No hard-coded
    numbers, so "this season" cases no longer rot.
 
-2. BANK (case_bank.py) — 1D ground-truth families: current-season finals,
+2. BANK (case_bank.py): 1D ground-truth families: current-season finals,
    ladder, nicknames, corrections, clarification, off-topic, injection,
    namesakes, Brisbane Bears/Lions, per-game averages, multi-team trends,
    scatter, multi-metric compare, quarters, ties, win/loss, no-data,
    coverage caveats, history.
 
-3. SALVAGED — the old `app/agent/eval/test_cases.py` suite, recovered from
+3. SALVAGED: the old `app/agent/eval/test_cases.py` suite, recovered from
    its bytecode in M5. Static string checks only; kept as a legacy subset.
 
-4. eval_queries.txt (repo root) — 128 exploratory queries, auto-tagged, no
+4. eval_queries.txt (repo root): 128 exploratory queries, auto-tagged, no
    ground truth (only meaningful with --judge).
 
 Subsets (see build_subsets): smoke, full, dev, heldout, adversarial, plus
@@ -39,7 +39,7 @@ EVAL_QUERIES_PATH = REPO_ROOT / "eval_queries.txt"
 
 
 # ---------------------------------------------------------------------------
-# 1. GATE — the M5 smoke15 cases with live ground truth.
+# 1. GATE: the M5 smoke15 cases with live ground truth.
 # ---------------------------------------------------------------------------
 GATE: List[EvalCase] = [
     EvalCase(
@@ -147,7 +147,7 @@ GATE: List[EvalCase] = [
         description="Relative-time query then an explicit correction pinning round+season.",
         is_correction=True,
         verification_sql=leaders("sum(coalesce(ps.goals,0))", "2024", 1, "m.round = '10'"),
-        truth=[T("value"), T("name", all_rows=True)],
+        truth=[T("value", alts=["value_ha"]), T("name", all_rows=True)],
     ),
     EvalCase(
         id="pair_02",
@@ -223,7 +223,7 @@ GATE: List[EvalCase] = [
         description="Top-N ranking; names AND totals must match (Tom Green's 770 is split by team-swapped rows).",
         verification_sql=leaders("sum(ps.disposals)", "2024", 5),
         truth=[T("name", all_rows=True)],
-        pairs=[PairCheck(key="name", value="value", min_frac=0.8)],
+        pairs=[PairCheck(key="name", value="value", alts=["value_ha"], min_frac=0.8)],
     ),
     EvalCase(
         id="salv_chart_trend",

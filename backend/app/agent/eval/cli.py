@@ -10,6 +10,7 @@ Run from backend/ with the venv python:
     venv/bin/python -m app.agent.eval --case fin_01,lad_01 --judge       # judge = triage only
     venv/bin/python -m app.agent.eval --subset full --truth-only         # print live ground truth, no LLM
     venv/bin/python -m app.agent.eval --diff v2_2026-09-28 path/to/new.json
+    venv/bin/python -m app.agent.eval --rescore v2_2026-09-28 --compare v2_2026-09-28  # no LLM
     venv/bin/python -m app.agent.eval --list-subsets
 
 Exit code: 0 when every scored case passed (skips do not fail the run);
@@ -26,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.agent.eval.cases import build_subsets, get_case, get_subset
-from app.agent.eval.models import CHECK_NAMES, EvalCase, EvalResult
+from app.agent.eval.models import CHECK_NAMES, EvalCase, EvalResult, TurnResult
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,76 @@ def _integrity(store, case: EvalCase) -> Optional[Any]:
         return f"error: {e}"
 
 
+def _prepare(case: EvalCase, store):
+    """(truth, skip_reason, case_as_scored, caveat_required) for one case."""
+    from app.agent.eval.truth import effective_case
+
+    truth, skip = store.truth_for(case)
+    if skip:
+        return None, skip, case, False
+    caveat_required = False
+    if case.caveat_sql:
+        try:
+            rows = store.query(case.caveat_sql)
+            caveat_required = bool(rows and list(rows[0].values())[0])
+        except Exception as e:
+            logger.warning(f"[{case.id}] caveat_sql failed, not requiring a caveat: {e}")
+    return truth, None, effective_case(case, truth), caveat_required
+
+
+def _score(case, scored_case, run, turns, truth, error, integrity_ok, caveat_required,
+           max_turn_s, max_turn_tokens) -> EvalResult:
+    from app.agent.eval.scorer import score_case
+
+    checks, passed, fails = score_case(
+        scored_case, turns, truth, integrity_ok, max_turn_s, max_turn_tokens, caveat_required
+    )
+    result = EvalResult(
+        case_id=case.id, run=run, tags=case.tags, source=case.source,
+        turns=turns, checks=checks, failures=fails,
+        truth_rows=(truth or [])[:50],
+        passed=passed and error is None,
+        budget_ok=checks.get("budget"),
+        integrity_ok=integrity_ok,
+        error=error,
+    )
+    result.status = "error" if error else ("pass" if result.passed else "fail")
+    return result
+
+
+def rescore_report(
+    report: Dict[str, Any],
+    max_turn_s: float = DEFAULT_MAX_TURN_S,
+    max_turn_tokens: int = DEFAULT_MAX_TURN_TOKENS,
+) -> List[EvalResult]:
+    """Re-score a saved report's turns against the CURRENT cases and live
+    truth, without calling any engine (cheap harness iteration; also shows
+    how an old run fares once 1C changes the data)."""
+    from app.agent.eval.truth import TruthStore
+
+    store = TruthStore()
+    results: List[EvalResult] = []
+    try:
+        for old in report.get("cases", []):
+            try:
+                case = get_case(old["case_id"])
+            except ValueError:
+                continue  # case removed since the report was written
+            truth, skip, scored_case, caveat_required = _prepare(case, store)
+            if skip or old.get("status") == "skip":
+                results.append(EvalResult(case_id=case.id, tags=case.tags, source=case.source, status="skip",
+                                          skip_reason=skip or old.get("skip_reason")))
+                continue
+            turns = [TurnResult.model_validate(t) for t in old.get("turns", [])]
+            result = _score(case, scored_case, old.get("run", 0), turns, truth, old.get("error"),
+                            old.get("integrity_ok"), caveat_required, max_turn_s, max_turn_tokens)
+            result.judge = old.get("judge")
+            results.append(result)
+    finally:
+        store.close()
+    return results
+
+
 def run_cases(
     cases: List[EvalCase],
     engine_name: str = "v2",
@@ -70,8 +141,8 @@ def run_cases(
 ) -> List[EvalResult]:
     """Drive + score each case `repeat` times; returns EvalResults in order."""
     from app.agent.eval.runner import drive_case, get_engine
-    from app.agent.eval.scorer import _build_judge_client, judge_case, score_case
-    from app.agent.eval.truth import TruthStore, effective_case
+    from app.agent.eval.scorer import _build_judge_client, judge_case
+    from app.agent.eval.truth import TruthStore
 
     store = store or TruthStore()
     engine = get_engine(engine_name, **(engine_kwargs or {}))
@@ -80,21 +151,13 @@ def run_cases(
     results: List[EvalResult] = []
     try:
         for i, case in enumerate(cases, 1):
-            truth, skip = store.truth_for(case)
+            truth, skip, scored_case, caveat_required = _prepare(case, store)
             label = f"[{i}/{len(cases)}] {case.id}: {case.queries[0][:70]!r}"
             if skip:
                 print(f"{label}\n    -> SKIP ({skip})", flush=True)
                 results.append(EvalResult(case_id=case.id, tags=case.tags, source=case.source,
                                           status="skip", skip_reason=skip))
                 continue
-            scored_case = effective_case(case, truth)
-            caveat_required = False
-            if case.caveat_sql:
-                try:
-                    rows = store.query(case.caveat_sql)
-                    caveat_required = bool(rows and list(rows[0].values())[0])
-                except Exception as e:
-                    logger.warning(f"[{case.id}] caveat_sql failed, not requiring a caveat: {e}")
             for run in range(repeat):
                 print(label + (f" (run {run + 1}/{repeat})" if repeat > 1 else ""), flush=True)
                 before = _integrity(store, case)
@@ -107,18 +170,8 @@ def run_cases(
                 after = _integrity(store, case)
                 integrity_ok = None if case.integrity_sql is None else (before == after)
 
-                checks, passed, fails = score_case(
-                    scored_case, turns, truth, integrity_ok, max_turn_s, max_turn_tokens, caveat_required
-                )
-                result = EvalResult(
-                    case_id=case.id, run=run, tags=case.tags, source=case.source,
-                    turns=turns, checks=checks, failures=fails,
-                    truth_rows=(truth or [])[:50],
-                    passed=passed and error is None,
-                    budget_ok=checks.get("budget"),
-                    error=error,
-                )
-                result.status = "error" if error else ("pass" if result.passed else "fail")
+                result = _score(case, scored_case, run, turns, truth, error, integrity_ok,
+                                caveat_required, max_turn_s, max_turn_tokens)
                 if judge and turns and run == 0:
                     result.judge = judge_case(scored_case, turns, truth, client=judge_client, model=judge_model)
 
@@ -281,6 +334,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--diff", nargs=2, metavar=("BASE", "NEW"), help="Diff two saved reports and exit")
     parser.add_argument("--show-all", action="store_true", help="With --compare/--diff, list unchanged cases too")
     parser.add_argument("--truth-only", action="store_true", help="Print live ground truth per case; no LLM")
+    parser.add_argument("--rescore", default=None,
+                        help="Re-score a saved report (name or path) against current cases + live truth; no LLM")
     parser.add_argument("--list-subsets", action="store_true", help="List subsets and exit")
     parser.add_argument("--max-cases", type=int, default=None, help="Cap the number of cases run")
     args = parser.parse_args(argv)
@@ -312,44 +367,51 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.truth_only:
         return _truth_only(cases)
 
-    engine_name = "v2-ws" if args.ws else args.engine
-    from app.agent.eval.runner import get_engine  # noqa: F401  (fail fast on unknown engine)
     from app.agent.eval.scorer import judge_model_name
     from app.agent.eval.truth import TruthStore
 
-    store = TruthStore()
-    db = store.describe()
-    print(f"Running {len(cases)} case(s) x{args.repeat} engine={engine_name} db={db}"
-          + (f" subset={subset_label}" if subset_label else ""))
-    try:
-        results = run_cases(
-            cases,
-            engine_name=engine_name,
-            repeat=max(1, args.repeat),
-            judge=args.judge,
-            judge_model=args.judge_model,
-            max_turn_s=args.max_turn_budget,
-            max_turn_tokens=args.token_budget,
-            engine_kwargs={"url": args.url, "read_only_db": not args.allow_db_writes},
-            store=store,
-        )
-    except ValueError as e:  # e.g. engine not implemented
-        print(f"error: {e}", file=sys.stderr)
-        return 2
+    if args.rescore:
+        # Re-score saved turns against current cases + live truth; no engine calls.
+        old = bl.load(args.rescore)
+        print(f"Re-scoring {len(old.get('cases', []))} saved run(s) from {args.rescore}")
+        results = rescore_report(old, args.max_turn_budget, args.token_budget)
+        meta = dict(old.get("meta", {}), rescored_at=_now_iso(), rescored_from=args.rescore)
+    else:
+        engine_name = "v2-ws" if args.ws else args.engine
+        store = TruthStore()
+        db = store.describe()
+        print(f"Running {len(cases)} case(s) x{args.repeat} engine={engine_name} db={db}"
+              + (f" subset={subset_label}" if subset_label else ""))
+        try:
+            results = run_cases(
+                cases,
+                engine_name=engine_name,
+                repeat=max(1, args.repeat),
+                judge=args.judge,
+                judge_model=args.judge_model,
+                max_turn_s=args.max_turn_budget,
+                max_turn_tokens=args.token_budget,
+                engine_kwargs={"url": args.url, "read_only_db": not args.allow_db_writes},
+                store=store,
+            )
+        except ValueError as e:  # e.g. engine not implemented
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        meta = {
+            "generated_at": _now_iso(),
+            "engine": engine_name,
+            "model": os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+            "subset": subset_label,
+            "case_ids": [c.id for c in cases],
+            "repeat": args.repeat,
+            "db": db,
+            "judge": args.judge,
+            "judge_model": judge_model_name(args.judge_model) if args.judge else None,
+            "budgets": {"p90_s": args.p90_budget, "max_turn_s": args.max_turn_budget,
+                        "max_turn_tokens": args.token_budget},
+        }
 
     summary = summarize(results, args.p90_budget, args.max_turn_budget)
-    meta = {
-        "generated_at": _now_iso(),
-        "engine": engine_name,
-        "model": os.getenv("OPENAI_MODEL", "gpt-5-mini"),
-        "subset": subset_label,
-        "case_ids": [c.id for c in cases],
-        "repeat": args.repeat,
-        "db": db,
-        "judge": args.judge,
-        "judge_model": judge_model_name(args.judge_model) if args.judge else None,
-        "budgets": {"p90_s": args.p90_budget, "max_turn_s": args.max_turn_budget, "max_turn_tokens": args.token_budget},
-    }
     report = build_report(results, meta, summary)
 
     print("\n=== Summary ===")

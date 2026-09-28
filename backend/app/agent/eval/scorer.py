@@ -109,12 +109,15 @@ def _final_haystack(turns: List[TurnResult]) -> str:
 
 
 def _all_sql(turns: List[TurnResult]) -> str:
+    """SQL/tool args that actually EXECUTED (blocked or failed attempts are harmless)."""
     parts = []
     for t in turns:
-        parts.append(t.sql or "")
+        if not t.tool_calls:
+            parts.append(t.sql or "")  # engines without a call trace
         for c in t.tool_calls:
-            parts.append(c.sql or "")
-            parts.append(json.dumps(c.args, default=str))
+            if c.error is None and c.row_count is not None:
+                parts.append(c.sql or "")
+                parts.append(json.dumps(c.args, default=str))
     return "\n".join(parts).lower()
 
 
@@ -276,10 +279,12 @@ def _check_pairs(pc: PairCheck, truth: List[Dict[str, Any]], turn: TurnResult, f
     for r in rows:
         key, value = r.get(pc.key), r.get(pc.value)
         series = r.get(pc.series) if pc.series else None
+        values = [v for v in [value] + [r.get(a) for a in pc.alts] if v is not None]
         if pc.where == "rows":
-            hit = A.row_pair_match(turn.rows, key, value, series, pc.tol)
+            hit = any(A.row_pair_match(turn.rows, key, v, series, pc.tol) for v in values)
         else:
-            hit = bool(turn.chart_spec) and A.chart_pair_match(turn.chart_spec, key, value, series, pc.tol)
+            hit = bool(turn.chart_spec) and any(
+                A.chart_pair_match(turn.chart_spec, key, v, series, pc.tol) for v in values)
         if not hit:
             misses.append(f"{key}{'/' + str(series) if series is not None else ''}={value}")
     frac = 1 - len(misses) / len(rows)

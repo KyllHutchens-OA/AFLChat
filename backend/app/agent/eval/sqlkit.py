@@ -104,9 +104,15 @@ def player_total(name: str, cols: dict, season: str = None, team: int = None, wh
 
 
 def leaders(stat_expr: str, season: str, n: int = 1, where: str = "true", alias: str = "value") -> str:
-    """Players ranked by a season total (ties included via rank())."""
+    """Players ranked by a season total (ties included via rank()).
+
+    Also returns `<alias>_ha`, the home-and-away-only total: "most goals in
+    2023" is fairly answered either way (Coleman counts H&A only).
+    """
+    ha_expr = f"{stat_expr} filter (where {HA})" if stat_expr.startswith("sum(") else "null"
     return (
-        f"select * from (select p.name, {stat_expr} {alias}, rank() over (order by {stat_expr} desc nulls last) rnk "
+        f"select * from (select p.name, {stat_expr} {alias}, {ha_expr} {alias}_ha, "
+        f"rank() over (order by {stat_expr} desc nulls last) rnk "
         "from player_stats ps join players p on p.id=ps.player_id join matches m on m.id=ps.match_id "
         f"where m.season={season} and {where} group by p.id, p.name) x where rnk <= {n} order by rnk, name"
     )
