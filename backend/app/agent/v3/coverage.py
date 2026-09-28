@@ -2,9 +2,12 @@
 Data coverage for the v3 agent: season range, latest match with player
 stats ("data as of"), and which recent rounds still lack player stats.
 
-Stand-in for 1C's data_coverage helper (same intent: latest
-match-with-stats date). Cached for an hour so the system prompt's coverage
-line stays byte-stable between requests.
+The "data as of" date comes from 1C's `data_coverage()`
+(`app/services/data_health.py`), the authoritative source used by
+`GET /api/health/data`. This module adds the v3-specific parts (season
+bounds, per-round-name missing-stats breakdown for the current season) and
+caches the merged result for an hour so the system prompt's coverage line
+stays byte-stable between requests.
 """
 import logging
 import time
@@ -19,20 +22,20 @@ _cache: Dict[str, Any] = {"at": 0.0, "data": None}
 def coverage(force: bool = False) -> Dict[str, Any]:
     if not force and _cache["data"] and time.time() - _cache["at"] < _TTL_S:
         return _cache["data"]
-    from app.agent.v3.tools.base import AFL_TEAM_IDS, query, round_name, round_number
+    from app.agent.v3.tools.base import query, round_name, round_number
+    from app.services.data_health import data_coverage as afl_data_coverage
 
     data: Dict[str, Any] = {"first_season": 1990, "last_season": 2026, "data_as_of": None,
                             "latest_match": None, "missing_stats_rounds": [], "missing_stats_season": None}
     try:
-        df = query(
-            "SELECT MIN(m.season) AS first_season, MAX(m.season) AS last_season, "
-            "MAX(m.match_date) FILTER (WHERE m.home_score IS NOT NULL AND (m.home_score > 0 OR m.away_score > 0)) AS latest_match, "
-            "MAX(m.match_date) FILTER (WHERE EXISTS (SELECT 1 FROM player_stats ps WHERE ps.match_id = m.id)) AS data_as_of "
-            "FROM matches m WHERE m.home_team_id = ANY(:ids)", {"ids": list(AFL_TEAM_IDS)})
+        df = query("SELECT MIN(season) AS first_season, MAX(season) AS last_season FROM matches")
         row = df.iloc[0].to_dict()
         data.update({k: row[k] for k in ("first_season", "last_season")})
-        data["latest_match"] = str(row["latest_match"])[:10] if row["latest_match"] else None
-        data["data_as_of"] = str(row["data_as_of"])[:10] if row["data_as_of"] else None
+
+        cov = afl_data_coverage()
+        data["data_as_of"] = cov.get("latest_match_with_stats")
+        data["latest_match"] = cov.get("latest_completed_match")
+
         missing = query(
             f"SELECT {round_name('m')} AS round_name, MIN({round_number('m')}) AS rn, COUNT(*) AS matches "
             "FROM matches m WHERE m.season = :season AND (m.home_score > 0 OR m.away_score > 0) "

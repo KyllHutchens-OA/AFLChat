@@ -200,7 +200,7 @@ SQL_EXAMPLES: List[Dict[str, Any]] = [
             "SUM(CASE WHEN m.home_team_id = t.id THEN m.home_score ELSE m.away_score END) AS points_for, "
             "SUM(CASE WHEN m.home_team_id = t.id THEN m.away_score ELSE m.home_score END) AS points_against "
             "FROM matches m JOIN teams t ON (m.home_team_id = t.id OR m.away_team_id = t.id) "
-            "WHERE m.round NOT IN ('Qualifying Final','Elimination Final','Semi Final','Preliminary Final','Grand Final') "
+            "WHERE NOT m.is_final "
             "GROUP BY m.season, t.name"
             "), ranked AS ("
             "SELECT *, wins * 4 + draws * 2 AS premiership_points, "

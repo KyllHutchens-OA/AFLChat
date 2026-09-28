@@ -45,7 +45,7 @@ class SquiggleFetcher:
             # Preload teams and matches in bulk to avoid N×5 per-tip DB queries.
             team_by_name = {t.name: t for t in session.query(Team).all()}
             match_by_key = {
-                (m.season, m.round, m.home_team_id, m.away_team_id): m
+                (m.season, m.round_number, m.home_team_id, m.away_team_id): m
                 for m in session.query(Match).filter_by(season=season).all()
             }
             existing_preds = {
@@ -67,7 +67,7 @@ class SquiggleFetcher:
                         continue
 
                     match = match_by_key.get(
-                        (season, str(round_num), home_team.id, away_team.id)
+                        (season, int(round_num), home_team.id, away_team.id)
                     )
                     if not match:
                         continue
@@ -147,7 +147,7 @@ class SquiggleFetcher:
         # Find match
         match = session.query(Match).filter_by(
             season=season,
-            round=str(round_num),
+            round_number=int(round_num),
             home_team_id=home_team.id,
             away_team_id=away_team.id
         ).first()

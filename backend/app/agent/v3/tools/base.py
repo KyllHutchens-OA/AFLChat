@@ -13,7 +13,6 @@ import logging
 import math
 import re
 import threading
-import time
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Type
 
@@ -139,40 +138,21 @@ def result(store: Optional[ResultStore], df: Optional[pd.DataFrame], *, why_empt
     return out
 
 
-# ── Round columns (1C) with a legacy fallback ───────────────────────────────
-
-_round_cols: Dict[str, Any] = {"checked": 0.0, "native": None}
-
-
-def has_round_columns() -> bool:
-    """True once matches.round_number/round_name/is_final exist (1C migration)."""
-    if _round_cols["native"] is None or time.time() - _round_cols["checked"] > 3600:
-        try:
-            df = query("SELECT count(*) AS n FROM information_schema.columns WHERE table_name = 'matches' "
-                       "AND column_name IN ('round_number', 'round_name', 'is_final')")
-            _round_cols["native"] = int(df["n"].iloc[0]) == 3
-        except Exception as e:
-            logger.warning(f"round column check failed: {e}")
-            _round_cols["native"] = False
-        _round_cols["checked"] = time.time()
-    return bool(_round_cols["native"])
+# ── Round columns (1C) ──────────────────────────────────────────────────────
+# matches.round_number / round_name / is_final are native columns as of the 1C
+# migration (scripts/db/1c_01_round_columns.sql); no legacy `round`-string fallback.
 
 
 def round_name(a: str = "m") -> str:
-    if has_round_columns():
-        return f"{a}.round_name"
-    return (f"(CASE WHEN {a}.round = '0' THEN 'Opening Round' WHEN {a}.round ~ '^[0-9]+$' "
-            f"THEN 'Round ' || {a}.round ELSE {a}.round END)")
+    return f"{a}.round_name"
 
 
 def is_final(a: str = "m") -> str:
-    return f"{a}.is_final" if has_round_columns() else f"({a}.round !~ '^[0-9]+$')"
+    return f"{a}.is_final"
 
 
 def round_number(a: str = "m") -> str:
-    if has_round_columns():
-        return f"{a}.round_number"
-    return f"(CASE WHEN {a}.round ~ '^[0-9]+$' THEN {a}.round::int END)"
+    return f"{a}.round_number"
 
 
 def finals_clause(mode: str, a: str = "m") -> str:
