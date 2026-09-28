@@ -61,8 +61,8 @@ const SuggestedQuestions: React.FC<SuggestedQuestionsProps> = ({ onSelect }) => 
         <button
           key={q}
           onClick={() => onSelect(q)}
-          className="px-4 py-2 text-sm rounded-full border border-afl-warm-200 text-afl-warm-700
-                     hover:bg-afl-accent hover:text-white hover:border-afl-accent
+          className="px-4 py-2 text-sm rounded-full border border-warm-200 text-warm-700
+                     hover:bg-sherrin hover:text-white hover:border-sherrin
                      transition-all duration-200"
         >
           {q}

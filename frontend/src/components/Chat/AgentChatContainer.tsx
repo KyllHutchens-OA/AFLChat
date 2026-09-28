@@ -10,19 +10,32 @@ const MESSAGE_THRESHOLD = 20;
 interface AgentChatContainerProps {
   conversationId?: string;
   onConversationCreated: (id: string | null) => void;
+  // /ask?q=... — sent once on mount, then the caller clears the query param
+  initialQuery?: string;
+  onInitialQuerySent?: () => void;
 }
 
 const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   conversationId,
   onConversationCreated,
+  initialQuery,
+  onInitialQuerySent,
 }) => {
   const [input, setInput] = useState('');
   const [dismissedNewChatPrompt, setDismissedNewChatPrompt] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const sentInitialQuery = useRef(false);
   const { messages, isConnected, isThinking, thinkingStep, isLoadingHistory, currentConversationId, sendMessage, startNewChat } =
     useAgentWebSocket({ conversationId, onConversationCreated });
+
+  useEffect(() => {
+    if (!initialQuery || sentInitialQuery.current || !isConnected) return;
+    sentInitialQuery.current = true;
+    sendMessage(initialQuery);
+    onInitialQuerySent?.();
+  }, [initialQuery, isConnected, sendMessage, onInitialQuerySent]);
 
   const showNewChatPrompt = messages.length >= MESSAGE_THRESHOLD && !dismissedNewChatPrompt;
 
@@ -82,9 +95,9 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto space-y-4 pb-4 min-h-0">
           {isLoadingHistory && (
-            <div className="text-center text-afl-warm-500 mt-8">
+            <div className="text-center text-warm-500 mt-8">
               <div className="flex items-center justify-center gap-2">
-                <div className="w-4 h-4 border-2 border-afl-accent border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-sherrin border-t-transparent rounded-full animate-spin" />
                 <span>Loading conversation...</span>
               </div>
             </div>
@@ -93,10 +106,10 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
           {/* Empty state */}
           {!isLoadingHistory && messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center px-4 animate-fade-in">
-              <h2 className="text-2xl font-semibold text-afl-warm-900 mb-2">
+              <h2 className="text-2xl font-semibold text-warm-900 mb-2">
                 Ask me about AFL statistics
               </h2>
-              <p className="text-sm text-afl-warm-500 mb-8">
+              <p className="text-sm text-warm-500 mb-8">
                 Stats, records, player comparisons — ask anything
               </p>
               <SuggestedQuestions onSelect={handleSuggestedQuestion} />
@@ -109,7 +122,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
               {message.type === 'user' ? (
                 /* User bubble — right-aligned, warm accent */
                 <div className="flex justify-end">
-                  <div className="max-w-[80%] rounded-2xl rounded-br-md px-4 py-3 bg-afl-accent text-white shadow-apple-sm">
+                  <div className="max-w-[80%] rounded-2xl rounded-br-md px-4 py-3 bg-sherrin text-white shadow-card-sm">
                     <div className="whitespace-pre-wrap text-sm">{message.text}</div>
                   </div>
                 </div>
@@ -140,13 +153,13 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setDismissedNewChatPrompt(true)}
-                className="text-sm text-afl-warm-500 hover:text-afl-warm-700 px-2 py-1"
+                className="text-sm text-warm-500 hover:text-warm-700 px-2 py-1"
               >
                 Dismiss
               </button>
               <button
                 onClick={() => { startNewChat(); setDismissedNewChatPrompt(false); }}
-                className="btn-apple-primary text-sm"
+                className="btn-primary text-sm"
               >
                 New Chat
               </button>
@@ -160,7 +173,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
             <button
               type="button"
               onClick={startNewChat}
-              className="p-2.5 rounded-lg text-afl-warm-400 hover:text-afl-warm-700 hover:bg-afl-warm-100 transition-colors"
+              className="p-2.5 rounded-lg text-warm-400 hover:text-warm-700 hover:bg-warm-100 transition-colors"
               title="New Chat"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -177,17 +190,17 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
               onFocus={handleInputFocus}
               placeholder="Ask about AFL statistics..."
               disabled={!isConnected || isThinking}
-              className="w-full px-4 py-3 rounded-xl border border-afl-warm-200 bg-white
-                         focus:outline-none focus:ring-2 focus:ring-afl-accent/30 focus:border-afl-accent
-                         text-sm disabled:bg-afl-warm-50 disabled:cursor-not-allowed
-                         placeholder:text-afl-warm-400 transition-all"
+              className="w-full px-4 py-3 rounded-xl border border-warm-200 bg-white
+                         focus:outline-none focus:ring-2 focus:ring-sherrin/30 focus:border-sherrin
+                         text-sm disabled:bg-warm-50 disabled:cursor-not-allowed
+                         placeholder:text-warm-400 transition-all"
             />
           </div>
           <button
             type="submit"
             disabled={!isConnected || isThinking || !input.trim()}
-            className="p-2.5 rounded-xl bg-afl-accent text-white
-                       hover:bg-afl-accent-600 disabled:bg-afl-warm-200 disabled:cursor-not-allowed
+            className="p-2.5 rounded-xl bg-sherrin text-white
+                       hover:bg-sherrin-600 disabled:bg-warm-200 disabled:cursor-not-allowed
                        transition-all duration-200"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

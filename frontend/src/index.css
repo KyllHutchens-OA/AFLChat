@@ -1,33 +1,108 @@
 /* Import animations */
 @import './styles/animations.css';
 
+/* Footy-NAC identity system: a condensed display face for headlines and
+   scoreboard numerals (Anton), Inter for body copy. */
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  /* SF Pro font loading (system fonts fallback gracefully) */
+  :root {
+    /* Club theming: ClubContext sets these; default is Sherrin red / ink. */
+    --club-primary: #C8102E;
+    --club-secondary: #16130F;
+  }
+
   body {
     @apply font-sans antialiased;
     margin: 0;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: #FAF7F2;  /* afl-warm-50 */
-    color: #1C1C1E;  /* Apple gray-900 */
+    background-color: #F6F1E7; /* paper */
+    color: #16130F; /* ink */
   }
 
   * {
     box-sizing: border-box;
   }
 
-  /* Smooth scrolling */
   html {
     scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer components {
-  /* Frosted glass effect (Apple's signature) */
+  /* --- Footy-NAC design system: one button, card and radius family --- */
+  .btn-primary {
+    @apply px-6 py-2.5 bg-sherrin text-white rounded-lg font-semibold
+           shadow-card hover:bg-sherrin-600 active:scale-95
+           transition-all duration-200 ease-out;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-2.5 bg-white text-ink border border-warm-300 rounded-lg font-semibold
+           shadow-card-sm hover:bg-warm-100 active:scale-95
+           transition-all duration-200 ease-out;
+  }
+
+  .input-field {
+    @apply px-4 py-2.5 bg-white border border-warm-300 rounded-lg
+           focus:outline-none focus:ring-2 focus:ring-sherrin/40 focus:border-sherrin
+           transition-all duration-200 ease-out placeholder:text-warm-500;
+  }
+
+  .card {
+    @apply bg-white rounded-xl shadow-card border border-warm-200/60
+           transition-all duration-300 ease-out hover:shadow-card-md;
+  }
+
+  .stat-number {
+    @apply font-display text-5xl tracking-tight text-ink tabular-nums;
+  }
+
+  .section-label {
+    @apply text-xs font-semibold uppercase tracking-wider text-warm-600;
+  }
+
+  /* Boundary-line chalk divider, used between landing sections */
+  .boundary-line {
+    @apply relative h-px w-full bg-warm-300/70;
+  }
+
+  /* Subtle paper grain texture */
+  .paper-grain {
+    background-image:
+      radial-gradient(rgba(22, 19, 15, 0.05) 0.5px, transparent 0.5px),
+      radial-gradient(rgba(22, 19, 15, 0.04) 0.5px, transparent 0.5px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1.5px 1.5px;
+  }
+
+  /* Same grain, for dark (ink) surfaces like the scoreboard */
+  .paper-grain-dark {
+    background-image:
+      radial-gradient(rgba(255, 255, 255, 0.04) 0.5px, transparent 0.5px),
+      radial-gradient(rgba(255, 255, 255, 0.03) 0.5px, transparent 0.5px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1.5px 1.5px;
+  }
+
+  /* --- Legacy design system (kept for LiveGames/**, unowned in this pass) --- */
   .glass {
     @apply bg-white/80 backdrop-blur-apple border border-afl-warm-200/50;
   }
@@ -36,7 +111,6 @@
     @apply bg-apple-gray-900/80 backdrop-blur-apple border border-white/10;
   }
 
-  /* Apple button styles */
   .btn-apple-primary {
     @apply px-6 py-2.5 bg-afl-accent text-white rounded-apple font-medium
            shadow-apple hover:bg-afl-accent-600 active:scale-95
@@ -49,25 +123,15 @@
            transition-all duration-200 ease-apple;
   }
 
-  /* Apple input styles */
   .input-apple {
     @apply px-4 py-2.5 bg-white border border-apple-gray-300 rounded-apple
            focus:outline-none focus:ring-2 focus:ring-afl-accent focus:border-transparent
            transition-all duration-200 ease-apple placeholder:text-apple-gray-500;
   }
 
-  /* Card with subtle depth */
   .card-apple {
     @apply bg-white rounded-apple-lg shadow-apple border border-afl-warm-200/50
            transition-all duration-300 ease-apple hover:shadow-apple-md;
-  }
-
-  .stat-number {
-    @apply text-5xl font-bold tracking-tight text-afl-warm-900;
-  }
-
-  .section-label {
-    @apply text-xs font-semibold uppercase tracking-wider text-afl-warm-500;
   }
 }
 

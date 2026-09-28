@@ -1,0 +1,18 @@
+{
+  "goalkicker": {
+    "question": "Who's kicked the most goals in the AFL era?",
+    "askQuestion": "Who has the most career goals since 1990?",
+    "answer": "Lance Franklin — 1,066 goals, more than anyone else since 1990.",
+    "name": "Lance Franklin",
+    "total": 1066,
+    "bySeason": [21, 31, 73, 113, 67, 64, 82, 69, 60, 79, 47, 81, 73, 57, 27, 51, 52, 19]
+  },
+  "headToHead": {
+    "question": "Daicos v Bontempelli, disposals by season",
+    "askQuestion": "Compare Nick Daicos and Marcus Bontempelli average disposals per season since 2021",
+    "answer": "Daicos has climbed past Bontempelli on the ball since 2023.",
+    "seasons": [2021, 2022, 2023, 2024, 2025, 2026],
+    "daicos": { "name": "Nick Daicos", "values": [18.9, 23.4, 27.8, 27.8, 28.4, 29.5], "primary": "#000000", "secondary": "#FFFFFF" },
+    "bontempelli": { "name": "Marcus Bontempelli", "values": [26.7, 23.5, 27.7, 25.8, 27.1, 27.9], "primary": "#014896", "secondary": "#CC2031" }
+  }
+}

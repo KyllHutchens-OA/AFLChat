@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { SpoilerProvider } from './contexts/SpoilerContext';
+import { ClubProvider } from './contexts/ClubContext';
 import { LiveDataProvider } from './contexts/LiveDataContext';
 import Layout from './components/Layout/Layout';
 import SpoilerModal from './components/Modal/SpoilerModal';
@@ -9,7 +10,8 @@ import LiveGames from './pages/LiveGames';
 import About from './pages/About';
 import { useAnalytics } from './hooks/useAnalytics';
 
-// Admin dashboard stays out of the main bundle.
+// Landing and admin dashboard stay out of the main bundle.
+const Landing = lazy(() => import('./pages/Landing'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 
 function AppRoutes() {
@@ -17,7 +19,8 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/" element={<AFLAgent />} />
+      <Route path="/" element={<Suspense fallback={null}><Landing /></Suspense>} />
+      <Route path="/ask" element={<AFLAgent />} />
       <Route path="/afl" element={<AFLAgent />} />
       <Route path="/aflagent/:conversationId?" element={<AFLAgent />} />
       {/* Spoiler preference is asked only on the first visit to /live */}
@@ -34,11 +37,13 @@ function App() {
   return (
     <Router>
       <SpoilerProvider>
-        <LiveDataProvider>
-          <Layout>
-            <AppRoutes />
-          </Layout>
-        </LiveDataProvider>
+        <ClubProvider>
+          <LiveDataProvider>
+            <Layout>
+              <AppRoutes />
+            </Layout>
+          </LiveDataProvider>
+        </ClubProvider>
       </SpoilerProvider>
     </Router>
   );

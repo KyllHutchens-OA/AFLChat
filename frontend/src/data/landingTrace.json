@@ -1,0 +1,11 @@
+{
+  "question": "Collingwood vs Carlton head to head over the last 10 years",
+  "note": "A real chat_traces row from afl_dev (id 19), trimmed for display.",
+  "resolveEntities": "team_a: \"Collingwood\" -> Collingwood Magpies (id 4)\nteam_b: \"Carlton\" -> Carlton Blues (id 3)\nseason_from: 2016, season_to: 2026",
+  "tool": "head_to_head({ team_a: \"Collingwood\", team_b: \"Carlton\", season_from: 2016, season_to: 2026, finals: \"include\" })",
+  "sql": "SELECT tm.season, COUNT(*) AS games,\n  COUNT(*) FILTER (WHERE tm.score > tm.opp_score) AS collingwood_wins,\n  COUNT(*) FILTER (WHERE tm.score < tm.opp_score) AS carlton_wins\nFROM tm\nWHERE tm.team_id = :a AND tm.opp_id = :b\nGROUP BY tm.season ORDER BY tm.season",
+  "rowCount": 11,
+  "chart": "make_chart(type=\"groupedBar\", x=\"season\", series=[\"collingwood_wins\", \"carlton_wins\"])",
+  "answer": "Across the last 10 completed seasons, 2016-2025, Collingwood led Carlton 13 wins to 4, with no draws across 17 games.",
+  "latencyMs": 2723
+}

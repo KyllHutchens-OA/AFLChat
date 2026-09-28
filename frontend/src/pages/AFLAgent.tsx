@@ -1,10 +1,17 @@
 import { useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import AgentChatContainer from '../components/Chat/AgentChatContainer';
 
 const AFLAgent: React.FC = () => {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
+  // /ask?q=... pre-fills and sends the question (landing page hero/chips/proof cards)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialQuery = searchParams.get('q') ?? undefined;
+
+  const clearQueryParam = useCallback(() => {
+    if (searchParams.has('q')) setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const handleConversationCreated = useCallback(
     (id: string | null) => {
@@ -24,6 +31,8 @@ const AFLAgent: React.FC = () => {
       <AgentChatContainer
         conversationId={conversationId}
         onConversationCreated={handleConversationCreated}
+        initialQuery={initialQuery}
+        onInitialQuerySent={clearQueryParam}
       />
     </main>
   );
