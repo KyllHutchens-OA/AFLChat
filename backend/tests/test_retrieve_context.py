@@ -24,9 +24,6 @@ class TestHeuristicIntentGuess:
     def test_tipping_keyword(self):
         assert _heuristic_intent_guess("Who should I tip this week?", {}) == "tipping_advice"
 
-    def test_betting_keyword(self):
-        assert _heuristic_intent_guess("What are the odds for this week's games?", {}) == "betting_odds"
-
     def test_injury_keyword(self):
         assert _heuristic_intent_guess("Any injuries for Collingwood?", {}) == "injury_news"
 

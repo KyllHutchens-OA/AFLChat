@@ -1,8 +1,8 @@
 """
-Migration: Add NewsArticle, BettingOdds, SquigglePrediction, APIRequestLog tables
+Migration: Add NewsArticle, SquigglePrediction, APIRequestLog tables
 """
 from app.data.database import engine, Base
-from app.data.models import NewsArticle, BettingOdds, SquigglePrediction, APIRequestLog
+from app.data.models import NewsArticle, SquigglePrediction, APIRequestLog
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -10,16 +10,15 @@ logger = logging.getLogger(__name__)
 
 
 def migrate():
-    """Create news, odds, predictions, and API log tables."""
+    """Create news, predictions, and API log tables."""
     try:
-        logger.info("Creating news, odds, predictions, and API log tables...")
+        logger.info("Creating news, predictions, and API log tables...")
 
         # Create only the new tables
         Base.metadata.create_all(
             engine,
             tables=[
                 NewsArticle.__table__,
-                BettingOdds.__table__,
                 SquigglePrediction.__table__,
                 APIRequestLog.__table__,
             ]
@@ -27,7 +26,6 @@ def migrate():
 
         logger.info("✓ Tables created successfully!")
         logger.info("  - news_articles")
-        logger.info("  - betting_odds")
         logger.info("  - squiggle_predictions")
         logger.info("  - api_request_logs")
 

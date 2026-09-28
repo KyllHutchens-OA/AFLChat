@@ -54,7 +54,7 @@ Columns: id (int, PK), season (int), round (varchar — see gotcha below),
   home_q1_goals/home_q1_behinds..home_q4_goals/home_q4_behinds (int, per quarter),
   away_q1_goals/away_q1_behinds..away_q4_goals/away_q4_behinds (int, per quarter).
 Join key: matches.home_team_id/away_team_id -> teams.id; matches.id <- player_stats.match_id,
-  team_stats.match_id, betting_odds.match_id, squiggle_predictions.match_id, live_games.match_id.
+  team_stats.match_id, squiggle_predictions.match_id, live_games.match_id.
 Season coverage: 1990-2026 (season 2026 is a fully completed 207-game season in this DB
   even though it's the "current" season — do not assume 2026 is partial/in-progress).
 Gotchas:
@@ -170,18 +170,6 @@ Gotchas:
     'post_match'. "games left"/"remaining"/"upcoming" -> status NOT IN ('completed',
     'post_match'); "results so far" -> status IN ('completed', 'post_match').""",
 
-    "betting_odds": """\
-### betting_odds
-Purpose: Bookmaker odds snapshots for matches (fetched from The Odds API).
-Columns: id (int, PK), match_id (FK matches), bookmaker (varchar),
-  home_odds/away_odds (numeric, decimal odds format), odds_fetched_at (timestamp).
-Join key: betting_odds.match_id -> matches.id.
-Gotchas: multiple rows per match (one per bookmaker/fetch time) — take the most recent
-  odds_fetched_at per bookmaker, or average across bookmakers, depending on the question.
-  Betting/tipping questions are normally answered via the BettingTool/TippingTool
-  (execute_node routes them there directly, no SQL needed) — this table is documented
-  here for completeness, not because generate_sql typically needs to query it directly.""",
-
     "squiggle_predictions": """\
 ### squiggle_predictions
 Purpose: Match outcome predictions from the Squiggle model.
@@ -257,9 +245,9 @@ def get_schema_docs(intent: Optional[str], entities: Optional[Dict[str, Any]] = 
         is a player_stats column like disposals/goals/tackles).
       - `live_games` is added when no season is specified, or a named season is the
         latest known season (current-year queries commonly touch live/recent games).
-      - `betting_odds` / `squiggle_predictions` are added only for their matching
-        intents (mostly for documentation completeness — those intents are normally
-        answered by dedicated tools, not generated SQL).
+      - `squiggle_predictions` is added only for tipping_advice (mostly for
+        documentation completeness; that intent is normally answered by
+        TippingTool, not generated SQL).
       - `team_stats` is added only for team_analysis queries whose metrics name a
         team-level advanced stat (inside 50s, clearances, etc.) not just scores.
     """
@@ -280,8 +268,6 @@ def get_schema_docs(intent: Optional[str], entities: Optional[Dict[str, Any]] = 
         tables.add("players")
         tables.add("player_stats")
 
-    if intent_str == "betting_odds":
-        tables.add("betting_odds")
     if intent_str == "tipping_advice":
         tables.add("squiggle_predictions")
 
@@ -293,7 +279,7 @@ def get_schema_docs(intent: Optional[str], entities: Optional[Dict[str, Any]] = 
 
     # Deterministic ordering so prompts/tests are stable regardless of set iteration order.
     ordered = [t for t in ("teams", "matches", "players", "player_stats", "team_stats",
-                           "live_games", "betting_odds", "squiggle_predictions") if t in tables]
+                           "live_games", "squiggle_predictions") if t in tables]
     return "\n\n".join(SCHEMA_DOCS[t] for t in ordered)
 
 

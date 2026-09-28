@@ -103,9 +103,13 @@ def create_app(config=None):
     from app.api import reports
     app.register_blueprint(reports.bp)
 
-    # Register teams API (team list + fun stats)
+    # Register teams API (team list)
     from app.api import teams_api
     app.register_blueprint(teams_api.bp)
+
+    # Register meta API (season status for starter chips)
+    from app.api import meta_api
+    app.register_blueprint(meta_api.bp)
 
     # Register WebSocket handlers
     from app.api import websocket
@@ -131,13 +135,6 @@ def create_app(config=None):
         logger.info("✓ Background data scheduler started")
     else:
         logger.info("RUN_SCHEDULER is not true: scheduler and SSE listener not started")
-
-    # Log env var status for scheduler-dependent APIs
-    theoddsapi_key = os.getenv("THEODDSAPI_KEY")
-    if theoddsapi_key:
-        logger.info("THEODDSAPI_KEY: SET")
-    else:
-        logger.warning("THEODDSAPI_KEY: NOT SET - betting odds updates will be skipped")
 
     # Add security headers to all responses
     @app.after_request

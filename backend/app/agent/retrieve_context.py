@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 # in spirit (not imported, to keep this module dependency-free/no-LLM) — used only to
 # steer retrieval pruning, never surfaced as the final intent.
 _TIPPING_KEYWORDS = ("tip", "predict", "who will win", "who's going to win", "who should i")
-_BETTING_KEYWORDS = ("odds", "betting", "bet on", "favourite", "favorite")
 _INJURY_KEYWORDS = ("injur", "out this week", "ruled out", "hamstring", "knee")
 _NEWS_KEYWORDS = ("news", "latest", "headlines", "article")
 _TREND_KEYWORDS = ("over time", "across time", "trend", "historical", "evolution", "year by year", "since")
@@ -45,8 +44,6 @@ def _heuristic_intent_guess(user_query: str, entities: Dict[str, Any]) -> str:
 
     if any(kw in query_lower for kw in _TIPPING_KEYWORDS):
         return "tipping_advice"
-    if any(kw in query_lower for kw in _BETTING_KEYWORDS):
-        return "betting_odds"
     if any(kw in query_lower for kw in _INJURY_KEYWORDS):
         return "injury_news"
     if any(kw in query_lower for kw in _NEWS_KEYWORDS):

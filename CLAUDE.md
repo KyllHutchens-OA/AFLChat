@@ -16,7 +16,7 @@ AFL App/
 │   │   ├── data/                # SQLAlchemy models, database.py, ingestion scripts, migrations
 │   │   ├── middleware/          # Rate limiting (Flask-Limiter), usage tracking
 │   │   ├── scheduler/           # Background job scheduler
-│   │   ├── services/            # Business logic (conversations, live games, summaries, odds)
+│   │   ├── services/            # Business logic (conversations, live games, summaries)
 │   │   ├── utils/               # JSON serialization, validators
 │   │   ├── visualization/       # Chart selection, Recharts spec builder (ChartSpecV1), preprocessor
 │   │   ├── __init__.py          # Flask app factory (CORS, SocketIO, blueprints)
@@ -106,7 +106,6 @@ NEWS_ENRICHMENT_MODEL=gpt-5-nano # Cheap enrichment LLM
 DAILY_LIMIT_PER_VISITOR=50 / DAILY_LIMIT_PER_IP=150 / GLOBAL_DAILY_LIMIT_USD=5.00
 AGENT_STATEMENT_TIMEOUT_MS=5000 / AGENT_MAX_ROWS=5000
 API_SPORTS_KEY=...               # Live player stats
-THEODDSAPI_KEY=...               # Betting odds (16 req/day budget)
 CORS_ORIGINS=http://localhost:3000
 FLASK_ENV=development
 LOG_LEVEL=INFO
@@ -193,7 +192,7 @@ Core tables:
 - **team_stats** — per-match team aggregates
 - **conversations** — JSONB chat history (UUID keyed)
 - **news_articles** — LLM-enriched AFL news
-- **betting_odds** — upcoming match odds
+- **betting_odds**: legacy, unused (odds feature cut; drop with `scripts/db/drop_betting_odds.sql`)
 - **api_usage** — LLM token/cost tracking
 - **page_views** — analytics
 - **live_games**, **live_game_events**, **live_game_milestones**, **quarter_snapshots** — live match data
@@ -207,6 +206,7 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 **REST** (`backend/app/api/routes.py`):
 - `GET /api/health` — health check (DB + OpenAI)
 - `GET /api/conversations/<id>` — load history; needs `X-Conversation-Token` (owner token), returns no SQL/entities
+- `GET /api/meta/season`: current / latest completed season + `in_season` (drives chat starter chips; `api/meta_api.py`)
 - `GET /api/analytics/*`, `/api/analytics/summary` — admin dashboard; `Authorization: Bearer $ANALYTICS_ADMIN_TOKEN`
 
 **WebSocket** (`/socket.io` via `api/websocket.py`):
@@ -225,7 +225,6 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 | OpenAI          | LLM for reasoning & SQL          | `OPENAI_API_KEY`    | gpt-5-mini + gpt-5-nano      |
 | Squiggle API    | Live games (SSE) + historical    | —                   | `api.squiggle.com.au`        |
 | API-Sports      | Live player stats                | `API_SPORTS_KEY`    | 30s cache TTL                |
-| The Odds API    | Betting odds                     | `THEODDSAPI_KEY`    | 16 req/day budget            |
 | RSS feeds       | AFL news (SMH, The Age, ABC)     | —                   | Enriched with gpt-5-nano     |
 
 ---
@@ -286,7 +285,7 @@ Wire-format chart types (`ChartSpecV1.chartType`, camelCase): `line`, `bar`, `gr
 - `live_game_service.py` — Squiggle SSE polling, scoring events, WebSocket broadcast
 - `game_summary_service.py` — GPT-5-mini narrative summaries per quarter
 - `api_sports_service.py` — live player stats with caching
-- `scheduler.py` — background jobs (odds refresh, news fetch, live game polling, stats ingestion)
+- `scheduler.py` — background jobs (news fetch, live game polling, stats ingestion)
 
 ---
 
@@ -362,9 +361,8 @@ Chat pipeline restructure (Milestones 0–5, complete):
 1. **WebSocket worker** — must use `geventwebsocket` worker; standard gunicorn workers break SocketIO
 2. **Supabase pooler** — prepared statements must be disabled (`prepare=False` in psycopg3)
 3. **React StrictMode** — socket hook uses singleton pattern to prevent double-connect
-4. **The Odds API quota** — only 16 req/day; fetcher guards against overcalling
-5. **Round field is a string** — rounds can be "1"–"24", "Opening Round", "Qualifying Final", etc. (V3 migration)
-6. **LLM model env vars** — always use `OPENAI_MODEL` / `NEWS_ENRICHMENT_MODEL` env vars, never hardcode model strings
-7. **Single gunicorn worker** — WebSocket state is in-process; scaling to multiple workers requires Redis adapter
-8. **AFL Tables round numbering** — AFL Tables and Squiggle may number rounds differently (Opening Round offset). The stats ingester matches by team IDs + date, not round number
-9. **AFL Tables update delay** — player stats appear on afltables.com 1–3 days after a round completes. The 6 AM daily job will pick them up automatically once available
+4. **Round field is a string** — rounds can be "1"–"24", "Opening Round", "Qualifying Final", etc. (V3 migration)
+5. **LLM model env vars** — always use `OPENAI_MODEL` / `NEWS_ENRICHMENT_MODEL` env vars, never hardcode model strings
+6. **Single gunicorn worker** — WebSocket state is in-process; scaling to multiple workers requires Redis adapter
+7. **AFL Tables round numbering** — AFL Tables and Squiggle may number rounds differently (Opening Round offset). The stats ingester matches by team IDs + date, not round number
+8. **AFL Tables update delay** — player stats appear on afltables.com 1–3 days after a round completes. The 6 AM daily job will pick them up automatically once available

@@ -51,11 +51,11 @@ client = OpenAI(
 )
 
 # Intents that are answered by dedicated tools in execute_node, never by SQL.
-NO_SQL_INTENTS = {"afl_news", "injury_news", "betting_odds", "tipping_advice"}
+NO_SQL_INTENTS = {"afl_news", "injury_news", "tipping_advice"}
 
 # Tool-based intents that support follow-up questions (mirrors understand_node's
 # off-topic-but-actually-a-followup handling in graph.py).
-_TOOL_FOLLOWUP_INTENTS = {"injury_news", "afl_news", "tipping_advice", "betting_odds"}
+_TOOL_FOLLOWUP_INTENTS = {"injury_news", "afl_news", "tipping_advice"}
 
 _SHAPE_TO_CHART = {
     "temporal_trend": "line",
@@ -247,6 +247,10 @@ def generate_sql(
         chart_type = _SHAPE_TO_CHART.get(data_shape)
         chart_config = data.get("chart_config", {}) or {}
 
+        # Betting odds were cut; treat a stray legacy intent as off-topic.
+        if intent == "betting_odds":
+            intent = "off_topic"
+
         # ── off_topic handling (mirrors understand_node in graph.py) ──────────
         if intent == "off_topic":
             followup_intent = _check_followup_tool_intent(conversation_history)
@@ -264,9 +268,9 @@ def generate_sql(
                 updates["clarification_question"] = (
                     f"That doesn't seem to be an AFL question. I can help with Australian Football League "
                     f"statistics and data from {earliest} to {hist_season}, including match results, player stats, "
-                    f"team performance, betting odds, and tipping predictions.\n\n"
+                    f"team performance, and tipping predictions.\n\n"
                     f"Try something like: \"How many goals did Hawkins kick in 2024?\" or "
-                    f"\"What are the odds for this week's games?\""
+                    f"\"Who are the top goal kickers this season?\""
                 )
                 return updates
 

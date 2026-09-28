@@ -24,7 +24,6 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   const { messages, isConnected, isThinking, thinkingStep, isLoadingHistory, currentConversationId, sendMessage, startNewChat } =
     useAgentWebSocket({ conversationId, onConversationCreated });
 
-  const teamName = localStorage.getItem('footy-nac-team');
   const showNewChatPrompt = messages.length >= MESSAGE_THRESHOLD && !dismissedNewChatPrompt;
 
   const scrollToBottom = () => {
@@ -100,7 +99,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
               <p className="text-sm text-afl-warm-500 mb-8">
                 Stats, records, player comparisons — ask anything
               </p>
-              <SuggestedQuestions teamName={teamName} onSelect={handleSuggestedQuestion} />
+              <SuggestedQuestions onSelect={handleSuggestedQuestion} />
             </div>
           )}
 

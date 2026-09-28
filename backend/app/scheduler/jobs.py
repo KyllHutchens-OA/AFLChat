@@ -1,5 +1,5 @@
 """
-Scheduled jobs for fetching news, odds, and predictions.
+Scheduled jobs for fetching news and predictions.
 """
 import logging
 
@@ -15,17 +15,6 @@ def fetch_rss_news():
         logger.info(f"RSS job complete: {articles_added} new articles")
     except Exception as e:
         logger.error(f"RSS job failed: {e}")
-
-
-def update_betting_odds():
-    """Daily: Update odds with rate limiting."""
-    try:
-        from app.data.ingestion.odds_fetcher import OddsFetcher
-        
-        requests_made = OddsFetcher.update_upcoming_matches(days_ahead=7, max_requests=16)
-        logger.info(f"Odds job complete: {requests_made} API requests")
-    except Exception as e:
-        logger.error(f"Odds job failed: {e}")
 
 
 def update_squiggle_predictions():

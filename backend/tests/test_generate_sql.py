@@ -168,11 +168,11 @@ class TestNoSqlIntents:
         assert updates["sql_query"] is None
         assert updates["requires_visualization"] is False
 
-    def test_betting_odds_intent_sets_no_sql(self):
+    def test_legacy_betting_odds_intent_is_off_topic(self):
+        # Odds were cut; a stray "betting_odds" intent must not crash.
         payload = {"intent": "betting_odds", "sql": ""}
         updates, _ = _call_generate_sql(payload)
-        assert updates["intent"] == QueryIntent.BETTING_ODDS
-        assert updates["sql_query"] is None
+        assert updates["needs_clarification"] is True
 
 
 class TestOffTopicHandling:

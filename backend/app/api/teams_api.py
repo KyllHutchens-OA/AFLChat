@@ -1,13 +1,11 @@
 """
-Teams API — team listing and fun stats endpoints.
+Teams API: team listing endpoint.
 """
 import time
 import logging
 from flask import Blueprint, jsonify
 from sqlalchemy import text
 from app.data.database import get_session
-from app.analytics.entity_resolver import EntityResolver
-from app.services.fun_stats_service import get_fun_stats
 
 logger = logging.getLogger(__name__)
 
@@ -51,17 +49,3 @@ def list_teams():
         logger.error(f"Failed to fetch teams: {e}")
         return jsonify({"error": "Failed to fetch teams"}), 500
 
-
-@bp.route('/<team_name>/fun-stats', methods=['GET'])
-def team_fun_stats(team_name):
-    """Return 2-3 fun/surprising stats for a team."""
-    resolved = EntityResolver.resolve_team(team_name)
-    if not resolved:
-        return jsonify({"error": "Team not found"}), 404
-
-    try:
-        stats = get_fun_stats(resolved)
-        return jsonify(stats)
-    except Exception as e:
-        logger.error(f"Failed to get fun stats for {team_name}: {e}")
-        return jsonify({"error": "Failed to compute fun stats"}), 500

@@ -96,7 +96,7 @@ class TestRouteAfterExecuteV2:
         assert AFLAnalyticsAgent._route_after_execute_v2(state) == "review"
 
     def test_nonempty_results_for_tool_intent_skips_review(self):
-        # Tool intents (news/odds/tips) have no SQL to review — they fall
+        # Tool intents (news/tips) have no SQL to review; they fall
         # straight through to the same visualize/respond decision v1 uses.
         state = {
             "sql_error": None,

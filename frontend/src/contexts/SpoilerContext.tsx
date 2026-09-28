@@ -11,6 +11,7 @@ const SpoilerContext = createContext<SpoilerContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
   SPOILER_MODE: 'afl-nac-spoiler-mode',
+  // Legacy key name (was the welcome modal); now means "spoiler prompt answered"
   HAS_SEEN_MODAL: 'footy-nac-welcome-v2',
 };
 
