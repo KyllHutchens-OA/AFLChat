@@ -10,7 +10,7 @@ This is **Footy-NAC** (Not Another Commentator): an AI-powered AFL analytics pla
 AFL App/
 ├── backend/                     # Flask + LangGraph API
 │   ├── app/
-│   │   ├── agent/               # LangGraph pipeline (graph, state, nodes, prompts/, eval/)
+│   │   ├── agent/               # v2 LangGraph pipeline (graph, nodes, prompts/, eval/) + v3/ tool-calling loop and llm.py
 │   │   ├── api/                 # REST + WebSocket endpoints (routes, websocket, analytics, reports)
 │   │   ├── analytics/           # Entity resolver, context enrichment, stats, validators
 │   │   ├── data/                # SQLAlchemy models, database.py, ingestion scripts, migrations
@@ -53,7 +53,7 @@ AFL App/
 | Layer        | Technology                                      |
 |--------------|-------------------------------------------------|
 | Backend      | Flask, Flask-SocketIO, LangGraph, SQLAlchemy    |
-| LLM          | OpenAI `gpt-5-mini` (main), `gpt-5-nano` (news) |
+| LLM          | `gpt-6-luna` (OpenAI Responses API) for chat, summaries and news, via the provider-thin `app/agent/v3/llm.py` (OpenAI, Gemini, Anthropic adapters) |
 | Database     | PostgreSQL (Supabase / Railway), psycopg3       |
 | Frontend     | React 18, Vite, TypeScript, TailwindCSS         |
 | Charts       | Recharts (backend emits validated `ChartSpecV1` JSON; frontend renders) |
@@ -98,8 +98,14 @@ SECRET_KEY=...
 
 Optional:
 ```
-OPENAI_MODEL=gpt-5-mini          # Main LLM
-NEWS_ENRICHMENT_MODEL=gpt-5-nano # Cheap enrichment LLM
+AGENT_ENGINE=v2                  # v2 (LangGraph, default) or v3 (tool-calling loop)
+AGENT_MODEL=gpt-6-luna           # Chat model (both engines), reasoning effort low
+AGENT_EFFORT=low                 # v3 reasoning effort
+SUMMARY_MODEL=gpt-6-luna         # Live game quarter/final summaries
+NEWS_ENRICHMENT_MODEL=gpt-6-luna # News enrichment, reasoning off
+NEWS_SERVICE_TIER=flex           # OpenAI tier for news enrichment (half price)
+GEMINI_API_KEY=...               # Only for gemini-* models (bake-off / fallback)
+ANTHROPIC_API_KEY=...            # Only for claude-* models (bake-off)
 API_SPORTS_KEY=...               # Live player stats
 THEODDSAPI_KEY=...               # Betting odds (16 req/day budget)
 CORS_ORIGINS=http://localhost:3000
@@ -161,6 +167,13 @@ User Query
    Template (simple) or LLM (complex) → natural language
 ```
 
+**v3 engine (`AGENT_ENGINE=v3`, `app/agent/v3/`)** — one tool-calling loop that replaces the pipeline above once the 1E gate passes:
+- `loop.py` `AgentLoop`: system prompt (`prompt.py`, cache-stable) + typed tools (`tools/`: resolve_entities, player_stats, leaderboard, team_results, head_to_head, match_lookup, ladder, news, run_sql, make_chart), max 6 tool calls, parallel tool calls, streamed answer
+- every tool returns `{rows, row_count, result_id, columns, why_empty, notes}`; `make_chart` builds a validated ChartSpecV1 and returns errors to the model
+- `ws_stream.py`: WS events `received` -> `thinking` (per tool call) -> `response_delta` -> `visualization` -> `response` -> `complete` (with `data_as_of`)
+- conversation memory: compact tool calls in message metadata (`history.py`); per-turn trace rows in `chat_traces` (`scripts/db/1e_chat_traces.sql`)
+- `runner.py` `run_turn(question, history, model=...)` for evals and scripts; `scripts/v3_latency.py`, `scripts/v3_bakeoff.py`
+
 **Key details:**
 - In-memory LRU cache (128 entries) for identical (query, context) pairs; correction turns bypass cache reads
 - Real token usage accumulated in `state["token_usage"]` across every LLM call
@@ -216,11 +229,11 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 
 | Service         | Purpose                          | Env Var             | Notes                        |
 |-----------------|----------------------------------|---------------------|------------------------------|
-| OpenAI          | LLM for reasoning & SQL          | `OPENAI_API_KEY`    | gpt-5-mini + gpt-5-nano      |
+| OpenAI          | LLM (chat, summaries, news)      | `OPENAI_API_KEY`    | gpt-6-luna, Responses API    |
 | Squiggle API    | Live games (SSE) + historical    | —                   | `api.squiggle.com.au`        |
 | API-Sports      | Live player stats                | `API_SPORTS_KEY`    | 30s cache TTL                |
 | The Odds API    | Betting odds                     | `THEODDSAPI_KEY`    | 16 req/day budget            |
-| RSS feeds       | AFL news (SMH, The Age, ABC)     | —                   | Enriched with gpt-5-nano     |
+| RSS feeds       | AFL news (SMH, The Age, ABC)     | —                   | Enriched by NEWS_ENRICHMENT_MODEL |
 
 ---
 
@@ -278,7 +291,7 @@ Wire-format chart types (`ChartSpecV1.chartType`, camelCase): `line`, `bar`, `gr
 
 - `conversation_service.py` — JSONB chat history CRUD
 - `live_game_service.py` — Squiggle SSE polling, scoring events, WebSocket broadcast
-- `game_summary_service.py` — GPT-5-mini narrative summaries per quarter
+- `game_summary_service.py` — SUMMARY_MODEL narrative summaries per quarter
 - `api_sports_service.py` — live player stats with caching
 - `scheduler.py` — background jobs (odds refresh, news fetch, live game polling, stats ingestion)
 
@@ -358,7 +371,7 @@ Chat pipeline restructure (Milestones 0–5, complete):
 3. **React StrictMode** — socket hook uses singleton pattern to prevent double-connect
 4. **The Odds API quota** — only 16 req/day; fetcher guards against overcalling
 5. **Round field is a string** — rounds can be "1"–"24", "Opening Round", "Qualifying Final", etc. (V3 migration)
-6. **LLM model env vars** — always use `OPENAI_MODEL` / `NEWS_ENRICHMENT_MODEL` env vars, never hardcode model strings
+6. **LLM calls** — go through `app/agent/v3/llm.py` (`chat` / `complete`); model names come only from `AGENT_MODEL` / `SUMMARY_MODEL` / `NEWS_ENRICHMENT_MODEL` (defaults in `llm.MODEL_ENV_DEFAULTS`), prices from `llm.PRICES` (an unknown model raises). Pass `track_endpoint` for background calls so api_usage records real model and cost
 7. **Single gunicorn worker** — WebSocket state is in-process; scaling to multiple workers requires Redis adapter
 8. **AFL Tables round numbering** — AFL Tables and Squiggle may number rounds differently (Opening Round offset). The stats ingester matches by team IDs + date, not round number
 9. **AFL Tables update delay** — player stats appear on afltables.com 1–3 days after a round completes. The 6 AM daily job will pick them up automatically once available

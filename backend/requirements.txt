@@ -12,9 +12,7 @@ alembic==1.13.0
 
 # Agent Framework (let pip resolve compatible versions)
 langgraph
-langchain
 langchain-core
-langchain-openai
 
 # Data Processing
 pandas>=2.2.0
@@ -37,8 +35,10 @@ pydantic>=2.0.0  # Let pip resolve compatible version
 Flask-Limiter>=3.5.0  # Rate limiting
 cachetools>=5.3.0  # In-memory caching
 
-# OpenAI (2.16.0+ required for Responses API with gpt-5-nano)
-openai>=2.16.0
+# LLM SDKs behind app/agent/v3/llm.py (OpenAI Responses API; Gemini and Anthropic for the bake-off)
+openai>=3.19.2
+google-genai>=2.25.0
+anthropic>=1.8.0
 
 # Development
 pytest==7.4.3

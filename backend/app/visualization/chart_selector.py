@@ -9,13 +9,12 @@ import pandas as pd
 import logging
 import json
 import re
-from openai import OpenAI
-import os
+
+from app.agent.v3.llm import complete as llm_complete
 
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+CHART_LLM_TIMEOUT_S = 10.0
 
 
 class ChartSelector:
@@ -471,25 +470,18 @@ Important:
 - Consider readability (don't chart 20 metrics on one chart)
 """
 
-            # Call fast model for chart decision
-            response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                reasoning_effort="low",
-            )
+            # Rare fallback: short timeout so a slow call never holds up the answer.
+            response = llm_complete(prompt, json_mode=True, effort="low", timeout=CHART_LLM_TIMEOUT_S)
 
             # Parse LLM response
-            result = json.loads(response.choices[0].message.content or "{}")
+            result = json.loads(response.text or "{}")
 
-            # Attach real token usage so the caller can accumulate it (stripped
-            # out again in _validate_and_enhance's returned public fields... no,
-            # it's explicitly carried through — see _validate_and_enhance).
-            usage = response.usage
+            # Attach real token usage so the caller can accumulate it (carried
+            # through _validate_and_enhance).
             result["_usage"] = {
-                "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
-            } if usage else None
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            }
 
             logger.info(f"LLM chart selection: {result.get('chart_type')} (confidence: {result.get('confidence')})")
             logger.info(f"Reasoning: {result.get('reasoning')}")

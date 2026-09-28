@@ -9,9 +9,7 @@ feeding back into GENERATE_SQL under a shared per-turn attempt cap.
 """
 from typing import Dict, Any, List, Optional
 from langgraph.graph import StateGraph, END
-from openai import OpenAI
-import httpx
-import os
+from app.agent.v3.llm import complete as llm_complete
 import logging
 from dotenv import load_dotenv
 
@@ -41,20 +39,12 @@ SQL_ATTEMPT_CAP = 3
 from app.config import get_config
 config_obj = get_config()
 
-# Initialize OpenAI client with timeout for production reliability
-# 60s total timeout, 10s connect timeout
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    timeout=httpx.Timeout(60.0, connect=10.0)
-)
-
 def _accumulate_usage(state: "AgentState", usage: Optional[Any]) -> None:
     """
-    Merge real OpenAI token usage into the per-request state accumulator.
+    Merge real token usage into the per-request state accumulator.
 
-    Accepts either an OpenAI `response.usage` object (with prompt_tokens /
-    completion_tokens attributes) or a plain dict with input_tokens/output_tokens
-    (used by helper functions that return usage explicitly).
+    Accepts an llm.Usage (input_tokens / output_tokens attributes) or a plain
+    dict with the same keys (used by helpers that return usage explicitly).
     """
     if not usage:
         return
@@ -65,9 +55,8 @@ def _accumulate_usage(state: "AgentState", usage: Optional[Any]) -> None:
         totals["input_tokens"] += usage.get("input_tokens", 0) or 0
         totals["output_tokens"] += usage.get("output_tokens", 0) or 0
     else:
-        # OpenAI SDK CompletionUsage object
-        totals["input_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
-        totals["output_tokens"] += getattr(usage, "completion_tokens", 0) or 0
+        totals["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
+        totals["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
 
 
 class AFLAnalyticsAgent:
@@ -1316,7 +1305,7 @@ class AFLAnalyticsAgent:
 
     @staticmethod
     def _build_error_response(state: Dict[str, Any]) -> str:
-        """Build a helpful, conversational error response using gpt-5-nano."""
+        """Build a helpful, conversational error response via the LLM (AGENT_MODEL, no reasoning)."""
         error_detail = state.get("execution_error", "")
 
         # Connection/timeout errors don't need an LLM call
@@ -1330,7 +1319,7 @@ class AFLAnalyticsAgent:
 
     @staticmethod
     def _build_empty_results_response(state: Dict[str, Any]) -> str:
-        """Build a helpful, conversational response when no results found using gpt-5-nano."""
+        """Build a helpful, conversational response when no results found (LLM, AGENT_MODEL)."""
         return AFLAnalyticsAgent._generate_llm_error_response(state, error_type="no_results")
 
     @staticmethod
@@ -1373,7 +1362,7 @@ class AFLAnalyticsAgent:
 
     @staticmethod
     def _generate_llm_error_response(state: Dict[str, Any], error_type: str = "no_results") -> str:
-        """Generate a conversational error response via gpt-5-nano.
+        """Generate a conversational error response via the LLM (AGENT_MODEL, no reasoning).
 
         Cheap and fast — provides context-aware suggestions based on what the user asked.
         """
@@ -1424,14 +1413,10 @@ Rules:
 - Format suggestions naturally, not as a bulleted list of raw queries
 - End with a note that they can report an issue if they think the data should exist"""
 
-            response = client.chat.completions.create(
-                model=os.getenv("NEWS_ENRICHMENT_MODEL", "gpt-5-nano"),
-                messages=[{"role": "user", "content": prompt}],
-                max_completion_tokens=300,
-            )
+            response = llm_complete(prompt, effort="none", max_output_tokens=300, timeout=20.0)
             _accumulate_usage(state, response.usage)
 
-            result = (response.choices[0].message.content or "").strip()
+            result = (response.text or "").strip()
             if result:
                 return result
 
@@ -2353,14 +2338,10 @@ Statistical Insights:
 Provide a concise analysis (3-5 sentences):"""
 
             # Generate response using a more capable model for better NL quality
-            response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
-                messages=[{"role": "user", "content": prompt}],
-                reasoning_effort="low",
-            )
+            response = llm_complete(prompt, effort="low")
             _accumulate_usage(state, response.usage)
 
-            llm_response = (response.choices[0].message.content or "").strip()
+            llm_response = (response.text or "").strip()
             # Add data range disclaimer for all-time queries
             if self._needs_data_range_disclaimer(state):
                 llm_response += f"\n\n*Based on data from {_earliest} to present.*"

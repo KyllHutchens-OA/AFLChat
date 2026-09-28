@@ -25,13 +25,11 @@ otherwise-successful answer from reaching the user.
 """
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional, Tuple
 
-import httpx
 import pandas as pd
 from dotenv import load_dotenv
-from openai import OpenAI
+from app.agent.v3.llm import complete as llm_complete
 
 from app.agent.prompts.review import REVIEW_PROMPT
 from app.agent.state import QueryIntent
@@ -40,11 +38,6 @@ from app.utils.json_serialization import make_json_serializable
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    timeout=httpx.Timeout(60.0, connect=10.0),
-)
 
 SAMPLE_ROW_LIMIT = 10
 
@@ -96,12 +89,12 @@ def _sample_rows(query_results: Any, limit: int = SAMPLE_ROW_LIMIT) -> Tuple[Lis
 
 
 def _accumulate_usage(state: Dict[str, Any], usage: Any) -> None:
-    """Merge real OpenAI token usage into the per-request state accumulator."""
+    """Merge real token usage (llm.Usage) into the per-request state accumulator."""
     if not usage:
         return
     totals = state.setdefault("token_usage", {"input_tokens": 0, "output_tokens": 0})
-    totals["input_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
-    totals["output_tokens"] += getattr(usage, "completion_tokens", 0) or 0
+    totals["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
+    totals["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
 
 
 def _default_verdict(reason: str) -> Dict[str, Any]:
@@ -141,16 +134,11 @@ def review_results(
             sample_rows_json=json.dumps(sample_rows, indent=2),
         )
 
-        logger.info("REVIEW: Calling OpenAI (results sanity check)...")
-        response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            reasoning_effort="low",
-        )
+        logger.info("REVIEW: Calling LLM (results sanity check)...")
+        response = llm_complete(prompt, json_mode=True, effort="low")
         _accumulate_usage(state, response.usage)
 
-        raw = (response.choices[0].message.content or "").strip()
+        raw = (response.text or "").strip()
         data = json.loads(raw)
 
         verdict = str(data.get("verdict", "")).strip().upper()
