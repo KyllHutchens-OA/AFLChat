@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from sqlalchemy import text
 from decimal import Decimal
+from datetime import datetime
 import logging
 import os
 from scipy import stats as scipy_stats

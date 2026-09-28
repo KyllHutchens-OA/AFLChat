@@ -35,6 +35,16 @@ interface ResponseCardProps {
   conversationId?: string | null;
 }
 
+// Charted answers already show their rows under "Show the numbers"; drop the
+// duplicate markdown table the model sometimes writes into the text.
+const stripMarkdownTables = (md: string): string =>
+  md
+    .split('\n')
+    .filter((line) => !/^\s*\|.*\|\s*$/.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // 'YYYY-MM-DD' -> '26 Sep 2026' (string parsing, so no timezone shift).
@@ -51,6 +61,7 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isErro
   const asOf = dataAsOf ? formatDataAsOf(dataAsOf) : null;
   const tableData = Array.isArray(visualization?.data) ? visualization.data : null;
   const blurred = hideScores && looksLikeResult(text);
+  const bodyText = visualization && tableData ? stripMarkdownTables(text) : text;
 
   if (isError) {
     return (
@@ -73,7 +84,7 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isErro
       {/* Headline sentence (streamed text) leads — the chart is the hero below it. */}
       <SpoilerBlur active={blurred}>
         <div className="chat-markdown text-warm-900">
-          <SafeMarkdown text={text} />
+          <SafeMarkdown text={bodyText} />
         </div>
 
         {visualization && (

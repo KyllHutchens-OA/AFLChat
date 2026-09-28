@@ -19,10 +19,10 @@ const STEPS: Step[] = [
 
 const STATS = [
   { value: '7,090', label: 'matches, 1990–2026' },
-  { value: '299,975', label: 'player-game rows' },
-  { value: '118 / 121', label: 'ground-truth eval cases' },
+  { value: '310,423', label: 'player-game rows' },
+  { value: '118 / 122', label: 'ground-truth eval cases' },
   { value: '~2.6s', label: 'median answer time' },
-  { value: '~$0.0002', label: 'cost per answer' },
+  { value: '< $0.001', label: 'cost per answer' },
 ];
 
 const HowItThinks = () => {

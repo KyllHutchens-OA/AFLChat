@@ -513,9 +513,6 @@ class LiveGameService:
                     home_score=live_game.home_score,
                     away_score=live_game.away_score,
                     match_status="completed",
-                    round_name=round_name,
-                    is_final=is_final,
-                    round_number=round_number,
                 )
                 session.add(match)
                 session.flush()

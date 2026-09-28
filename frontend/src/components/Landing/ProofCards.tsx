@@ -13,7 +13,7 @@ const ProofCards = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-10">
         <h2 className="font-display text-3xl text-ink mb-2">What can it do?</h2>
         <p className="text-warm-600 mb-8 max-w-2xl">
-          Real outputs from the app, not mock-ups. Answered from 7,090 matches and 299,975 player-game
+          Real outputs from the app, not mock-ups. Answered from 7,090 matches and 310,423 player-game
           rows.
         </p>
 
@@ -30,7 +30,7 @@ const ProofCards = () => {
               <button onClick={() => ask(goalkicker.askQuestion)} className="btn-secondary text-sm py-2 px-4">
                 Ask this
               </button>
-              <span className="text-xs text-warm-600">299,975 player-game rows</span>
+              <span className="text-xs text-warm-600">310,423 player-game rows</span>
             </div>
           </div>
 
