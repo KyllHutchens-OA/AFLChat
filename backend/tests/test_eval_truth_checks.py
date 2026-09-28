@@ -194,8 +194,11 @@ class TestBaselineDiff:
         assert case_status([{"status": "skip"}]) == "skip"
 
 
-def test_engine_registry_reports_missing_v3():
+def test_engine_registry_resolves_v3_and_rejects_unknown():
+    from app.agent.eval.engines.v3 import V3Engine
     from app.agent.eval.runner import get_engine
 
-    with pytest.raises(ValueError, match="not implemented yet"):
-        get_engine("v3")
+    engine = get_engine("v3", read_only_db=False, model="gpt-6-luna")
+    assert isinstance(engine, V3Engine) and engine.describe()["model"] == "gpt-6-luna"
+    with pytest.raises(ValueError, match="Unknown engine"):
+        get_engine("v9")

@@ -1,0 +1,26 @@
+[
+  {
+    "model": "gpt-6-luna",
+    "passed": "19/20",
+    "facts": "13/13",
+    "rows": "1/1",
+    "charts": "5/5",
+    "chart_values": "2/3",
+    "no_data": "1/1",
+    "behaviour": "4/4",
+    "ttft_p50": 2.19,
+    "ttft_p90": 3.94,
+    "total_p50": 2.504,
+    "total_p90": 4.334,
+    "cost_per_turn_usd": 0.000151,
+    "cost_total_usd": 0.00348
+  },
+  {
+    "model": "gemini-3.5-flash-lite",
+    "skipped": "GEMINI_API_KEY not set"
+  },
+  {
+    "model": "claude-sonnet-5",
+    "skipped": "ANTHROPIC_API_KEY not set"
+  }
+]
