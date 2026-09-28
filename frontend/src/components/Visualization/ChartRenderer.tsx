@@ -257,7 +257,10 @@ function renderLineChart(spec: ChartSpec, colors: string[]): React.ReactElement 
       <Tooltip contentStyle={tooltipStyle} />
       {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
       {spec.series.map((s, i) => {
-        const color = s.color || colors[i % colors.length];
+        // `colors[i]` is already highlight-resolved (resolveSeriesColors), and
+        // falls back to s.color internally -- don't re-prioritize s.color here
+        // or every series just gets its backend default and highlight never shows.
+        const color = colors[i % colors.length];
         return (
           <Line
             key={s.key || s.name || i}
@@ -293,7 +296,7 @@ function renderBarChart(spec: ChartSpec, colors: string[]): React.ReactElement {
           key={s.key || s.name || i}
           dataKey={s.key || ''}
           name={s.name}
-          fill={s.color || colors[i % colors.length]}
+          fill={colors[i % colors.length]}
           radius={[4, 4, 0, 0]}
           animationDuration={600}
         />
@@ -324,7 +327,7 @@ function renderHorizontalBarChart(spec: ChartSpec, colors: string[]): React.Reac
           key={s.key || s.name || i}
           dataKey={s.key || ''}
           name={s.name}
-          fill={s.color || colors[i % colors.length]}
+          fill={colors[i % colors.length]}
           radius={[0, 4, 4, 0]}
           animationDuration={600}
         />
@@ -353,7 +356,7 @@ function renderGroupedBarChart(spec: ChartSpec, colors: string[]): React.ReactEl
           key={s.key || s.name || i}
           dataKey={s.key || ''}
           name={s.name}
-          fill={s.color || colors[i % colors.length]}
+          fill={colors[i % colors.length]}
           stackId={s.stackId}
           radius={s.stackId ? undefined : [4, 4, 0, 0]}
           animationDuration={600}
@@ -380,7 +383,7 @@ function renderScatterChart(spec: ChartSpec, colors: string[]): React.ReactEleme
             key={s.key || s.name || i}
             name={s.name}
             data={spec.data.filter((d: any) => d.group === s.key)}
-            fill={s.color || colors[i % colors.length]}
+            fill={colors[i % colors.length]}
             animationDuration={600}
           />
         ))}
@@ -449,7 +452,7 @@ function renderAreaChart(spec: ChartSpec, colors: string[]): React.ReactElement 
       <Tooltip contentStyle={tooltipStyle} />
       {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
       {spec.series.map((s, i) => {
-        const color = s.color || colors[i % colors.length];
+        const color = colors[i % colors.length];
         return (
           <Area
             key={s.key || s.name || i}
