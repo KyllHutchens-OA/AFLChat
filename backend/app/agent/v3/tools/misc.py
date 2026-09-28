@@ -96,18 +96,21 @@ def make_chart(args: MakeChartArgs, store: Optional[ResultStore] = None) -> Dict
     if len(df) < 2:
         return {"error": "need at least 2 rows to chart; answer in text instead"}
     data = df.copy()
-    data[args.x] = _intify(data[args.x])
     ct = args.chart_type
+    data[args.x] = _intify(data[args.x])
+    if ct != "scatter":
+        # Categorical/ordinal x as text: builders iterate rows, which would upcast 2015 to "2015.0".
+        data[args.x] = data[args.x].astype(str)
     params: Dict[str, Any] = {"x_col": args.x, "title": args.title}
     keys = [args.x] + ([args.series_by] if args.series_by else [])
-    if data.duplicated(subset=keys).any():
+    if ct != "scatter" and data.duplicated(subset=keys).any():
         return {"error": f"x values repeat for {keys}; pass series_by (e.g. team/player) or aggregate first"}
     if ct in ("bar", "horizontal_bar", "grouped_bar", "stacked_bar", "pie") and data[args.x].nunique() > 30:
         return {"error": "too many categories (>30) for a bar/pie chart; use a line chart or a top-N result"}
     if ct == "pie" and (len(ys) > 1 or len(data) > 8):
         return {"error": "pie needs one y column and at most 8 slices; use bar instead"}
     if args.series_by and data[args.series_by].nunique() > 8:
-        return {"error": "at most 8 series; filter the result first"}
+        return {"error": "at most 8 series; for a scatter of many players pass series_by=null"}
 
     if args.series_by:
         params.update(group_col=args.series_by, y_col=ys[0])
@@ -164,6 +167,7 @@ def fallback_chart(question: str, store: ResultStore) -> Optional[Dict[str, Any]
     asked = [c for c in numeric if re.sub(r"(es|s)$", "", c.split("_")[0]) in q]
     x_time = next((c for c in ("season", "round") if c in data.columns), None)
     if x_time and len(asked) >= 2 and not data.duplicated(subset=[x_time]).any():
+        data[x_time] = _intify(data[x_time]).astype(str)
         spec, _ = RechartsBuilder.build_with_errors(
             data.melt(id_vars=[x_time], value_vars=asked[:4], var_name="metric", value_name="value")
                 .assign(metric=lambda d: d["metric"].str.replace("_", " ").str.title()),
@@ -176,6 +180,8 @@ def fallback_chart(question: str, store: ResultStore) -> Optional[Dict[str, Any]
     x, y, group = config.get("x_col"), config.get("y_col"), config.get("group_col")
     if x in data.columns:
         data[x] = _intify(data[x])
+        if config["chart_type"] != "scatter":
+            data[x] = data[x].astype(str)
     keys = [c for c in (x, group) if c]
     if not x or not y or data.duplicated(subset=keys).any():
         return None

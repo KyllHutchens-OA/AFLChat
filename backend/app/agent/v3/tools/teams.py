@@ -61,23 +61,26 @@ def _score_cols(df: pd.DataFrame, pairs) -> pd.DataFrame:
 
 
 class TeamResultsArgs(BaseModel):
-    team: str = Field(description="Team name or nickname")
+    teams: List[str] = Field(description="1-4 team names or nicknames; several teams share one result (column 'team') "
+                                         "so they can be charted together with series_by='team'")
     season_from: Optional[int] = Field(description="First season (inclusive), null = from 1990")
     season_to: Optional[int] = Field(description="Last season (inclusive), null = latest")
     opponent: Optional[str] = Field(description="Only games against this team; null = any")
     venue: Optional[str] = Field(description="Only games at this venue; null = any")
     finals: Finals = Field(description="include / exclude / only finals")
-    per: Literal["match", "season", "total"] = Field(description="Each game, a row per season, or one total row")
+    per: Literal["match", "season", "total"] = Field(description="Each game, a row per season, or one total row per team")
 
 
 def team_results(args: TeamResultsArgs, store: Optional[ResultStore] = None) -> Dict[str, Any]:
     problem = check_seasons(args.season_from, args.season_to)
-    team = resolve_team_id(args.team)
-    if problem or not team:
-        return result(store, None, why_empty=problem or f"unknown team '{args.team}'")
-    params: Dict[str, Any] = {"afl_ids": list(AFL_TEAM_IDS), "team_id": team[0]}
+    names = seq(args.teams)[:4]
+    teams = [resolve_team_id(t) for t in names]
+    unknown = [n for n, t in zip(names, teams) if not t]
+    if problem or unknown or not names:
+        return result(store, None, why_empty=problem or (f"unknown team '{unknown[0]}'" if unknown else "no team given"))
+    params: Dict[str, Any] = {"afl_ids": list(AFL_TEAM_IDS), "team_ids": [t[0] for t in teams]}
     where = _season_where(args.season_from, args.season_to, params) + finals_clause(args.finals)
-    outer = " WHERE tm.team_id = :team_id"
+    outer = " JOIN teams tt ON tt.id = tm.team_id WHERE tm.team_id = ANY(:team_ids)"
     if args.opponent:
         opp = resolve_team_id(args.opponent)
         if not opp:
@@ -89,19 +92,19 @@ def team_results(args: TeamResultsArgs, store: Optional[ResultStore] = None) -> 
         params["venue"] = VenueResolver.resolve_venue(args.venue) or f"%{args.venue}%"
     cte = _team_rows_cte(where)
     if args.per == "match":
-        df = query(cte + " SELECT tm.match_date::date AS date, tm.season, tm.round, o.name AS opponent, tm.venue, "
-                   "CASE WHEN tm.is_home THEN 'home' ELSE 'away' END AS home_away, tm.goals, tm.behinds, "
+        df = query(cte + " SELECT tt.name AS team, tm.match_date::date AS date, tm.season, tm.round, o.name AS opponent, "
+                   "tm.venue, CASE WHEN tm.is_home THEN 'home' ELSE 'away' END AS home_away, tm.goals, tm.behinds, "
                    "tm.score AS team_points, tm.opp_goals, tm.opp_behinds, tm.opp_score AS opponent_points, "
                    "CASE WHEN tm.score > tm.opp_score THEN 'W' WHEN tm.score < tm.opp_score THEN 'L' ELSE 'D' END AS result, "
                    "tm.score - tm.opp_score AS margin FROM tm JOIN teams o ON o.id = tm.opp_id"
-                   + outer + " ORDER BY tm.match_date LIMIT 500", params)
+                   + outer + " ORDER BY tt.name, tm.match_date LIMIT 500", params)
         if len(df):
             df = _score_cols(df, [("score", "goals", "behinds", "team_points"),
                                   ("opponent_score", "opp_goals", "opp_behinds", "opponent_points")])
             df = df.drop(columns=["goals", "behinds", "opp_goals", "opp_behinds"])
     else:
         per_season = args.per == "season"
-        df = query(cte + f" SELECT {'tm.season, ' if per_season else ''}COUNT(*) AS games, "
+        df = query(cte + f" SELECT tt.name AS team, {'tm.season, ' if per_season else ''}COUNT(*) AS games, "
                    "COUNT(*) FILTER (WHERE tm.score > tm.opp_score) AS wins, "
                    "COUNT(*) FILTER (WHERE tm.score < tm.opp_score) AS losses, "
                    "COUNT(*) FILTER (WHERE tm.score = tm.opp_score) AS draws, "
@@ -109,14 +112,12 @@ def team_results(args: TeamResultsArgs, store: Optional[ResultStore] = None) -> 
                    "SUM(tm.goals) AS goals, SUM(tm.behinds) AS behinds, "
                    "ROUND(SUM(tm.score) * 100.0 / NULLIF(SUM(tm.opp_score), 0), 1) AS percentage, "
                    "ROUND(AVG(tm.score), 1) AS avg_score, ROUND(AVG(tm.opp_score), 1) AS avg_conceded "
-                   f"FROM tm{outer}" + (" GROUP BY tm.season ORDER BY tm.season" if per_season else ""), params)
-        if args.per == "total" and len(df) and int(df["games"].iloc[0]) == 0:
-            df = df.head(0)
+                   f"FROM tm{outer} GROUP BY tt.name" + (", tm.season ORDER BY tm.season, tt.name" if per_season
+                                                         else " ORDER BY tt.name"), params)
     notes = [_early_note(args.season_from, args.season_to)]
     if args.finals == "include" and args.per != "match":
         notes.append("Win/loss counts include finals; ladder position uses the ladder tool (home-and-away only).")
-    return result(store, df, why_empty="no played matches for that team with those filters",
-                  notes=notes, team=team[1])
+    return result(store, df, why_empty="no played matches for that team with those filters", notes=notes)
 
 
 class HeadToHeadArgs(BaseModel):

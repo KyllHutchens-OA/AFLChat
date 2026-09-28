@@ -88,7 +88,9 @@ class V2Engine(EngineAdapter):
             _force_read_only(engine)
 
     def describe(self) -> Dict[str, Any]:
-        return {"engine": self.name, "model": os.getenv("OPENAI_MODEL", "gpt-5-mini")}
+        from app.agent.v3.llm import model_for
+
+        return {"engine": self.name, "model": model_for("AGENT_MODEL")}
 
     def _clear_caches(self) -> None:
         # Repeats must not be served from the SQL result cache (skews latency).

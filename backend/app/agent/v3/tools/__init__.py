@@ -59,9 +59,10 @@ TOOLS: Dict[str, ToolDef] = {t.name: t for t in [
             "optionally for one club or against one opponent. Ties at the cut-off are kept.",
             lambda a: f"Ranking players by {a.get('stat', 'stat').replace('_', ' ')}{_when(a)}"),
     ToolDef("team_results", TeamResultsArgs, team_results,
-            "A team's results: every game, per-season win/loss/draw records with points for/against and "
-            "percentage, or one total. Filters: seasons, opponent, venue, finals.",
-            lambda a: f"Checking {a.get('team', 'team')} results{_when(a)}"),
+            "Results for 1-4 teams: every game, per-season win/loss/draw records with points for/against, "
+            "goals, behinds, average score and percentage, or one total per team. Filters: seasons, opponent, "
+            "venue, finals. Pass several teams in one call to compare or chart them together.",
+            lambda a: f"Checking {_who(a, 'teams')} results{_when(a)}"),
     ToolDef("head_to_head", HeadToHeadArgs, head_to_head,
             "Head-to-head record between two teams per season with totals and the last meetings.",
             lambda a: f"Comparing {a.get('team_a', '')} and {a.get('team_b', '')}{_when(a)}"),

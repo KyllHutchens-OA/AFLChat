@@ -24,8 +24,8 @@ Eval scoring.
    agent's rows as evidence and returns a verdict that is reported next to
    the deterministic result (disagreements are listed for a human to look
    at). It never changes pass/fail. Model: --judge-model / EVAL_JUDGE_MODEL /
-   OPENAI_MODEL (the plan wants a different model family from the agent;
-   only the OpenAI client is wired today, so the model id is configurable).
+   AGENT_MODEL, called through app.agent.v3.llm, so a different model family
+   (e.g. claude-sonnet-5) works once its API key is set.
 """
 import json
 import logging
@@ -492,15 +492,14 @@ Respond with JSON: {{"verdict": "correct" | "partially_correct" | "incorrect" | 
 
 
 def _build_judge_client():
-    """OpenAI client using the project's standard construction pattern."""
-    import httpx
-    from openai import OpenAI
-
-    return OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=httpx.Timeout(60.0, connect=10.0))
+    """Kept for the cli signature; judge calls go through app.agent.v3.llm (any provider)."""
+    return None
 
 
 def judge_model_name(model: Optional[str] = None) -> str:
-    return model or os.getenv("EVAL_JUDGE_MODEL") or os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    from app.agent.v3.llm import model_for
+
+    return model or os.getenv("EVAL_JUDGE_MODEL") or model_for("AGENT_MODEL")
 
 
 def judge_case(
@@ -553,12 +552,10 @@ def judge_case(
         chart_data=chart_data,
     )
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        data = json.loads((response.choices[0].message.content or "").strip())
+        from app.agent.v3.llm import complete as llm_complete, parse_json
+
+        response = llm_complete(prompt, model=model, json_mode=True, effort="low")
+        data = parse_json(response.text)
         verdict = data.get("verdict")
         if verdict not in JUDGE_VERDICTS:
             verdict = "cannot_judge"

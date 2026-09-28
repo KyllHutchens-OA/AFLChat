@@ -175,11 +175,11 @@ def run_cases(
                 if judge and turns and run == 0:
                     result.judge = judge_case(scored_case, turns, truth, client=judge_client, model=judge_model)
 
-                applicable = {k: v for k, v in checks.items() if v is not None}
+                applicable = {k: v for k, v in result.checks.items() if v is not None}
                 judge_str = f" judge={result.judge['verdict']}" if result.judge else ""
                 print(f"    -> {result.status.upper()} in {result.total_latency_s}s checks={applicable}{judge_str}",
                       flush=True)
-                for f in fails[:6]:
+                for f in result.failures[:6]:
                     print(f"       - {f}", flush=True)
                 results.append(result)
     finally:
@@ -323,7 +323,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--max-turn-budget", type=float, default=DEFAULT_MAX_TURN_S, help="Any single turn (s)")
     parser.add_argument("--token-budget", type=int, default=DEFAULT_MAX_TURN_TOKENS, help="Tokens per turn")
     parser.add_argument("--judge", action="store_true", help="LLM triage (never changes pass/fail)")
-    parser.add_argument("--judge-model", default=None, help="Judge model (default: EVAL_JUDGE_MODEL or OPENAI_MODEL)")
+    parser.add_argument("--judge-model", default=None, help="Judge model (default: EVAL_JUDGE_MODEL or AGENT_MODEL)")
     parser.add_argument("--ws", action="store_true", help="Alias for --engine v2-ws")
     parser.add_argument("--url", default="http://localhost:5001", help="Backend URL for v2-ws")
     parser.add_argument("--allow-db-writes", action="store_true",
@@ -397,10 +397,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         except ValueError as e:  # e.g. engine not implemented
             print(f"error: {e}", file=sys.stderr)
             return 2
+        from app.agent.v3.llm import model_for
+
+        engine_model = model_for("AGENT_MODEL")
         meta = {
             "generated_at": _now_iso(),
             "engine": engine_name,
-            "model": os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+            "model": engine_model,
             "subset": subset_label,
             "case_ids": [c.id for c in cases],
             "repeat": args.repeat,

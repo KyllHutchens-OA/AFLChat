@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_CALLS = 6
 MAX_MODEL_CALLS = 8
 TOOL_OUTPUT_CHARS = 12000
+RESULT_ROWS = 200  # rows of the final result kept on TurnOutput (evals compare them to ground truth)
 
 Emit = Callable[[str, Dict[str, Any]], None]
 
@@ -39,7 +40,9 @@ class TurnOutput:
     runner (runner.run_turn) and the chat_traces writer."""
     answer: str
     chart_spec: Optional[Dict[str, Any]]
-    rows: List[Dict[str, Any]]                  # rows of the last data tool result (capped)
+    rows: List[Dict[str, Any]]                  # last non-empty tool result, up to RESULT_ROWS
+    columns: List[str]
+    row_count: Optional[int]                    # uncapped size of that result
     tool_calls: List[Dict[str, Any]]            # name, args, output, sql, latency_s, error
     sql: List[str]
     llm_calls: List[Dict[str, Any]]             # model, latency_s, first_text_s, usage, cost_usd
@@ -117,10 +120,15 @@ class AgentLoop:
                 chart = fallback_chart(question, store)
             except Exception as e:
                 logger.warning(f"fallback chart failed: {e}")
-        last_rows = next((c["output"].get("rows") or [] for c in reversed(calls_made)
-                          if c["name"] != "make_chart" and isinstance(c.get("output"), dict)), [])
+        last = store.last()
+        last_rows = []
+        if last is not None:
+            head = last.head(RESULT_ROWS).astype(object)
+            last_rows = head.where(head.notna(), None).to_dict(orient="records")
         return TurnOutput(
-            answer=answer.strip(), chart_spec=chart, rows=last_rows, tool_calls=calls_made,
+            answer=answer.strip(), chart_spec=chart, rows=last_rows,
+            columns=list(last.columns) if last is not None else [],
+            row_count=int(len(last)) if last is not None else None, tool_calls=calls_made,
             sql=[s for c in calls_made for s in c.get("sql", [])], llm_calls=llm_calls,
             usage=usage.as_dict(), cost_usd=round(cost, 8), model=self.model,
             latency_s=round(time.monotonic() - t0, 3), ttft_s=ttft, data_as_of=data_as_of(),
