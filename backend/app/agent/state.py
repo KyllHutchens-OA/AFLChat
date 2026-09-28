@@ -82,7 +82,7 @@ class AgentState(TypedDict, total=False):
     llm_chart_config_hint: Optional[Dict]  # x_col_hint, y_col_hint from the generate_sql LLM call
 
     # Visualization phase
-    visualization_spec: Optional[Dict]  # Plotly JSON spec
+    visualization_spec: Optional[Dict]  # ChartSpecV1 JSON spec (Recharts)
 
     # Response phase
     natural_language_summary: str

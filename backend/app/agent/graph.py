@@ -986,7 +986,7 @@ class AFLAnalyticsAgent:
 
     async def visualize_node(self, state: AgentState) -> AgentState:
         """
-        VISUALIZE node: Generate Plotly chart specification.
+        VISUALIZE node: Generate the ChartSpecV1 chart specification (Recharts).
 
         Updates:
         - visualization_spec

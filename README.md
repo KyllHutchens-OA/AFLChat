@@ -6,13 +6,13 @@
 
 This project showcases an AI agent that autonomously analyzes Australian Football League (AFL) statistics, performs multi-step reasoning, and provides insights through natural language conversation with embedded interactive visualizations.
 
-**Tech Stack**: Flask + Flask-SocketIO (backend) · React + Vite (frontend) · LangGraph (agent framework) · GPT-5-nano (LLM) · Supabase PostgreSQL · Plotly (visualizations)
+**Tech Stack**: Flask + Flask-SocketIO (backend) · React + Vite (frontend) · LangGraph (agent framework) · OpenAI `gpt-6-luna` (LLM) · Supabase PostgreSQL · Recharts (visualizations)
 
 ## Features
 
 - **Natural Language Queries**: Ask questions in plain English about AFL match and player statistics
 - **Multi-Step Reasoning**: Agent autonomously classifies intent, generates SQL, and formats responses
-- **Interactive Visualizations**: Plotly charts (line, bar, grouped bar) embedded in chat with heuristic chart selection
+- **Interactive Visualizations**: Recharts charts (line, bar, grouped bar) embedded in chat with heuristic chart selection
 - **Real-time Streaming**: WebSocket status updates showing the agent's progress through the pipeline
 - **35 Years of Data**: Complete AFL match and player statistics from 1990-2025 (6,243 matches, 273k+ player stat rows)
 - **Fast-Path Queries**: Regex-matched common patterns bypass the LLM entirely (~200ms response)
@@ -90,7 +90,7 @@ This project showcases an AI agent that autonomously analyzes Australian Footbal
 │   │   ├── middleware/   # Rate limiting, security, cost controls
 │   │   ├── services/     # Business logic services
 │   │   ├── utils/        # Shared utilities
-│   │   └── visualization/# Plotly chart builder, chart selector, data preprocessing
+│   │   └── visualization/# Recharts chart builder, chart selector, data preprocessing
 │   └── run.py
 │
 ├── frontend/             # React + Vite chat interface
@@ -109,7 +109,7 @@ This project showcases an AI agent that autonomously analyzes Australian Footbal
 ├── scripts/              # Data ingestion and utility scripts
 │
 └── docs/
-    └── CONTEXT.md        # Current development state
+    └── BENCHMARK_BEFORE_AFTER.md  # Eval results, before/after the pipeline rebuild
 ```
 
 ## Development
@@ -151,7 +151,7 @@ User Query
          2. ANALYZE_DEPTH → Determine if in-depth analysis needed
          3. PLAN → Analysis strategy (skipped for simple queries)
          4. EXECUTE → Run SQL against PostgreSQL
-         5. VISUALIZE → Heuristic chart selection + Plotly spec generation
+         5. VISUALIZE → Heuristic chart selection + Recharts spec generation
          6. RESPOND → Template response or LLM-generated summary
 ```
 
@@ -159,7 +159,7 @@ User Query
 - Consolidated LLM call merges intent classification + SQL generation (saves one round-trip)
 - Chart type selection uses heuristics for ~90% of queries (no LLM needed)
 - Template responses handle simple stats and top-N lists directly
-- `reasoning_effort='low'` on GPT-5-nano reduces reasoning tokens
+- `reasoning_effort='low'` on `gpt-6-luna` reduces reasoning tokens
 - In-memory LLM response cache for repeat queries
 
 **Key Design Principles**:
@@ -191,4 +191,4 @@ MIT
 
 ---
 
-**Built with**: LangGraph · GPT-5-nano · Flask · React · Supabase · Plotly · Railway
+**Built with**: LangGraph · OpenAI `gpt-6-luna` · Flask · React · Supabase · Recharts · Railway

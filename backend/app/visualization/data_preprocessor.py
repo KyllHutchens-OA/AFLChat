@@ -72,7 +72,7 @@ class DataPreprocessor:
         Returns:
             Dict containing:
             - data: Processed DataFrame (may include new columns like moving_avg)
-            - annotations: List of annotation dicts for Plotly
+            - annotations: List of chart annotation dicts (consumed by RechartsBuilder)
             - recommendations: Dict of suggested enhancements
             - metadata: Dict with data characteristics
         """
@@ -243,7 +243,7 @@ class DataPreprocessor:
         chart_type: str,
         metadata: Dict
     ) -> List[Dict[str, Any]]:
-        """Generate Plotly annotations based on data analysis"""
+        """Generate chart annotations based on data analysis"""
         annotations = []
         is_count = metadata.get("is_count_metric", False)
 
@@ -350,7 +350,7 @@ class DataPreprocessor:
         window: int = 3
     ) -> Dict[str, Any]:
         """
-        Generate Plotly trace for moving average
+        Generate moving-average series for the chart spec
 
         Args:
             data: DataFrame with moving_avg_3 column
@@ -359,7 +359,7 @@ class DataPreprocessor:
             window: Window size for moving average
 
         Returns:
-            Plotly trace dict
+            Moving-average series dict
         """
         if 'moving_avg_3' not in data.columns:
             return {}
