@@ -7,7 +7,7 @@ import {
   ScatterChart, Scatter,
   PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ReferenceDot, Label,
+  ReferenceDot, ReferenceLine, Label,
   ComposedChart,
 } from 'recharts';
 import { chartSpecSchema, ChartSpec, SeriesItem, DEFAULT_COLORS } from '../../types/chartSpec';
@@ -40,24 +40,33 @@ const integerFormatter = (value: any) => {
   return String(value);
 };
 
-// ── Club colours (2A `highlight`: a team/player's club abbreviation) ────
+// ── Club colours (2A `highlight`: the AFL team's full name, matching
+// teams.name — e.g. "Geelong", "Brisbane Lions" — not an abbreviation). ────
 // When any series names a club, series without one are muted so the
-// highlighted subject(s) stand out — e.g. Daicos (COL) vs Bontempelli (WB)
-// in real club colours, or one club highlighted in an otherwise grey ranking.
+// highlighted subject(s) stand out — e.g. Daicos (Collingwood) vs Bontempelli
+// (Western Bulldogs) in real club colours, or one club highlighted in an
+// otherwise grey ranking.
 
-const CLUB_BY_ABBR: Record<string, (typeof CLUBS)[number]> = Object.fromEntries(
-  CLUBS.map((c) => [c.abbreviation, c]),
+const CLUB_BY_NAME: Record<string, (typeof CLUBS)[number]> = Object.fromEntries(
+  CLUBS.map((c) => [c.name.toLowerCase(), c]),
 );
 const MUTED_SERIES_COLOR = '#C3AC87'; // warm-300 — recedes behind club colours
 
 function resolveSeriesColors(series: SeriesItem[], palette: string[]): string[] {
   const anyHighlight = series.some((s) => s.highlight);
   return series.map((s, i) => {
-    const club = s.highlight ? CLUB_BY_ABBR[s.highlight.toUpperCase()] : undefined;
+    const club = s.highlight ? CLUB_BY_NAME[s.highlight.toLowerCase()] : undefined;
     if (club) return club.primaryColor;
     if (anyHighlight) return MUTED_SERIES_COLOR; // has a highlight elsewhere, this one isn't the subject
     return s.color || palette[i % palette.length];
   });
+}
+
+// A groupedBar with any negative value is 2A's diverging_bar (wins positive,
+// losses negative) — it needs a visible y=0 baseline, since grouped bars
+// straddling zero otherwise look like they're floating.
+function hasNegativeValues(spec: ChartSpec): boolean {
+  return spec.series.some((s) => spec.data.some((row) => Number(row[s.key]) < 0));
 }
 
 // ── Responsive height: shorter on phones so a two-bar chart isn't a tall sliver ──
@@ -236,6 +245,9 @@ function renderLineChart(spec: ChartSpec, colors: string[]): React.ReactElement 
   // Use ComposedChart if any series is dashed (moving avg)
   const hasDashed = spec.series.some(s => s.dashed);
   const ChartComponent = hasDashed ? ComposedChart : LineChart;
+  // "linear" for discrete per-season/round buckets (2A) — smoothing implies
+  // values between seasons that don't exist. Defaults to the old "monotone".
+  const curveType = spec.curve || 'monotone';
 
   return (
     <ChartComponent data={spec.data} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
@@ -249,7 +261,7 @@ function renderLineChart(spec: ChartSpec, colors: string[]): React.ReactElement 
         return (
           <Line
             key={s.key || s.name || i}
-            type="monotone"
+            type={curveType}
             dataKey={s.key || ''}
             name={s.name}
             stroke={color}
@@ -324,6 +336,10 @@ function renderHorizontalBarChart(spec: ChartSpec, colors: string[]): React.Reac
 // ── Grouped / Stacked Bar Chart ─────────────────────────────────
 
 function renderGroupedBarChart(spec: ChartSpec, colors: string[]): React.ReactElement {
+  // Diverging bars (2A's diverging_bar: wins positive, losses negative)
+  // straddle zero — a reference line makes that baseline visible instead of
+  // the bars looking like they're floating.
+  const diverging = hasNegativeValues(spec);
   return (
     <BarChart data={spec.data} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE4" />
@@ -331,6 +347,7 @@ function renderGroupedBarChart(spec: ChartSpec, colors: string[]): React.ReactEl
       <YAxis {...yAxisProps(spec)} />
       <Tooltip contentStyle={tooltipStyle} />
       {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
+      {diverging && <ReferenceLine y={0} stroke="#8C7B6B" strokeWidth={1.5} />}
       {spec.series.map((s, i) => (
         <Bar
           key={s.key || s.name || i}
