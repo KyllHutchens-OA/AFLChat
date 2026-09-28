@@ -100,16 +100,16 @@ def team_results(args: TeamResultsArgs, store: Optional[ResultStore] = None) -> 
                                   ("opponent_score", "opp_goals", "opp_behinds", "opponent_points")])
             df = df.drop(columns=["goals", "behinds", "opp_goals", "opp_behinds"])
     else:
-        group = "tm.season" if args.per == "season" else "1"
-        head = "tm.season, " if args.per == "season" else ""
-        df = query(cte + f" SELECT {head}COUNT(*) AS games, "
+        per_season = args.per == "season"
+        df = query(cte + f" SELECT {'tm.season, ' if per_season else ''}COUNT(*) AS games, "
                    "COUNT(*) FILTER (WHERE tm.score > tm.opp_score) AS wins, "
                    "COUNT(*) FILTER (WHERE tm.score < tm.opp_score) AS losses, "
                    "COUNT(*) FILTER (WHERE tm.score = tm.opp_score) AS draws, "
                    "SUM(tm.score) AS points_for, SUM(tm.opp_score) AS points_against, "
+                   "SUM(tm.goals) AS goals, SUM(tm.behinds) AS behinds, "
                    "ROUND(SUM(tm.score) * 100.0 / NULLIF(SUM(tm.opp_score), 0), 1) AS percentage, "
                    "ROUND(AVG(tm.score), 1) AS avg_score, ROUND(AVG(tm.opp_score), 1) AS avg_conceded "
-                   f"FROM tm{outer} GROUP BY {group} ORDER BY {group}", params)
+                   f"FROM tm{outer}" + (" GROUP BY tm.season ORDER BY tm.season" if per_season else ""), params)
         if args.per == "total" and len(df) and int(df["games"].iloc[0]) == 0:
             df = df.head(0)
     notes = [_early_note(args.season_from, args.season_to)]

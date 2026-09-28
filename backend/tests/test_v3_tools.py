@@ -107,6 +107,12 @@ def test_team_results_per_season():
     assert (row["wins"], row["losses"], row["draws"]) == (10, 12, 1)
 
 
+def test_team_results_total_with_goals_and_behinds():
+    out = run("team_results", team="Sydney", season_from=2024, season_to=2024, opponent=None, venue=None,
+              finals="include", per="total")
+    assert out["row_count"] == 1 and out["rows"][0]["goals"] > 300
+
+
 def test_match_lookup_grand_final_score_format():
     out = run("match_lookup", **{**ML, "season": 2023, "round_name": "GF"})
     row = out["rows"][0]
