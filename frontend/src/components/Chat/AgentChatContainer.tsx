@@ -3,13 +3,16 @@ import { useAgentWebSocket } from '../../hooks/useAgentWebSocket';
 import ResponseCard from './ResponseCard';
 import SuggestedQuestions from './SuggestedQuestions';
 import ThinkingCard from './ThinkingCard';
-import FeedbackButton from './FeedbackButton';
+import ChatInput from './ChatInput';
+import RecentConversationsDrawer from './RecentConversationsDrawer';
+import { getRecentConversations } from '../../utils/recentConversations';
 
 const MESSAGE_THRESHOLD = 20;
 
 interface AgentChatContainerProps {
   conversationId?: string;
   onConversationCreated: (id: string | null) => void;
+  onSelectConversation: (id: string) => void;
   // /ask?q=... — sent once on mount, then the caller clears the query param
   initialQuery?: string;
   onInitialQuerySent?: () => void;
@@ -18,17 +21,20 @@ interface AgentChatContainerProps {
 const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   conversationId,
   onConversationCreated,
+  onSelectConversation,
   initialQuery,
   onInitialQuerySent,
 }) => {
   const [input, setInput] = useState('');
   const [dismissedNewChatPrompt, setDismissedNewChatPrompt] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [showRecent, setShowRecent] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const sentInitialQuery = useRef(false);
-  const { messages, isConnected, isThinking, thinkingStep, isLoadingHistory, currentConversationId, sendMessage, startNewChat } =
-    useAgentWebSocket({ conversationId, onConversationCreated });
+  const {
+    messages, isConnected, isThinking, thinkingStep, thinkingTool, thinkingPhase,
+    isLoadingHistory, currentConversationId, sendMessage, startNewChat,
+  } = useAgentWebSocket({ conversationId, onConversationCreated });
 
   useEffect(() => {
     if (!initialQuery || sentInitialQuery.current || !isConnected) return;
@@ -66,8 +72,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
     scrollToBottom();
   }, [messages, isThinking, keyboardHeight]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = () => {
     if (!input.trim() || isThinking) return;
     sendMessage(input.trim());
     setInput('');
@@ -84,16 +89,26 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
           marginBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : undefined,
         }}
       >
+        {/* Present for screen readers/SEO even though the empty-state heading
+            below (h2) is the only one usually visible. */}
+        <h1 className="sr-only">Ask the footy</h1>
+
         {/* Disconnected warning */}
         {!isConnected && (
-          <div className="px-4 py-2 bg-red-50 border border-red-200 rounded-lg mb-3 flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-red-500" />
-            <span className="text-sm text-red-700">Disconnected — reconnecting...</span>
+          <div className="px-4 py-2 bg-sherrin-50 border border-sherrin-200 rounded-lg mb-3 flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-sherrin-500" />
+            <span className="text-sm text-sherrin-700">Disconnected — reconnecting...</span>
           </div>
         )}
 
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto space-y-4 pb-4 min-h-0">
+        {/* Messages Area. role="log" + aria-live: screen-reader users hear each
+            answer as it arrives, and aria-busy reflects the thinking state. */}
+        <div
+          role="log"
+          aria-live="polite"
+          aria-busy={isThinking}
+          className="flex-1 overflow-y-auto space-y-4 pb-4 min-h-0"
+        >
           {isLoadingHistory && (
             <div className="text-center text-warm-500 mt-8">
               <div className="flex items-center justify-center gap-2">
@@ -127,27 +142,28 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
                   </div>
                 </div>
               ) : (
-                /* Agent response — full-width card */
                 <ResponseCard
                   text={message.text}
                   visualization={message.visualization}
                   isError={message.isError}
                   dataAsOf={message.isStreaming ? undefined : message.dataAsOf}
+                  trace={message.trace}
+                  conversationId={currentConversationId}
                 />
               )}
             </div>
           ))}
 
           {/* Thinking */}
-          {isThinking && <ThinkingCard step={thinkingStep} />}
+          {isThinking && <ThinkingCard step={thinkingStep} tool={thinkingTool} currentStep={thinkingPhase} />}
 
           <div ref={messagesEndRef} />
         </div>
 
         {/* New Chat Suggestion Banner */}
         {showNewChatPrompt && (
-          <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg mb-3 flex items-center justify-between">
-            <span className="text-sm text-amber-800">
+          <div className="px-4 py-3 bg-nightgame-100 border border-nightgame-300 rounded-lg mb-3 flex items-center justify-between">
+            <span className="text-sm text-warm-800">
               This conversation is getting long. Consider starting fresh.
             </span>
             <div className="flex items-center gap-2">
@@ -168,52 +184,63 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
         )}
 
         {/* Input Area */}
-        <form onSubmit={handleSubmit} className="flex items-center gap-2 pt-3 flex-shrink-0">
+        <div className="flex items-end gap-2 pt-3 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowRecent(true)}
+            aria-label="Recent chats"
+            title="Recent chats"
+            className="p-2.5 rounded-lg text-warm-400 hover:text-warm-700 hover:bg-warm-100 transition-colors
+                       focus-visible:ring-2 focus-visible:ring-sherrin/50 focus-visible:outline-none"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
           {messages.length > 0 && (
             <button
               type="button"
               onClick={startNewChat}
-              className="p-2.5 rounded-lg text-warm-400 hover:text-warm-700 hover:bg-warm-100 transition-colors"
+              aria-label="Start a new chat"
               title="New Chat"
+              className="p-2.5 rounded-lg text-warm-400 hover:text-warm-700 hover:bg-warm-100 transition-colors
+                         focus-visible:ring-2 focus-visible:ring-sherrin/50 focus-visible:outline-none"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
             </button>
           )}
-          <div className="flex-1 relative">
-            <input
-              ref={inputRef}
-              type="text"
+          <div className="flex-1">
+            <ChatInput
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={setInput}
+              onSubmit={handleSubmit}
               onFocus={handleInputFocus}
-              placeholder="Ask about AFL statistics..."
               disabled={!isConnected || isThinking}
-              className="w-full px-4 py-3 rounded-xl border border-warm-200 bg-white
-                         focus:outline-none focus:ring-2 focus:ring-sherrin/30 focus:border-sherrin
-                         text-sm disabled:bg-warm-50 disabled:cursor-not-allowed
-                         placeholder:text-warm-400 transition-all"
             />
           </div>
           <button
-            type="submit"
+            type="button"
+            onClick={handleSubmit}
             disabled={!isConnected || isThinking || !input.trim()}
+            aria-label="Send message"
             className="p-2.5 rounded-xl bg-sherrin text-white
                        hover:bg-sherrin-600 disabled:bg-warm-200 disabled:cursor-not-allowed
-                       transition-all duration-200"
+                       transition-all duration-200 focus-visible:ring-2 focus-visible:ring-sherrin/50 focus-visible:outline-none"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
             </svg>
           </button>
-        </form>
+        </div>
 
-        {/* Feedback section */}
-        {messages.length > 0 && (
-          <FeedbackButton
-            conversationId={currentConversationId}
-            messageText={messages.filter(m => m.type === 'agent' && !m.isError).slice(-1)[0]?.text || ''}
+        {showRecent && (
+          <RecentConversationsDrawer
+            conversations={getRecentConversations()}
+            currentId={currentConversationId}
+            onSelect={(id) => { setShowRecent(false); onSelectConversation(id); }}
+            onClose={() => setShowRecent(false)}
           />
         )}
       </div>

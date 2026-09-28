@@ -67,8 +67,10 @@ const seriesItemSchema = z
     color: z.string().optional(),
     dashed: z.boolean().optional(),
     stackId: z.string().optional(),
-    // AFL team to colour this series by (team itself, or a player's most
-    // frequent club) — not read by ChartRenderer yet, kept for a future pass.
+    // AFL team FULL NAME (e.g. "Geelong", "Brisbane Lions" — matches teams.name,
+    // not an abbreviation) to colour this series by: the team itself, or a
+    // player's most-frequent club. Optional and additive — old specs without
+    // it render exactly as before. Read by ChartRenderer (2C) via CLUBS.name.
     highlight: z.string().optional(),
   })
   .passthrough();

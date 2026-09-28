@@ -1,6 +1,7 @@
 """
 AFL Analytics Agent - Application Entry Point
 """
+import os
 import sys
 from pathlib import Path
 
@@ -13,18 +14,19 @@ from app import create_app, socketio
 app = create_app()
 
 if __name__ == '__main__':
+    port = int(os.getenv('PORT', 5001))  # override for local dev (e.g. a worktree on its own port)
     print("=" * 80)
     print("AFL Analytics Agent - Starting Server")
     print("=" * 80)
-    print("Server running at: http://localhost:5000")
-    print("Health check: http://localhost:5000/api/health")
+    print(f"Server running at: http://localhost:{port}")
+    print(f"Health check: http://localhost:{port}/api/health")
     print("=" * 80)
 
     # Run with SocketIO
     socketio.run(
         app,
         host='0.0.0.0',
-        port=5001,  # Changed from 5000 due to macOS AirPlay Receiver
+        port=port,
         debug=False,  # Temporarily disabled for testing
         allow_unsafe_werkzeug=True  # For development only
     )

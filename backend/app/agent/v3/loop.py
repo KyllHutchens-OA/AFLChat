@@ -104,6 +104,9 @@ class AgentLoop:
                     emit("response_reset", {})  # preamble before tool calls is not the answer
                 messages.append(res.assistant_message())
                 messages.extend(self._run_tools(res.tool_calls, budget, store, calls_made, emit))
+                # Model looks at tool results again before answering (or calling more tools) --
+                # the real "checking the answer" moment (2C thinking-state microcopy: the ARC).
+                emit("thinking", {"step": "Checking the answer...", "current_step": "review"})
             else:
                 error = "model call limit reached"
         except Exception as e:

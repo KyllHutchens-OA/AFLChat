@@ -39,7 +39,7 @@ class ChartErrorBoundary extends React.Component<ChartErrorBoundaryProps, ChartE
         return <DataTable data={this.props.data} title={this.props.title} />;
       }
       return (
-        <div className="w-full card p-4 my-4 text-center text-sm text-warm-700">
+        <div className="w-full text-center text-sm text-warm-700 py-2">
           Chart failed to render.
         </div>
       );

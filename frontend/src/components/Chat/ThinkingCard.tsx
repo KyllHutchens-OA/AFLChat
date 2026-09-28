@@ -1,56 +1,60 @@
 interface ThinkingCardProps {
+  // Raw backend label (`data.step`), used only when we don't recognise the tool/step.
   step: string;
+  // WS `thinking` event carries the real tool name for a tool call, if any.
+  tool?: string;
+  // `received` (before any work) | `tool` | `review` (model re-checking a
+  // tool result before answering or calling another tool).
+  currentStep?: string;
 }
 
-const STEPS = [
-  { keys: ['understand', 'received', 'question', 'complexity', 'analyz', 'plan'], label: 'Understanding' },
-  { keys: ['sql', 'query', 'generat', 'building', 'execut', 'fetch', 'database', 'search', 'found', 'result', 'statistic', 'enrich', 'news', 'predict', 'tipping'], label: 'Crunching the numbers' },
-  { keys: ['visuali', 'chart', 'creat', 'respond', 'writ', 'response', 'complete'], label: 'Putting it together' },
-];
+// Real pipeline steps, in footy voice — this is the "show real progress"
+// fix: previously a fuzzy keyword match on backend strings, now driven by
+// the actual tool name the WS `thinking` event carries.
+const TOOL_COPY: Record<string, string> = {
+  resolve_entities: "Working out who's who...",
+  player_stats: 'Checking the stats...',
+  leaderboard: 'Checking the stats...',
+  team_results: 'Checking the stats...',
+  head_to_head: 'Checking the stats...',
+  match_lookup: 'Checking the stats...',
+  ladder: 'Building the ladder...',
+  news: 'Checking the news...',
+  run_sql: 'Checking the stats...',
+  make_chart: 'Drawing it up...',
+};
 
-const ThinkingCard: React.FC<ThinkingCardProps> = ({ step }) => {
-  const stepLower = step.toLowerCase();
-  const activeIdx = STEPS.findIndex(s => s.keys.some(k => stepLower.includes(k)));
+const STEP_COPY: Record<string, string> = {
+  received: 'Having a crack...',
+  review: 'Going upstairs to the ARC...',
+};
+
+function microcopy(step: string, tool?: string, currentStep?: string): string {
+  if (tool && TOOL_COPY[tool]) return TOOL_COPY[tool];
+  if (currentStep && STEP_COPY[currentStep]) return STEP_COPY[currentStep];
+  return step || 'Thinking...';
+}
+
+const ThinkingCard: React.FC<ThinkingCardProps> = ({ step, tool, currentStep }) => {
+  const label = microcopy(step, tool, currentStep);
 
   return (
-    <div className="card p-5 animate-fade-in">
-      <div className="space-y-4">
-        {STEPS.map((s, i) => {
-          const isActive = i === activeIdx;
-          const isDone = i < activeIdx;
-
-          return (
-            <div key={s.label} className="flex items-center gap-3">
-              <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                isActive ? 'bg-sherrin animate-pulse' :
-                isDone ? 'bg-sherrin' :
-                'bg-warm-200'
-              }`} />
-
-              <span className={`text-sm flex-shrink-0 w-40 ${
-                isActive ? 'text-warm-900 font-medium' :
-                isDone ? 'text-warm-500' :
-                'text-warm-300'
-              }`}>
-                {s.label}
-              </span>
-
-              {isActive && (
-                <div className="flex-1 h-8 relative overflow-hidden">
-                  {/* Football — positioned absolutely, animated with left % */}
-                  <div className="football-dribble absolute bottom-0 h-5 w-5">
-                    <svg className="w-5 h-5 text-sherrin" viewBox="0 0 24 24" fill="currentColor">
-                      <ellipse cx="12" cy="12" rx="10" ry="7" transform="rotate(-30 12 12)" />
-                      <line x1="5" y1="8" x2="19" y2="16" stroke="white" strokeWidth="0.8" />
-                      <line x1="8" y1="5.5" x2="10" y2="17" stroke="white" strokeWidth="0.6" />
-                      <line x1="14" y1="7" x2="16" y2="18.5" stroke="white" strokeWidth="0.6" />
-                    </svg>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+    <div className="card p-5 animate-fade-in" role="status">
+      <div className="flex items-center gap-3">
+        <div className="relative h-6 w-6 flex-shrink-0 overflow-hidden">
+          <svg
+            className="football-dribble absolute bottom-0 h-5 w-5 text-sherrin"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <ellipse cx="12" cy="12" rx="10" ry="7" transform="rotate(-30 12 12)" />
+            <line x1="5" y1="8" x2="19" y2="16" stroke="white" strokeWidth="0.8" />
+            <line x1="8" y1="5.5" x2="10" y2="17" stroke="white" strokeWidth="0.6" />
+            <line x1="14" y1="7" x2="16" y2="18.5" stroke="white" strokeWidth="0.6" />
+          </svg>
+        </div>
+        <span className="text-sm font-medium text-warm-900">{label}</span>
       </div>
     </div>
   );

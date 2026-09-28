@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import type { Trace } from '../components/Chat/WorkingDrawer';
+import { addRecentConversation, setLastConversationId } from '../utils/recentConversations';
 
 interface Message {
   id: string;
@@ -15,6 +17,8 @@ interface Message {
   dataAsOf?: string;
   // True while `response_delta` text is still arriving.
   isStreaming?: boolean;
+  // "Show your working" drawer data (backend `trace` event / persisted metadata).
+  trace?: Trace;
 }
 
 interface UseAgentWebSocketOptions {
@@ -27,6 +31,10 @@ interface UseAgentWebSocketReturn {
   isConnected: boolean;
   isThinking: boolean;
   thinkingStep: string;
+  // Real tool name driving the current thinking step, e.g. "player_stats"; and
+  // the coarse phase ("received" | "tool" | "review") for steps with no tool.
+  thinkingTool?: string;
+  thinkingPhase?: string;
   isLoadingHistory: boolean;
   currentConversationId: string | null;
   sendMessage: (message: string) => void;
@@ -86,8 +94,13 @@ export const useAgentWebSocket = ({
   const [isConnected, setIsConnected] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [thinkingStep, setThinkingStep] = useState('');
+  const [thinkingTool, setThinkingTool] = useState<string | undefined>(undefined);
+  const [thinkingPhase, setThinkingPhase] = useState<string | undefined>(undefined);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const socketRef = useRef<Socket | null>(null);
+  // The question that (maybe) started a brand-new conversation, so
+  // `conversation_started` can record it in the local recent-chats list.
+  const lastSentQuestionRef = useRef<string>('');
   // Holds a visualization spec that arrived before we've attached it to an
   // agent message yet. The `visualization` and `response` socket events are
   // NOT guaranteed to arrive in a fixed order, so we can't rely on mutating a
@@ -146,6 +159,7 @@ export const useAgentWebSocket = ({
           // The backend flattens metadata into the message (B3), so read both.
           visualization: msg.metadata?.visualization ?? msg.visualization,
           dataAsOf: msg.metadata?.data_as_of ?? msg.data_as_of,
+          trace: msg.metadata?.trace ?? msg.trace,
         }));
 
         setMessages(loadedMessages);
@@ -212,6 +226,7 @@ export const useAgentWebSocket = ({
     socket.off('response_reset');
     socket.off('visualization');
     socket.off('response');
+    socket.off('trace');
     socket.off('complete');
     socket.off('error');
     socket.off('visitor_token');
@@ -224,6 +239,7 @@ export const useAgentWebSocket = ({
     socket.on('conversation_started', (data: { conversation_id?: string; owner_token?: string }) => {
       if (data?.conversation_id && data.owner_token) {
         saveConversationToken(data.conversation_id, data.owner_token);
+        addRecentConversation(data.conversation_id, lastSentQuestionRef.current);
       }
     });
 
@@ -235,17 +251,26 @@ export const useAgentWebSocket = ({
       setIsConnected(false);
       setIsThinking(false);
       setThinkingStep('');
+      setThinkingTool(undefined);
+      setThinkingPhase(undefined);
     });
 
     // v3 emits `received` before any server work, so the thinking card shows at once.
-    socket.on('received', (data: { step?: string }) => {
+    socket.on('received', (data: { step?: string; current_step?: string }) => {
       setIsThinking(true);
       setThinkingStep(data.step || 'Received your question...');
+      setThinkingTool(undefined);
+      setThinkingPhase(data.current_step);
     });
 
-    socket.on('thinking', (data: { step: string }) => {
+    // `tool` names the real tool call in progress; `current_step` is "tool" or
+    // "review" (model re-checking a result). ThinkingCard maps these to footy
+    // microcopy instead of guessing from the raw label string.
+    socket.on('thinking', (data: { step: string; current_step?: string; tool?: string }) => {
       setIsThinking(true);
       setThinkingStep(data.step);
+      setThinkingTool(data.tool);
+      setThinkingPhase(data.current_step);
     });
 
     // Streamed answer text (v3): the first delta creates the agent message.
@@ -308,9 +333,19 @@ export const useAgentWebSocket = ({
       setMessages((prev) => [...prev, agentMessage]);
     });
 
+    // Emitted after `response`, so the agent message already exists.
+    socket.on('trace', (data: Record<string, unknown>) => {
+      const targetId = lastAgentMessageIdRef.current;
+      if (!targetId) return;
+      setMessages((prev) => prev.map((m) => (m.id === targetId ? { ...m, trace: data as any } : m)));
+    });
+
     socket.on('complete', (data: { conversation_id?: string }) => {
       setIsThinking(false);
       setThinkingStep('');
+      setThinkingTool(undefined);
+      setThinkingPhase(undefined);
+      if (data.conversation_id) setLastConversationId(data.conversation_id);
 
       // If a visualization arrived AFTER `response` already built the agent
       // message (race between the two events), attach it to that message now
@@ -339,6 +374,8 @@ export const useAgentWebSocket = ({
     socket.on('error', (data: { message: string }) => {
       setIsThinking(false);
       setThinkingStep('');
+      setThinkingTool(undefined);
+      setThinkingPhase(undefined);
       streamingIdRef.current = null;
 
       // Categorize error type for better UX
@@ -360,7 +397,7 @@ export const useAgentWebSocket = ({
         friendlyMessage = "Please enter a message to send.";
       } else {
         errorType = 'processing';
-        friendlyMessage = `Something went wrong processing your request. ${data.message}`;
+        friendlyMessage = 'Try rephrasing your question, or ask something else.';
       }
 
       const errorMessage: Message = {
@@ -393,6 +430,7 @@ export const useAgentWebSocket = ({
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    lastSentQuestionRef.current = message;
 
     // Clear any leftover pending visualization from a previous turn (e.g. one
     // that never got flushed because that turn ended in an error).
@@ -427,6 +465,7 @@ export const useAgentWebSocket = ({
     setMessages([]);
     conversationIdRef.current = null;
     historyLoadedRef.current = true;
+    setLastConversationId(null); // don't auto-restore this thread next time /ask loads
     // Signal page to navigate to bare /aflagent
     onConversationCreatedRef.current(null);
   }, []);
@@ -436,6 +475,8 @@ export const useAgentWebSocket = ({
     isConnected,
     isThinking,
     thinkingStep,
+    thinkingTool,
+    thinkingPhase,
     isLoadingHistory,
     currentConversationId: conversationIdRef.current,
     sendMessage,

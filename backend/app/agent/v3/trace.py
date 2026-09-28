@@ -20,6 +20,42 @@ def _slim_calls(out: TurnOutput):
             for c in out.tool_calls]
 
 
+def _entities_from_calls(tool_calls):
+    """Matched players/teams, from every resolve_entities call this turn (2C "Show your working")."""
+    ents = []
+    for c in tool_calls:
+        if c["name"] != "resolve_entities":
+            continue
+        for r in (c.get("output") or {}).get("rows") or []:
+            ents.append({"query": r.get("query"), "kind": r.get("kind"), "name": r.get("name"), "id": r.get("id")})
+    return ents
+
+
+def build_trace_payload(out: TurnOutput) -> dict:
+    """"Show your working" drawer data: entities, tool calls (with args and SQL),
+    row counts, model round-trips, tokens, cost, latency, data freshness. Built
+    only from this turn's own TurnOutput -- no secrets, no other users' data."""
+    return {
+        "model": out.model,
+        "entities": _entities_from_calls(out.tool_calls),
+        "tool_calls": [
+            {"name": c["name"], "args": c.get("args") or {}, "sql": c.get("sql") or [],
+             "row_count": c.get("row_count"), "latency_s": c["latency_s"], "error": c.get("error")}
+            for c in out.tool_calls
+        ],
+        "sql": out.sql,
+        "row_count": out.row_count,
+        # Model round-trips beyond the first: every extra one re-read tool results before answering.
+        "retries": max(len(out.llm_calls) - 1, 0),
+        "tokens": out.usage,
+        "cost_usd": out.cost_usd,
+        "latency_s": out.latency_s,
+        "ttft_s": out.ttft_s,
+        "data_as_of": out.data_as_of,
+        "error": out.error,
+    }
+
+
 def write_trace(out: TurnOutput, *, question: str, conversation_id: Optional[str] = None,
                 visitor_id: Optional[str] = None) -> None:
     u = out.usage

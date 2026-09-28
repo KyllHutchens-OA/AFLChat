@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ResponsiveContainer,
   LineChart, Line,
@@ -7,14 +7,17 @@ import {
   ScatterChart, Scatter,
   PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ReferenceDot, Label,
+  ReferenceDot, ReferenceLine, Label,
   ComposedChart,
 } from 'recharts';
-import { chartSpecSchema, ChartSpec, DEFAULT_COLORS } from '../../types/chartSpec';
+import { chartSpecSchema, ChartSpec, SeriesItem, DEFAULT_COLORS } from '../../types/chartSpec';
+import { CLUBS } from '../../constants/clubs';
 import DataTable from './DataTable';
 
 interface ChartRendererProps {
   spec: any;
+  // Embedded inside a ResponseCard, which is already a card — no nested card chrome.
+  bare?: boolean;
 }
 
 // ── Warm tooltip styling ────────────────────────────────────────
@@ -37,9 +40,76 @@ const integerFormatter = (value: any) => {
   return String(value);
 };
 
+// ── Club colours (2A `highlight`: the AFL team's full name, matching
+// teams.name — e.g. "Geelong", "Brisbane Lions" — not an abbreviation). ────
+// When any series names a club, series without one are muted so the
+// highlighted subject(s) stand out — e.g. Daicos (Collingwood) vs Bontempelli
+// (Western Bulldogs) in real club colours, or one club highlighted in an
+// otherwise grey ranking.
+
+const CLUB_BY_NAME: Record<string, (typeof CLUBS)[number]> = Object.fromEntries(
+  CLUBS.map((c) => [c.name.toLowerCase(), c]),
+);
+const MUTED_SERIES_COLOR = '#C3AC87'; // warm-300 — recedes behind club colours
+
+function resolveSeriesColors(series: SeriesItem[], palette: string[]): string[] {
+  const anyHighlight = series.some((s) => s.highlight);
+  return series.map((s, i) => {
+    const club = s.highlight ? CLUB_BY_NAME[s.highlight.toLowerCase()] : undefined;
+    if (club) return club.primaryColor;
+    if (anyHighlight) return MUTED_SERIES_COLOR; // has a highlight elsewhere, this one isn't the subject
+    return s.color || palette[i % palette.length];
+  });
+}
+
+// A groupedBar with any negative value is 2A's diverging_bar (wins positive,
+// losses negative) — it needs a visible y=0 baseline, since grouped bars
+// straddling zero otherwise look like they're floating.
+function hasNegativeValues(spec: ChartSpec): boolean {
+  return spec.series.some((s) => spec.data.some((row) => Number(row[s.key]) < 0));
+}
+
+// ── Responsive height: shorter on phones so a two-bar chart isn't a tall sliver ──
+
+function useIsNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 640,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return narrow;
+}
+
+// Horizontal bars need one row of height per category, or Recharts starts
+// dropping category labels on a short mobile chart with many rows (e.g. a
+// top-10 with 11 rows because of ties at the cutoff).
+function chartHeight(narrow: boolean, s: ChartSpec): number {
+  const base = narrow ? 260 : 400;
+  if (s.chartType === 'bar' && s.orientation === 'horizontal') {
+    return Math.max(base, s.data.length * (narrow ? 30 : 36) + 60);
+  }
+  return base;
+}
+
+// ── A short text summary for screen readers (charts have no text alternative
+// otherwise — the table behind "Show the numbers" covers the rest) ──────────
+
+function chartSummary(s: ChartSpec): string {
+  const kind = s.orientation === 'horizontal' ? 'horizontal bar' : s.chartType;
+  const seriesNames = s.series.map((x) => x.name || x.key).filter(Boolean).join(', ');
+  const title = s.title ? `${s.title}. ` : '';
+  return `${title}${kind} chart, ${s.data.length} data point${s.data.length === 1 ? '' : 's'}${seriesNames ? `, series: ${seriesNames}` : ''}.`;
+}
+
 // ── Main Component ──────────────────────────────────────────────
 
-const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
+const ChartRenderer: React.FC<ChartRendererProps> = ({ spec, bare = true }) => {
+  const narrow = useIsNarrowViewport();
   if (!spec) return null;
 
   const result = chartSpecSchema.safeParse(spec);
@@ -50,7 +120,7 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
     // to show, otherwise render nothing — never crash on a bad spec.
     const rawData = Array.isArray(spec?.data) ? spec.data : null;
     if (rawData && rawData.length > 0) {
-      return <DataTable data={rawData} title={typeof spec?.title === 'string' ? spec.title : undefined} />;
+      return <DataTable data={rawData} title={typeof spec?.title === 'string' ? spec.title : undefined} bare={bare} />;
     }
     return null;
   }
@@ -65,21 +135,26 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
   // `table` isn't a Recharts chart at all — render the plain table directly
   // rather than routing it through ResponsiveContainer/renderChart.
   if (s.chartType === 'table') {
-    return <DataTable data={s.data} title={s.title} />;
+    return <DataTable data={s.data} title={s.title} bare={bare} />;
   }
 
-  const colors = s.colors && s.colors.length ? s.colors : DEFAULT_COLORS;
+  const colors = resolveSeriesColors(s.series, s.colors && s.colors.length ? s.colors : DEFAULT_COLORS);
+  const height = chartHeight(narrow, s);
 
   return (
-    <div className="w-full card p-6 my-4">
+    <div className={bare ? 'w-full tabular-nums' : 'w-full card p-6 my-4 tabular-nums'}>
       {s.title && (
-        <h3 className="text-base font-semibold text-[#3D2E1F] mb-4 text-center">
+        <h3 className="text-base font-semibold text-[#3D2E1F] mb-3 text-center">
           {s.title}
         </h3>
       )}
-      <ResponsiveContainer width="100%" height={400}>
-        {renderChart(s, colors)}
-      </ResponsiveContainer>
+      {/* role="img" + aria-label: Recharts' SVG internals are not meaningful to
+          screen readers on their own. */}
+      <div role="img" aria-label={chartSummary(s)}>
+        <ResponsiveContainer width="100%" height={height}>
+          {renderChart(s, colors)}
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 };
@@ -182,6 +257,9 @@ function renderLineChart(spec: ChartSpec, colors: string[]): React.ReactElement 
   // Use ComposedChart if any series is dashed (moving avg)
   const hasDashed = spec.series.some(s => s.dashed);
   const ChartComponent = hasDashed ? ComposedChart : LineChart;
+  // "linear" for discrete per-season/round buckets (2A) — smoothing implies
+  // values between seasons that don't exist. Defaults to the old "monotone".
+  const curveType = spec.curve || 'monotone';
 
   return (
     <ChartComponent data={spec.data} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
@@ -191,11 +269,14 @@ function renderLineChart(spec: ChartSpec, colors: string[]): React.ReactElement 
       <Tooltip contentStyle={tooltipStyle} />
       {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
       {spec.series.map((s, i) => {
-        const color = s.color || colors[i % colors.length];
+        // `colors[i]` is already highlight-resolved (resolveSeriesColors), and
+        // falls back to s.color internally -- don't re-prioritize s.color here
+        // or every series just gets its backend default and highlight never shows.
+        const color = colors[i % colors.length];
         return (
           <Line
             key={s.key || s.name || i}
-            type="monotone"
+            type={curveType}
             dataKey={s.key || ''}
             name={s.name}
             stroke={color}
@@ -227,7 +308,7 @@ function renderBarChart(spec: ChartSpec, colors: string[]): React.ReactElement {
           key={s.key || s.name || i}
           dataKey={s.key || ''}
           name={s.name}
-          fill={s.color || colors[i % colors.length]}
+          fill={colors[i % colors.length]}
           radius={[4, 4, 0, 0]}
           animationDuration={600}
         />
@@ -258,7 +339,7 @@ function renderHorizontalBarChart(spec: ChartSpec, colors: string[]): React.Reac
           key={s.key || s.name || i}
           dataKey={s.key || ''}
           name={s.name}
-          fill={s.color || colors[i % colors.length]}
+          fill={colors[i % colors.length]}
           radius={[0, 4, 4, 0]}
           animationDuration={600}
         />
@@ -270,6 +351,10 @@ function renderHorizontalBarChart(spec: ChartSpec, colors: string[]): React.Reac
 // ── Grouped / Stacked Bar Chart ─────────────────────────────────
 
 function renderGroupedBarChart(spec: ChartSpec, colors: string[]): React.ReactElement {
+  // Diverging bars (2A's diverging_bar: wins positive, losses negative)
+  // straddle zero — a reference line makes that baseline visible instead of
+  // the bars looking like they're floating.
+  const diverging = hasNegativeValues(spec);
   return (
     <BarChart data={spec.data} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE4" />
@@ -277,12 +362,13 @@ function renderGroupedBarChart(spec: ChartSpec, colors: string[]): React.ReactEl
       <YAxis {...yAxisProps(spec)} />
       <Tooltip contentStyle={tooltipStyle} />
       {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
+      {diverging && <ReferenceLine y={0} stroke="#8C7B6B" strokeWidth={1.5} />}
       {spec.series.map((s, i) => (
         <Bar
           key={s.key || s.name || i}
           dataKey={s.key || ''}
           name={s.name}
-          fill={s.color || colors[i % colors.length]}
+          fill={colors[i % colors.length]}
           stackId={s.stackId}
           radius={s.stackId ? undefined : [4, 4, 0, 0]}
           animationDuration={600}
@@ -309,7 +395,7 @@ function renderScatterChart(spec: ChartSpec, colors: string[]): React.ReactEleme
             key={s.key || s.name || i}
             name={s.name}
             data={spec.data.filter((d: any) => d.group === s.key)}
-            fill={s.color || colors[i % colors.length]}
+            fill={colors[i % colors.length]}
             animationDuration={600}
           />
         ))}
@@ -378,7 +464,7 @@ function renderAreaChart(spec: ChartSpec, colors: string[]): React.ReactElement 
       <Tooltip contentStyle={tooltipStyle} />
       {spec.legend && <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />}
       {spec.series.map((s, i) => {
-        const color = s.color || colors[i % colors.length];
+        const color = colors[i % colors.length];
         return (
           <Area
             key={s.key || s.name || i}
