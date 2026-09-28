@@ -53,6 +53,17 @@ def health_check():
     return jsonify(health), status_code
 
 
+@bp.route('/health/data', methods=['GET'])
+def data_health_check():
+    """Data freshness/integrity report (always 200; `status` is 'ok' or 'warn')."""
+    from app.services.data_health import data_health
+    try:
+        return jsonify(data_health()), 200
+    except Exception as e:
+        logger.error(f"Data health check failed: {e}")
+        return jsonify({'status': 'error', 'message': 'Data health unavailable'}), 503
+
+
 @bp.route('/chat/message', methods=['POST'])
 @limiter.limit("10 per minute")
 async def chat_message():

@@ -109,6 +109,43 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
+        # Job 10a: AFL Tables player stats (daily 6 AM AEST): every completed match
+        # without player_stats, any season.
+        self.scheduler.add_job(
+            func=self._ingest_player_stats,
+            trigger=CronTrigger(hour=6, minute=0, timezone='Australia/Melbourne'),
+            id="ingest_player_stats",
+            name="Ingest player stats from AFL Tables",
+            replace_existing=True,
+        )
+
+        # Job 10b: retry every 3 hours until AFL Tables publishes (no-op when nothing is missing)
+        self.scheduler.add_job(
+            func=self._retry_player_stats,
+            trigger=IntervalTrigger(hours=3),
+            id="retry_player_stats",
+            name="Retry missing player stats",
+            replace_existing=True,
+        )
+
+        # Job 10c: safety net, copy final live_games scores into matches (every 30 min)
+        self.scheduler.add_job(
+            func=self._sync_live_results,
+            trigger=IntervalTrigger(minutes=30),
+            id="sync_live_results",
+            name="Sync live_games final scores into matches",
+            replace_existing=True,
+        )
+
+        # Job 10d: data-health check after the stats job; logs ERROR (Sentry) on any breach
+        self.scheduler.add_job(
+            func=self._check_data_health,
+            trigger=CronTrigger(hour=7, minute=30, timezone='Australia/Melbourne'),
+            id="check_data_health",
+            name="Data health check",
+            replace_existing=True,
+        )
+
         # Job 11: Save preview context — DISABLED (now runs on local machine)
         # self.scheduler.add_job(
         #     func=self._save_preview_context,
@@ -289,6 +326,56 @@ class LiveGameScheduler:
         except Exception as e:
             logger.error(f"Match results job failed: {e}")
 
+
+    def _ingest_player_stats(self):
+        """Daily: player stats for every completed match that has none."""
+        try:
+            from app.data.ingestion.stats_ingester import ingest_from_afl_tables
+
+            result = ingest_from_afl_tables(limit=60)
+            logger.info(
+                f"Player stats job: {result['matches_processed']}/{result['matches_targeted']} matches, "
+                f"{len(result['unavailable'])} not yet on AFL Tables"
+            )
+        except Exception as e:
+            logger.error(f"Player stats job failed: {e}")
+
+    def _retry_player_stats(self):
+        """Every 3h: retry the current season only if a completed match still lacks stats."""
+        try:
+            from app.data.ingestion.stats_ingester import get_matches_needing_stats, ingest_from_afl_tables
+
+            season = datetime.now().year
+            with get_session() as session:
+                missing = len(get_matches_needing_stats(session, season=season, limit=1))
+            if missing:
+                ingest_from_afl_tables(season=season, limit=20)
+        except Exception as e:
+            logger.error(f"Player stats retry failed: {e}")
+
+    def _sync_live_results(self):
+        """Every 30 min: matches never keep a stale score once a live game is final."""
+        try:
+            from app.services.live_game_service import LiveGameService
+
+            fixed = LiveGameService.sync_completed_to_matches()
+            if fixed:
+                logger.info(f"Synced {fixed} final score(s) from live_games into matches")
+        except Exception as e:
+            logger.error(f"Live result sync failed: {e}")
+
+    def _check_data_health(self):
+        """Daily: log the data-health report; ERROR level when a check is breached."""
+        try:
+            from app.services.data_health import data_health
+
+            report = data_health()
+            if report["status"] != "ok":
+                logger.error(f"Data health breached: {report['checks']}")
+            else:
+                logger.info("Data health ok")
+        except Exception as e:
+            logger.error(f"Data health job failed: {e}")
 
     def _save_preview_context(self):
         """Save context for upcoming match previews to DB (pending rows for cloud task)."""

@@ -519,6 +519,33 @@ class LiveGameService:
 
 
     @staticmethod
+    def sync_completed_to_matches() -> int:
+        """Copy 100%-complete live_games scores into linked matches that disagree.
+
+        Skips matches whose result AFL Tables has already confirmed (quarter scores set).
+        Returns the number of matches updated.
+        """
+        fixed = 0
+        with get_session() as session:
+            rows = (
+                session.query(LiveGame, Match)
+                .join(Match, Match.id == LiveGame.match_id)
+                .filter(LiveGame.status == "completed", LiveGame.complete_percent >= 100,
+                        Match.home_q4_goals.is_(None))
+                .all()
+            )
+            for lg, m in rows:
+                hs, as_ = lg.home_score, lg.away_score
+                if m.home_team_id != lg.home_team_id:
+                    hs, as_ = as_, hs
+                if (m.home_score, m.away_score) != (hs, as_):
+                    logger.info(f"Match {m.id}: {m.home_score}-{m.away_score} -> {hs}-{as_} from live game {lg.id}")
+                    m.home_score, m.away_score, m.match_status = hs, as_, "completed"
+                    fixed += 1
+            session.commit()
+        return fixed
+
+    @staticmethod
     def get_active_games(hours=2) -> list:
         """
         Get all active games from the current round only.

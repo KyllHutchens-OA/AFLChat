@@ -14,7 +14,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 import requests
-from bs4 import BeautifulSoup
+
+from app.data.ingestion.afltables_pages import parse_match_page, parse_season_page
 
 CACHE_DIR = os.getenv("AFL_1C_CACHE", "/tmp/afl_1c_cache")
 AFLT_BASE = "https://afltables.com/afl"
@@ -100,57 +101,22 @@ class RefGame:
         return frozenset((self.home_id, self.away_id))
 
 
-_DT_RE = re.compile(r"(\w{3}) (\d{2}-\w{3}-\d{4})(?: (\d{1,2}:\d{2} [AP]M))?")
-_SCORE_RE = re.compile(r"(\d+)\.(\d+)")
-
-
-def _parse_quarters(tt_text: str) -> List[tuple]:
-    return [(int(g), int(b)) for g, b in _SCORE_RE.findall(tt_text.replace("\xa0", " "))]
-
-
 def aflt_season(year: int, refresh: bool = False) -> List[RefGame]:
     """Parse afltables.com/afl/seas/{year}.html into RefGames in page order."""
-    soup = BeautifulSoup(fetch_aflt(f"seas/{year}.html", refresh=refresh), "html.parser")
-    games: List[RefGame] = []
-    label, in_finals = None, False
-    for table in soup.find_all("table"):
-        rows = table.find_all("tr", recursive=False) or table.find_all("tr")
-        # Round / finals header tables: a single bold cell
-        if len(rows) == 1:
-            txt = rows[0].get_text(" ", strip=True)
-            m = re.match(r"Round (\d+)\b", txt)
-            if m and not table.find("tt"):
-                label, in_finals = m.group(1), False
-                continue
-            if re.fullmatch(r"(Qualifying|Elimination|Semi|Preliminary|Grand|Wildcard) Final", txt):
-                label, in_finals = txt, True
-                continue
-        if len(rows) != 2 or not table.find("tt"):
+    games = []
+    for d in parse_season_page(fetch_aflt(f"seas/{year}.html", refresh=refresh), year):
+        if d["home"] not in TEAM_IDS or d["away"] not in TEAM_IDS:
             continue
-        cells = [r.find_all("td", recursive=False) for r in rows]
-        if any(len(c) < 4 for c in cells) or label is None:
-            continue
-        home, away = cells[0][0].get_text(strip=True), cells[1][0].get_text(strip=True)
-        if home not in TEAM_IDS or away not in TEAM_IDS:
-            continue
-        info = cells[0][3].get_text(" ", strip=True)
-        dm = _DT_RE.search(info)
-        if not dm:
-            continue
-        dt_txt = dm.group(2) + (" " + dm.group(3) if dm.group(3) else " 12:00 AM")
-        local_dt = datetime.strptime(dt_txt, "%d-%b-%Y %I:%M %p")
-        att = re.search(r"Att:\s*([\d,]+)", info)
-        venue_a = cells[0][3].find("a")
-        link = cells[1][3].find("a", href=re.compile(r"stats/games/"))
-        hq, aq = _parse_quarters(cells[0][1].get_text()), _parse_quarters(cells[1][1].get_text())
         games.append(RefGame(
-            season=year, label=label, is_final=in_finals, local_dt=local_dt,
-            home=home, away=away, home_id=TEAM_IDS[home], away_id=TEAM_IDS[away],
-            home_q=hq, away_q=aq,
-            home_score=int(cells[0][2].get_text(strip=True)),
-            away_score=int(cells[1][2].get_text(strip=True)),
-            venue=venue_a.get_text(strip=True) if venue_a else "",
-            attendance=int(att.group(1).replace(",", "")) if att else None,
-            stats_url=link["href"].replace("../", "") if link else None,
+            season=year, label=d["label"], is_final=d["is_final"], local_dt=d["local_dt"],
+            home=d["home"], away=d["away"], home_id=TEAM_IDS[d["home"]], away_id=TEAM_IDS[d["away"]],
+            home_q=d["home_q"], away_q=d["away_q"], home_score=d["home_score"],
+            away_score=d["away_score"], venue=d["venue"], attendance=d["attendance"],
+            stats_url=d["stats_url"],
         ))
     return games
+
+
+def aflt_match_page(stats_url: str) -> Optional[Dict]:
+    """Parsed match page (cached)."""
+    return parse_match_page(fetch_aflt(stats_url))

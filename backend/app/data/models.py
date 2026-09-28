@@ -69,6 +69,8 @@ class Player(Base):
     debut_date = Column(Date)
     debut_year = Column(Integer)
     is_active = Column(Boolean, default=True)
+    # AFL Tables player key, e.g. 'J/Josh_Kennedy1' (unique per person; namesakes differ)
+    afltables_id = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
