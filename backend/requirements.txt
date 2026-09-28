@@ -40,6 +40,7 @@ cachetools>=5.3.0  # In-memory caching
 openai>=3.19.2
 google-genai>=2.25.0
 anthropic>=1.8.0
+certifi  # CA bundle for llm.py TLS (truststore breaks under gevent)
 
 # Agent SQL safety: full parse-tree validation (app/analytics/validators.py)
 sqlglot>=30.0.0

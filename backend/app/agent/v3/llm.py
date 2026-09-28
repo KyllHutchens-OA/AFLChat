@@ -113,6 +113,15 @@ def provider_for(model: str) -> str:
 _clients: Dict[str, Any] = {}
 
 
+def _tls_context():
+    """Plain stdlib TLS context with certifi CAs. httpx2's default is a
+    truststore.SSLContext, whose verify_mode setter recurses forever under
+    gevent's patched ssl (the production gunicorn GeventWebSocketWorker)."""
+    import ssl
+    import certifi
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def _client(provider: str):
     if provider in _clients:
         return _clients[provider]
@@ -120,14 +129,16 @@ def _client(provider: str):
     if not os.getenv(key_env):
         raise LLMError(f"{key_env} is not set")
     if provider == "openai":
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv(key_env), timeout=60.0, max_retries=2)
+        from openai import DefaultHttpxClient, OpenAI
+        client = OpenAI(api_key=os.getenv(key_env), timeout=60.0, max_retries=2,
+                        http_client=DefaultHttpxClient(verify=_tls_context()))
     elif provider == "gemini":
         from google import genai
         client = genai.Client(api_key=os.getenv(key_env))
     else:
-        from anthropic import Anthropic
-        client = Anthropic(api_key=os.getenv(key_env), timeout=60.0, max_retries=2)
+        from anthropic import Anthropic, DefaultHttpxClient
+        client = Anthropic(api_key=os.getenv(key_env), timeout=60.0, max_retries=2,
+                           http_client=DefaultHttpxClient(verify=_tls_context()))
     _clients[provider] = client
     return client
 
