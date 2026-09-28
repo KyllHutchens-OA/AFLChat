@@ -1,16 +1,17 @@
 # Web Framework
-Flask==3.0.0
-Flask-SocketIO==5.3.5
-Flask-CORS==4.0.0
-python-socketio==5.10.0
-python-engineio==4.8.0
+Flask==3.1.3
+Werkzeug>=3.1.6
+Flask-SocketIO==5.6.1
+Flask-CORS==6.0.5
+python-socketio==5.17.0
+python-engineio==4.14.0
 
 # Database
 SQLAlchemy>=2.0.36  # Python 3.14 compatibility requires 2.0.36+
 psycopg[binary]>=3.2.0
 alembic==1.13.0
 
-# Agent Framework (let pip resolve compatible versions)
+# Agent Framework (let pip resolve compatible versions; replaced in 1E, not upgraded here)
 langgraph
 langchain
 langchain-core
@@ -23,14 +24,14 @@ scipy>=1.14.0
 
 # Web Scraping
 beautifulsoup4==4.12.2
-requests==2.31.0
+requests==2.34.2
 # lxml removed - incompatible with Python 3.14, using html.parser instead
 
 # Visualization
 # (Recharts on frontend — no Python charting library needed)
 
 # Utilities
-python-dotenv==1.0.0
+python-dotenv==1.2.2
 pydantic>=2.0.0  # Let pip resolve compatible version
 
 # Production Hardening
@@ -40,14 +41,8 @@ cachetools>=5.3.0  # In-memory caching
 # OpenAI (2.16.0+ required for Responses API with gpt-5-nano)
 openai>=2.16.0
 
-# Development
-pytest==7.4.3
-pytest-cov==4.1.0
-black==23.12.0
-flake8==6.1.0
-
-# Monitoring (optional)
-sentry-sdk[flask]==1.39.1
+# Agent SQL safety: full parse-tree validation (app/analytics/validators.py)
+sqlglot>=30.0.0
 
 # Scheduling (for future updates)
 APScheduler==3.10.4
@@ -60,4 +55,15 @@ tavily-python>=0.3.0
 gunicorn>=21.0.0
 gevent>=23.0.0
 gevent-websocket>=0.10.1
-sqlparse>=0.4.4
+
+# Security floors for transitive dependencies (pip-audit 2026-09-28)
+urllib3>=2.7.0
+aiohttp>=3.14.3
+anyio>=4.14.2
+soupsieve>=2.9.0
+idna>=3.15
+orjson>=3.11.6
+Mako>=1.3.12
+click>=8.3.3
+
+# Dev/test tooling lives in requirements-dev.txt

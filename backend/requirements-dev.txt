@@ -1,0 +1,10 @@
+-r requirements.txt
+
+# Development and test tooling (not installed in production)
+pytest>=9.0.3
+pytest-cov>=4.1.0
+black>=26.3.1
+flake8>=6.1.0
+
+# Monitoring (optional, not wired into the app yet)
+sentry-sdk[flask]>=2.8.0
