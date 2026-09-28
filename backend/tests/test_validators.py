@@ -106,6 +106,55 @@ class TestBasicValidSelect:
         assert not is_valid
 
 
+class TestFullTreeValidation:
+    """sqlglot walks the whole tree: statements, subqueries, CTEs, set ops, functions."""
+
+    def _rejected(self, sql, fragment):
+        is_valid, error = SQLValidator.validate(sql)
+        assert not is_valid, f"Expected rejection for: {sql}"
+        assert fragment in (error or ""), error
+
+    def test_multiple_statements_rejected(self):
+        self._rejected("SELECT * FROM matches; DROP TABLE matches;", "single SQL statement")
+        self._rejected("SELECT 1 FROM matches; SELECT 2 FROM teams", "single SQL statement")
+
+    def test_non_allowlisted_table_in_nested_subquery_rejected(self):
+        self._rejected(
+            "SELECT * FROM matches WHERE id IN (SELECT 1 FROM (SELECT * FROM conversations) c)",
+            "conversations",
+        )
+        self._rejected("SELECT season FROM matches UNION SELECT 1 FROM api_usage", "api_usage")
+
+    def test_foreign_schema_rejected(self):
+        self._rejected("SELECT * FROM pg_catalog.pg_user", "Schema not allowed")
+        self._rejected("SELECT * FROM information_schema.tables", "Schema not allowed")
+
+    def test_denylisted_functions_rejected(self):
+        for sql in (
+            "SELECT pg_sleep(10) FROM matches",
+            "SELECT pg_read_file('/etc/passwd')",
+            "SELECT lo_import('/etc/passwd')",
+            "SELECT set_config('statement_timeout', '0', false)",
+            "SELECT query_to_xml('select * from conversations', true, true, '')",
+            "SELECT dblink('host=x', 'select 1')",
+        ):
+            self._rejected(sql, "Function not allowed")
+
+    def test_writes_inside_query_rejected(self):
+        self._rejected("WITH x AS (DELETE FROM matches RETURNING *) SELECT * FROM x", "DELETE")
+        self._rejected("SELECT * INTO new_table FROM matches", "INTO")
+        self._rejected("SELECT * FROM matches FOR UPDATE", "LOCK")
+
+    def test_cte_and_generate_series_allowed(self):
+        for sql in (
+            "WITH t AS (SELECT * FROM teams) SELECT * FROM t",
+            "SELECT g FROM generate_series(1, 3) g",
+            "SELECT name FROM players WHERE name = 'Drop Bear'",
+        ):
+            is_valid, error = SQLValidator.validate(sql)
+            assert is_valid, f"{sql}: {error}"
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))

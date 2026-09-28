@@ -9,9 +9,10 @@ import numpy as np
 from sqlalchemy import text
 from decimal import Decimal
 import logging
+import os
 from scipy import stats as scipy_stats
 
-from app.data.database import Session
+from app.data.database import Session, get_agent_engine, AGENT_STATEMENT_TIMEOUT_MS
 from app.analytics.validators import SQLValidator
 from app.analytics.data_quality import DataQualityChecker
 
@@ -20,10 +21,35 @@ logger = logging.getLogger(__name__)
 
 class DatabaseTool:
     """
-    Tool for querying the AFL database.
+    Tool for querying the AFL database with LLM-generated SQL.
 
-    Security: All SQL queries are validated before execution to prevent injection.
+    Security layers: SQLValidator (single SELECT, allowlisted tables, function
+    denylist), a separate engine on AGENT_DB_STRING (read-only agent_ro role),
+    a READ ONLY transaction with a statement timeout, and a row cap.
     """
+
+    # Hard cap on rows returned to the agent; the query is wrapped in LIMIT MAX_ROWS + 1
+    MAX_ROWS = int(os.getenv("AGENT_MAX_ROWS", "5000"))
+
+    @staticmethod
+    def _run_readonly(sql: str) -> Tuple[pd.DataFrame, bool]:
+        """Execute one validated query in a READ ONLY transaction. Returns (df, truncated)."""
+        capped_sql = (
+            f"SELECT * FROM (\n{sql.strip().rstrip(';').strip()}\n) AS agent_q "
+            f"LIMIT {DatabaseTool.MAX_ROWS + 1}"
+        )
+        with get_agent_engine().connect() as conn:
+            trans = conn.begin()
+            try:
+                conn.exec_driver_sql("SET TRANSACTION READ ONLY")
+                conn.exec_driver_sql(f"SET LOCAL statement_timeout = {AGENT_STATEMENT_TIMEOUT_MS}")
+                result = conn.execute(text(capped_sql))
+                rows = result.fetchmany(DatabaseTool.MAX_ROWS + 1)
+                columns = list(result.keys())
+            finally:
+                trans.rollback()
+        truncated = len(rows) > DatabaseTool.MAX_ROWS
+        return pd.DataFrame(rows[:DatabaseTool.MAX_ROWS], columns=columns), truncated
 
     @staticmethod
     def query_database(sql: str) -> Dict[str, Any]:
@@ -39,15 +65,13 @@ class DatabaseTool:
             - data: DataFrame (if successful)
             - error: str (if failed)
             - rows_returned: int
+            - truncated: bool (row cap hit)
         """
         try:
             logger.info(f"DatabaseTool.query_database called with SQL length={len(sql)}")
-            logger.info(f"SQL preview: {sql[:300]}...")
+            logger.debug(f"SQL: {sql}")
 
-            # Validate SQL
             is_valid, error_message = SQLValidator.validate(sql)
-            logger.info(f"SQL validation result: is_valid={is_valid}, error={error_message}")
-
             if not is_valid:
                 logger.warning(f"SQL validation failed: {error_message}")
                 return {
@@ -57,33 +81,22 @@ class DatabaseTool:
                     "rows_returned": 0
                 }
 
-            # Execute query
-            logger.info("DatabaseTool: Creating database session...")
-            session = Session()
-            logger.info("DatabaseTool: Session created, executing query...")
-
             try:
-                result = session.execute(text(sql))
-                logger.info("DatabaseTool: Query executed, fetching results...")
-                df = pd.DataFrame(result.fetchall(), columns=result.keys())
-                logger.info(f"DatabaseTool: Results fetched, {len(df)} rows")
+                df, truncated = DatabaseTool._run_readonly(sql)
             except Exception as exec_error:
                 # Auto-fix common SQL errors
                 error_str = str(exec_error).lower()
                 if "group by" in error_str or "grouping" in error_str:
                     logger.info("DatabaseTool: Attempting to auto-fix GROUP BY error...")
                     fixed_sql = DatabaseTool._auto_fix_group_by(sql)
-                    if fixed_sql and fixed_sql != sql:
-                        logger.info(f"DatabaseTool: Retrying with fixed SQL: {fixed_sql[:200]}...")
-                        result = session.execute(text(fixed_sql))
-                        df = pd.DataFrame(result.fetchall(), columns=result.keys())
+                    if fixed_sql and fixed_sql != sql and SQLValidator.validate(fixed_sql)[0]:
+                        logger.debug(f"DatabaseTool: Retrying with fixed SQL: {fixed_sql}")
+                        df, truncated = DatabaseTool._run_readonly(fixed_sql)
                         logger.info(f"DatabaseTool: Auto-fix successful, {len(df)} rows")
                     else:
                         raise exec_error
                 else:
                     raise exec_error
-            finally:
-                session.close()
 
             # Convert Decimal types to float for JSON serialization
             if len(df) > 0:
@@ -94,21 +107,22 @@ class DatabaseTool:
                         if len(first_non_null) > 0 and isinstance(first_non_null.iloc[0], Decimal):
                             df[col] = df[col].apply(lambda x: float(x) if isinstance(x, Decimal) else x)
 
+            if truncated:
+                logger.warning(f"DatabaseTool: result capped at {DatabaseTool.MAX_ROWS} rows")
             logger.info(f"Query executed successfully: {len(df)} rows returned")
 
             return {
                 "success": True,
                 "data": df,
                 "error": None,
-                "rows_returned": len(df)
+                "rows_returned": len(df),
+                "truncated": truncated,
             }
 
         except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
             error_type = type(e).__name__
             error_msg = str(e)
-            logger.error(f"Database query error ({error_type}): {error_msg}\n{tb}")
+            logger.error(f"Database query error ({error_type}): {error_msg}", exc_info=True)
 
             # Categorise for logging but return sanitised message to callers
             if "connection" in error_msg.lower() or "connect" in error_msg.lower():
