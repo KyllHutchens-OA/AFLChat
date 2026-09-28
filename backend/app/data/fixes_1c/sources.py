@@ -7,7 +7,6 @@ Pages are cached on disk (AFL_1C_CACHE) so re-runs do not re-hit the sites.
 """
 import json
 import os
-import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime

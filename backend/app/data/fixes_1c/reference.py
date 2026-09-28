@@ -11,7 +11,6 @@ Round contract (matches.round_number / round_name / is_final):
   - legacy matches.round: str(round_number) for H&A, round_name for finals
 """
 from collections import defaultdict
-from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 
 from app.data.fixes_1c.sources import RefGame, aflt_season, squiggle_games, TEAM_IDS

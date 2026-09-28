@@ -15,7 +15,6 @@ only missing (NULL) fields are filled, team_id is set from the page.
 """
 import logging
 import time
-from datetime import datetime
 from typing import Callable, Dict, List, Optional
 
 import requests
@@ -158,13 +157,14 @@ def apply_match_page(session, match: Match, game: Dict, page: Dict, team_ids: Di
             if not player_id:
                 result["players_not_found"] += 1
                 continue
-            stats = {f: p[f] for f in STAT_FIELDS if p.get(f) is not None}
+            # every field explicitly, so unrecorded columns are NULL rather than the 0 default
+            stats = {f: p.get(f) for f in STAT_FIELDS}
             existing = session.query(PlayerStat).filter_by(match_id=match.id, player_id=player_id).first()
             if existing:
                 changed = existing.team_id != team_id
                 existing.team_id = team_id
                 for f, v in stats.items():
-                    if getattr(existing, f) is None:
+                    if v is not None and getattr(existing, f) is None:
                         setattr(existing, f, v)
                         changed = True
                 result["stats_updated"] += int(changed)
