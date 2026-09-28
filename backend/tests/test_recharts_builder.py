@@ -7,11 +7,13 @@ plus the internal→contract chartType mapping (horizontal_bar→bar+orientation
 stacked_bar/grouped_bar/comparison/box→groupedBar), the pie >5-slice "Other"
 grouping, and the None-on-failure guard for empty/malformed inputs.
 """
+from decimal import Decimal
+
 import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from app.visualization.recharts_builder import RechartsBuilder
+from app.visualization.recharts_builder import ChartHelper, RechartsBuilder, nice_domain, nice_number
 from app.visualization.spec import ChartSpecV1
 
 
@@ -52,6 +54,19 @@ class TestLineChart:
         spec = RechartsBuilder.generate_chart(data, "trend", {"x_col": "round", "y_col": "goals"})
         parsed = _validate(spec)
         assert parsed.chartType == "line"
+
+    def test_season_x_gets_linear_curve_hint(self):
+        # Discrete per-season buckets shouldn't be smoothed (B11) — round keeps
+        # the frontend's current default (curve omitted).
+        data = pd.DataFrame({"season": ["2023", "2024"], "wins": [15, 18]})
+        spec = RechartsBuilder.generate_chart(data, "line", {"x_col": "season", "y_col": "wins"})
+        parsed = _validate(spec)
+        assert parsed.curve == "linear"
+
+        data = pd.DataFrame({"round": ["1", "2"], "disposals": [20, 25]})
+        spec = RechartsBuilder.generate_chart(data, "line", {"x_col": "round", "y_col": "disposals"})
+        parsed = _validate(spec)
+        assert parsed.curve is None
 
 
 class TestBarChart:
@@ -115,6 +130,90 @@ class TestGroupedAndStackedBar:
         parsed = _validate(spec)
         assert parsed.chartType == "groupedBar"
         assert len(parsed.series) == 3
+
+
+class TestDivergingBar:
+    """2A: win/loss by season — wins positive, losses negative, same x/season."""
+
+    def test_wins_positive_losses_negative(self):
+        data = pd.DataFrame({"season": [2023, 2024], "wins": [15, 18], "losses": [7, 4]})
+        spec = RechartsBuilder.generate_chart(
+            data, "diverging_bar", {"x_col": "season", "pos_col": "wins", "neg_col": "losses", "title": "x"}
+        )
+        parsed = _validate(spec)
+        assert parsed.chartType == "groupedBar"
+        row_2023 = next(r for r in parsed.data if r["x"] == "2023")
+        assert row_2023["wins"] == 15 and row_2023["losses"] == -7
+        assert parsed.xAxis.integerOnly is True
+
+    def test_null_negated_column_stays_null(self):
+        data = pd.DataFrame({"season": [2023], "wins": [15], "losses": [None]})
+        spec = RechartsBuilder.generate_chart(
+            data, "diverging_bar", {"x_col": "season", "pos_col": "wins", "neg_col": "losses", "title": "x"}
+        )
+        parsed = _validate(spec)
+        assert parsed.data[0]["losses"] is None
+
+
+class TestMultiBarExplicitMetrics:
+    """B1: an explicit metric_cols must win over auto-detecting every numeric
+    column, or an unwanted column (e.g. games) silently joins the chart."""
+
+    def test_metric_cols_restricts_series(self):
+        data = pd.DataFrame({
+            "season": ["2023", "2024"], "games": [23, 24], "wins": [15, 18], "losses": [8, 6],
+        })
+        spec = RechartsBuilder.generate_chart(
+            data, "stacked_bar", {"x_col": "season", "metric_cols": ["wins", "losses"], "title": "x"}
+        )
+        parsed = _validate(spec)
+        assert {s.key for s in parsed.series} == {"wins", "losses"}
+
+
+class TestAxisLabelRedundancy:
+    def test_name_like_columns_get_blank_axis_label(self):
+        assert ChartHelper.axis_label("player_name") == ""
+        assert ChartHelper.axis_label("team") == ""
+        assert ChartHelper.axis_label("name") == ""
+
+    def test_other_columns_still_humanized(self):
+        assert ChartHelper.axis_label("season") == "Season"
+
+    def test_bar_chart_drops_redundant_name_axis(self):
+        data = pd.DataFrame({"player_name": ["Cripps", "Bontempelli"], "disposals": [32, 28]})
+        spec = RechartsBuilder.generate_chart(data, "bar", {"x_col": "player_name", "y_col": "disposals"})
+        parsed = _validate(spec)
+        assert parsed.xAxis.label in (None, "")
+
+
+class TestValueCleaning:
+    """2A: Decimal -> float and rounding at the point values reach the wire spec."""
+
+    def test_decimal_coerced_to_float(self):
+        data = pd.DataFrame({"team": ["Collingwood", "Carlton"], "avg_score": [Decimal("88.5"), Decimal("70.0")]})
+        spec = RechartsBuilder.generate_chart(data, "bar", {"x_col": "team", "y_col": "avg_score"})
+        parsed = _validate(spec)
+        assert isinstance(parsed.data[0]["avg_score"], float)
+
+    def test_float_rounded_to_two_places(self):
+        data = pd.DataFrame({"team": ["Geelong", "Brisbane Lions"], "avg_score": [70.772727, 65.1]})
+        spec = RechartsBuilder.generate_chart(data, "bar", {"x_col": "team", "y_col": "avg_score"})
+        parsed = _validate(spec)
+        assert parsed.data[0]["avg_score"] == 70.77
+
+
+class TestNiceDomain:
+    def test_nice_number_rounds_up_and_down(self):
+        assert nice_number(103, round_up=True) == 200  # nearest of 1/2/2.5/5/10 x 10^n at or above 103
+        assert nice_number(777, round_up=True) == 1000
+        assert nice_number(103, round_up=False) == 100
+
+    def test_nice_domain_starts_at_zero_for_counts(self):
+        assert nice_domain(0, 103, start_at_zero=True) == [0.0, 200]
+
+    def test_nice_domain_never_inverted(self):
+        lo, hi = nice_domain(5, 5, start_at_zero=False)
+        assert lo < hi
 
 
 class TestPieChart:

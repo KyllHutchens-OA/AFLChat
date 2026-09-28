@@ -59,6 +59,11 @@ class SeriesItem(BaseModel):
     # Presence of stackId is how a "stacked" groupedBar is signaled to the
     # frontend (ChartRenderer's renderGroupedBarChart reads it per-series).
     stackId: Optional[str] = None
+    # The AFL team this series should be coloured by (the team itself for a
+    # team series, or a player's most-frequent club for a player series).
+    # Not consumed by ChartRenderer yet — a stepping stone for club-colour
+    # rendering (2A #4); frontend-optional, backend-populated where known.
+    highlight: Optional[str] = None
 
 
 class Annotation(BaseModel):
@@ -104,3 +109,9 @@ class ChartSpecV1(BaseModel):
     # slice-level text labels are suppressed in favor of legend + tooltip to
     # avoid label overlap. Defaults to showing labels when omitted.
     showSliceLabels: Optional[bool] = None
+    # Line-only interpolation hint: "linear" for discrete per-season/round
+    # buckets (smoothing implies values between seasons that don't exist,
+    # and overshoots small integer series); omitted = frontend's current
+    # default. Not consumed by ChartRenderer yet (2A data-contract change
+    # only; the render pass is a later 2C frontend task).
+    curve: Optional[Literal["linear", "monotone"]] = None

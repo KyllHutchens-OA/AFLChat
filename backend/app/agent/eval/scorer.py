@@ -281,10 +281,10 @@ def _check_pairs(pc: PairCheck, truth: List[Dict[str, Any]], turn: TurnResult, f
         series = r.get(pc.series) if pc.series else None
         values = [v for v in [value] + [r.get(a) for a in pc.alts] if v is not None]
         if pc.where == "rows":
-            hit = any(A.row_pair_match(turn.rows, key, v, series, pc.tol) for v in values)
+            hit = any(A.row_pair_match(turn.rows, key, v, series, pc.tol, pc.abs_value) for v in values)
         else:
             hit = bool(turn.chart_spec) and any(
-                A.chart_pair_match(turn.chart_spec, key, v, series, pc.tol) for v in values)
+                A.chart_pair_match(turn.chart_spec, key, v, series, pc.tol, pc.abs_value) for v in values)
         if not hit:
             misses.append(f"{key}{'/' + str(series) if series is not None else ''}={value}")
     frac = 1 - len(misses) / len(rows)
@@ -307,6 +307,8 @@ def _check_chart(
     if not (case.expects_chart or exp):
         return None, None
     if spec is None:
+        if exp is not None and exp.optional:
+            return None, None
         fails.append("chart: expected a chart, none emitted")
         return False, (False if exp and (exp.pairs or exp.scatter_truth) else None)
     if not _chart_spec_valid(spec):
@@ -339,6 +341,9 @@ def _check_chart(
             ok = False
     if exp.min_points is not None and len(spec.get("data") or []) < exp.min_points:
         fails.append(f"chart: {len(spec.get('data') or [])} points, expected >= {exp.min_points}")
+        ok = False
+    if exp.max_points is not None and len(spec.get("data") or []) > exp.max_points:
+        fails.append(f"chart: {len(spec.get('data') or [])} points, expected <= {exp.max_points}")
         ok = False
     if exp.labels:
         labels = A.chart_labels(spec)

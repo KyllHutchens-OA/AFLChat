@@ -67,6 +67,9 @@ const seriesItemSchema = z
     color: z.string().optional(),
     dashed: z.boolean().optional(),
     stackId: z.string().optional(),
+    // AFL team to colour this series by (team itself, or a player's most
+    // frequent club) — not read by ChartRenderer yet, kept for a future pass.
+    highlight: z.string().optional(),
   })
   .passthrough();
 
@@ -103,6 +106,10 @@ export const chartSpecSchema = z
     // Pie-only: false when the backend grouped >5 slices into "Other" — the
     // frontend suppresses on-slice text labels in favor of legend + tooltip.
     showSliceLabels: z.boolean().optional(),
+    // Line-only: "linear" for discrete per-season/round data (smoothing implies
+    // values between seasons that don't exist). Not read by ChartRenderer yet —
+    // a data-contract stepping stone for a later chart-styling pass.
+    curve: z.enum(['linear', 'monotone']).optional(),
   })
   .passthrough();
 

@@ -8,6 +8,8 @@ import pandas as pd
 import math
 from typing import Dict, Any, Optional
 
+from app.visualization.recharts_builder import nice_domain
+
 
 class LayoutConfig:
     """Calculates axis configuration hints for Recharts charts."""
@@ -73,10 +75,10 @@ class LayoutConfig:
         data_range = max_val - min_val
         is_count = metadata.get("is_count_metric", False)
 
-        # Count metrics: always start at 0, integer ticks
+        # Count metrics: always start at 0, integer ticks, nice round max
+        # (a raw 20%-padded max like 103 or 777 lands on an ugly tick — B11).
         if is_count:
-            padding = max(1, max_val * 0.2)
-            config["range"] = [0.0, float(max_val + padding)]
+            config["range"] = nice_domain(0, float(max_val), start_at_zero=True)
             config["dtick"] = 1
             return config
 
@@ -86,9 +88,7 @@ class LayoutConfig:
         is_small_range = data_range < 5 or (variance < mean_val / 3 if mean_val > 0 else False)
 
         if is_small_range and data_range > 0:
-            padding = data_range * 0.1
-            range_min = 0 if min_val < data_range * 0.2 else float(min_val - padding)
-            range_max = float(max_val + padding)
-            config["range"] = [float(range_min), float(range_max)]
+            start_at_zero = min_val < data_range * 0.2
+            config["range"] = nice_domain(float(min_val), float(max_val), start_at_zero=start_at_zero)
 
         return config
