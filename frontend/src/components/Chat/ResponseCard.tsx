@@ -23,9 +23,20 @@ interface ResponseCardProps {
   text: string;
   visualization?: any;
   isError?: boolean;
+  dataAsOf?: string;
 }
 
-const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isError }) => {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// 'YYYY-MM-DD' -> '26 Sep 2026' (string parsing, so no timezone shift).
+const formatDataAsOf = (iso: string): string | null => {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d || m > 12) return null;
+  return `${d} ${MONTHS[m - 1]} ${y}`;
+};
+
+const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isError, dataAsOf }) => {
+  const asOf = dataAsOf ? formatDataAsOf(dataAsOf) : null;
   if (isError) {
     return (
       <div className="card-apple border-l-4 border-l-red-400 p-5">
@@ -58,6 +69,7 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isErro
           </ChartErrorBoundary>
         </>
       )}
+      {asOf && <p className="mt-3 text-xs text-afl-warm-600">Data as of {asOf}</p>}
     </div>
   );
 };

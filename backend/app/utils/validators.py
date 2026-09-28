@@ -39,6 +39,7 @@ class ChatMessageRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, max_length=100)
     owner_token: Optional[str] = Field(None, max_length=128)
     source: Optional[str] = Field(None, max_length=20)
+    spoiler_mode: Optional[bool] = None  # v3: answer without revealing results
 
     @field_validator('message')
     @classmethod

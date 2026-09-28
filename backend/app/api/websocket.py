@@ -13,6 +13,7 @@ from pydantic import ValidationError
 import logging
 import asyncio
 import json
+import os
 import re
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,12 @@ WS_RATE_LIMIT = 10  # messages per minute
 
 # sid -> server-issued visitor id (single worker, see Procfile)
 _sid_visitors: dict = {}
+
+# v2 (LangGraph pipeline) is the default; v3 is the tool-calling loop in app/agent/v3.
+AGENT_ENGINE = os.getenv("AGENT_ENGINE", "v2").lower()
+if AGENT_ENGINE == "v3":
+    from app.agent.v3.tools.entities import warm_async
+    warm_async()
 
 
 def _check_ws_rate_limit(ip: str) -> bool:
@@ -73,7 +80,8 @@ def handle_chat_message(data):
             "message": "user query" (1-2000 chars),
             "conversation_id": "uuid" (optional),
             "owner_token": "token from conversation_started" (required to continue a conversation),
-            "source": "aflagent" (optional)
+            "source": "aflagent" (optional),
+            "spoiler_mode": true/false (optional, v3 only)
         }
     """
     from flask import request
@@ -107,6 +115,13 @@ def handle_chat_message(data):
             f"conversation_id={conversation_id}"
         )
         logger.debug(f"Message content: {user_query}")
+
+        if AGENT_ENGINE == "v3":
+            from app.agent.v3.ws_stream import handle_chat_message_v3
+            handle_chat_message_v3(payload, emit=session_emit, session_id=session_id,
+                                   visitor_id=visitor_id, ip_address=ip_address,
+                                   rate_limit_ok=_check_ws_rate_limit)
+            return
 
         # WebSocket rate limit check (10/min per IP)
         if not _check_ws_rate_limit(ip_address or session_id):

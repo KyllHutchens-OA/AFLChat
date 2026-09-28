@@ -10,7 +10,7 @@ This is **Footy-NAC** (Not Another Commentator): an AI-powered AFL analytics pla
 AFL App/
 ├── backend/                     # Flask + LangGraph API
 │   ├── app/
-│   │   ├── agent/               # LangGraph pipeline (graph, state, nodes, prompts/, eval/)
+│   │   ├── agent/               # v2 LangGraph pipeline (graph, nodes, prompts/, eval/) + v3/ tool-calling loop and llm.py
 │   │   ├── api/                 # REST + WebSocket endpoints (routes, websocket, analytics, reports)
 │   │   ├── analytics/           # Entity resolver, context enrichment, stats, validators
 │   │   ├── data/                # SQLAlchemy models, database.py, ingestion scripts, migrations
@@ -53,7 +53,7 @@ AFL App/
 | Layer        | Technology                                      |
 |--------------|-------------------------------------------------|
 | Backend      | Flask, Flask-SocketIO, LangGraph, SQLAlchemy    |
-| LLM          | OpenAI `gpt-5-mini` (main), `gpt-5-nano` (news) |
+| LLM          | `gpt-6-luna` (OpenAI Responses API) for chat, summaries and news, via the provider-thin `app/agent/v3/llm.py` (OpenAI, Gemini, Anthropic adapters) |
 | Database     | PostgreSQL (Supabase / Railway), psycopg3       |
 | Frontend     | React 18, Vite, TypeScript, TailwindCSS         |
 | Charts       | Recharts (backend emits validated `ChartSpecV1` JSON; frontend renders) |
@@ -101,8 +101,15 @@ ANALYTICS_ADMIN_TOKEN=...        # Bearer token for /api/analytics/*; unset = al
 Optional:
 ```
 RUN_SCHEDULER=false              # true only on the one process that runs jobs + SSE listener
-OPENAI_MODEL=gpt-5-mini          # Main LLM (every model must have a PRICING entry, usage_tracker.py)
-NEWS_ENRICHMENT_MODEL=gpt-5-nano # Cheap enrichment LLM
+AGENT_ENGINE=v2                  # v2 (LangGraph, default) or v3 (tool-calling loop)
+AGENT_MODEL=gpt-6-luna           # Chat model (both engines), reasoning effort low
+AGENT_EFFORT=low                 # v3 reasoning effort
+SUMMARY_MODEL=gpt-6-luna         # Live game quarter/final summaries
+NEWS_ENRICHMENT_MODEL=gpt-6-luna # News enrichment, reasoning off
+NEWS_SERVICE_TIER=flex           # OpenAI tier for news enrichment (half price)
+EVAL_JUDGE_MODEL=...             # Optional eval judge model (defaults to AGENT_MODEL)
+GEMINI_API_KEY=...               # Only for gemini-* models (bake-off / fallback)
+ANTHROPIC_API_KEY=...            # Only for claude-* models (bake-off)
 DAILY_LIMIT_PER_VISITOR=50 / DAILY_LIMIT_PER_IP=150 / GLOBAL_DAILY_LIMIT_USD=5.00
 AGENT_STATEMENT_TIMEOUT_MS=5000 / AGENT_MAX_ROWS=5000
 API_SPORTS_KEY=...               # Live player stats
@@ -165,10 +172,24 @@ User Query
    Template (simple) or LLM (complex) → natural language
 ```
 
+**v3 engine (`AGENT_ENGINE=v3`, `app/agent/v3/`)**: one tool-calling loop that replaces the pipeline above once the 1E gate passes:
+- `loop.py` `AgentLoop`: system prompt (`prompt.py`, cache-stable) + typed tools (`tools/`: resolve_entities, player_stats, leaderboard, team_results, head_to_head, match_lookup, ladder, news, run_sql, make_chart), max 6 tool calls, parallel tool calls, streamed answer
+- every tool returns `{rows, row_count, result_id, columns, why_empty, notes}`; `make_chart` builds a validated ChartSpecV1 and returns errors to the model
+- `ws_stream.py`: WS events `received` -> `thinking` (per tool call) -> `response_delta` -> `visualization` -> `response` -> `complete` (with `data_as_of`)
+- conversation memory: compact tool calls in message metadata (`history.py`); per-turn trace rows in `chat_traces` (`scripts/db/1e_chat_traces.sql`)
+- security: `api/websocket.py` validates the payload and resolves the signed visitor id and ProxyFix IP before handing off to `ws_stream.py`, which applies the owner-token check, rate limit and fail-closed budgets; typed tools run on the `agent_ro` engine and `run_sql` goes through `DatabaseTool` (sqlglot validator)
+- `runner.py` `run_turn(question, history, model=...)` for evals and scripts; `scripts/v3_latency.py`, `scripts/v3_bakeoff.py`
+
 **Key details:**
 - In-memory LRU cache (128 entries) for identical (query, context) pairs; correction turns bypass cache reads
 - Real token usage accumulated in `state["token_usage"]` across every LLM call
-- Eval harness: `cd backend && venv/bin/python -m app.agent.eval --subset smoke15 [--judge]` (in-process; `--ws` drives a running backend). WS-level benchmark: `backend/venv/bin/python scripts/benchmark_chat.py` + `scripts/score_baseline.py`. Results in `scripts/benchmark_results/`; before/after summary in `docs/BENCHMARK_BEFORE_AFTER.md`
+- Eval harness (engine-agnostic, live ground truth; the gate for replacing v2): run from `backend/`
+  - `venv/bin/python -m app.agent.eval --subset smoke` (fast, ~20 cases); `--subset full` (121 ground-truth cases, the gate); `dev` (full minus 20 held-out cases: tune on this, never on `heldout`); `adversarial`; `--list-subsets`
+  - `--engine v2|v2-ws|v3` (v3 adapter lands in 1E at `app/agent/eval/engines/v3.py`); `--case id1,id2`; `--repeat 3` (stability); `--strict` (also fails flaky cases, turns over `--max-turn-budget` 30s / `--token-budget`, and p90 over `--p90-budget` 15s)
+  - `--truth-only` prints each case's live verification-SQL result without calling any LLM; `--judge [--judge-model M]` is triage only (never changes pass/fail)
+  - Baselines: `--save-baseline <name>` writes `app/agent/eval/baselines/<name>.json`; `--compare <name>` diffs a run per case (status, latency, tokens); `--diff A B` diffs two saved reports; `--rescore <name>` re-scores saved turns against current cases + live truth (no LLM). v2 baseline: `baselines/v2_2026-09-28.json`
+  - The engine's DB connections are forced read-only during evals (`--allow-db-writes` to disable)
+- WS-level benchmark (legacy M0): `backend/venv/bin/python scripts/benchmark_chat.py` + `scripts/score_baseline.py`. Before/after summary in `docs/BENCHMARK_BEFORE_AFTER.md`
 
 ---
 
@@ -211,7 +232,7 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 
 **WebSocket** (`/socket.io` via `api/websocket.py`):
 - `connect` — takes `auth.visitor_token` (server-signed) or issues one via `visitor_token`
-- Event `chat_message` — `{message (<=2000 chars), conversation_id?, owner_token?}`; runs agent, emits `thinking` progress events; a new conversation emits `conversation_started {conversation_id, owner_token}` (the only time the token is sent)
+- Event `chat_message`: `{message (<=2000 chars), conversation_id?, owner_token?, source?, spoiler_mode? (bool)}`; runs agent, emits `thinking` progress events; a new conversation emits `conversation_started {conversation_id, owner_token}` (the only time the token is sent)
 - Rate limited: 10 messages/min per IP; daily per-visitor + per-IP + global budget, fail closed
 
 **Security model** (1A): agent SQL passes `SQLValidator` (sqlglot, full tree) and runs as `agent_ro` in a READ ONLY transaction with a row cap; roles in `scripts/db/roles.sql`. `ProxyFix(x_for=1)` is the only source of client IPs; never read `X-Forwarded-For` directly.
@@ -222,10 +243,10 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 
 | Service         | Purpose                          | Env Var             | Notes                        |
 |-----------------|----------------------------------|---------------------|------------------------------|
-| OpenAI          | LLM for reasoning & SQL          | `OPENAI_API_KEY`    | gpt-5-mini + gpt-5-nano      |
+| OpenAI          | LLM (chat, summaries, news)      | `OPENAI_API_KEY`    | gpt-6-luna, Responses API    |
 | Squiggle API    | Live games (SSE) + historical    | —                   | `api.squiggle.com.au`        |
 | API-Sports      | Live player stats                | `API_SPORTS_KEY`    | 30s cache TTL                |
-| RSS feeds       | AFL news (SMH, The Age, ABC)     | —                   | Enriched with gpt-5-nano     |
+| RSS feeds       | AFL news (SMH, The Age, ABC)     | none                | Enriched by NEWS_ENRICHMENT_MODEL |
 
 ---
 
@@ -283,7 +304,7 @@ Wire-format chart types (`ChartSpecV1.chartType`, camelCase): `line`, `bar`, `gr
 
 - `conversation_service.py` — JSONB chat history CRUD
 - `live_game_service.py` — Squiggle SSE polling, scoring events, WebSocket broadcast
-- `game_summary_service.py` — GPT-5-mini narrative summaries per quarter
+- `game_summary_service.py`: SUMMARY_MODEL narrative summaries per quarter
 - `api_sports_service.py` — live player stats with caching
 - `scheduler.py` — background jobs (news fetch, live game polling, stats ingestion)
 
@@ -330,7 +351,7 @@ kicks, handballs, disposals, marks, tackles, goals, behinds, hitouts, clearances
 ## Middleware
 
 - `rate_limiter.py` — Flask-Limiter, 10 req/min per IP, HTTP 429 on limit
-- `usage_tracker.py` — daily budget per visitor + global; token counting; cost calculation
+- `usage_tracker.py`: daily budget per visitor + per IP + global (fail closed); token counting; cost from `llm.PRICES`
 
 ---
 
@@ -362,7 +383,7 @@ Chat pipeline restructure (Milestones 0–5, complete):
 2. **Supabase pooler** — prepared statements must be disabled (`prepare=False` in psycopg3)
 3. **React StrictMode** — socket hook uses singleton pattern to prevent double-connect
 4. **Round field is a string** — rounds can be "1"–"24", "Opening Round", "Qualifying Final", etc. (V3 migration)
-5. **LLM model env vars** — always use `OPENAI_MODEL` / `NEWS_ENRICHMENT_MODEL` env vars, never hardcode model strings
+5. **LLM calls**: go through `app/agent/v3/llm.py` (`chat` / `complete`); model names come only from `AGENT_MODEL` / `SUMMARY_MODEL` / `NEWS_ENRICHMENT_MODEL` (defaults in `llm.MODEL_ENV_DEFAULTS`), prices from `llm.PRICES`, the single pricing table (an unknown model raises, and `validate_configured_models` checks every configured model at startup). Pass `track_endpoint` for background calls so api_usage records real model and cost. `OPENAI_MODEL`, `OPENAI_MODEL_FAST` and `OPENAI_MODEL_RESPONSE` are removed (a warning is logged if still set)
 6. **Single gunicorn worker** — WebSocket state is in-process; scaling to multiple workers requires Redis adapter
 7. **AFL Tables round numbering** — AFL Tables and Squiggle may number rounds differently (Opening Round offset). The stats ingester matches by team IDs + date, not round number
 8. **AFL Tables update delay** — player stats appear on afltables.com 1–3 days after a round completes. The 6 AM daily job will pick them up automatically once available

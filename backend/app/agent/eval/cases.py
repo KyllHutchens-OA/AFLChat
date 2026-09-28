@@ -1,40 +1,37 @@
 """
-Eval case definitions.
+Eval case definitions and subsets.
 
-Three sources of cases, merged here:
+Sources, merged here:
 
-1. SMOKE15 — the 15-case gate set. Mirrors the Milestone-0 benchmark
-   (scripts/benchmark_chat.py: 7 singles + 3 two-turn correction pairs +
-   2 known-no-data queries, same ids so before/after comparison is trivial)
-   plus 3 cases derived from the salvaged pre-restructure eval data.
-   Expected facts were verified against the live DB on 2026-07-08; each
-   case's `verification_sql` records how.
+1. GATE: the original 15-case M5 gate set (same ids as the Milestone-0
+   benchmark so before/after comparison stays trivial), rewritten in 1D to
+   use LIVE ground truth: each case's `verification_sql` runs at eval time
+   and `truth` / `chart` expectations point at its columns. No hard-coded
+   numbers, so "this season" cases no longer rot.
 
-2. SALVAGED — the old `app/agent/eval/test_cases.py` suite, recovered from
-   its CPython 3.14 bytecode (`test_cases.cpython-314.pyc`) by walking
-   `co_consts` (the source file itself was deleted). Old field semantics
-   were mapped onto the new EvalCase model:
-       expect_response_contains  -> expected_facts
-       expect_response_not_contains -> forbidden
-       expect_chart_type         -> expects_chart (type-agnostic: validity
-                                    is checked against ChartSpecV1, not the
-                                    old Plotly type vocabulary)
-       expect_no_chart           -> expects_no_chart
-       expect_sql_substring      -> expected_sql_substrings
-       conversation_history      -> conversation_history (as-is)
+2. BANK (case_bank.py): 1D ground-truth families: current-season finals,
+   ladder, nicknames, corrections, clarification, off-topic, injection,
+   namesakes, Brisbane Bears/Lions, per-game averages, multi-team trends,
+   scatter, multi-metric compare, quarters, ties, win/loss, no-data,
+   coverage caveats, history.
 
-3. eval_queries.txt (repo root) — all 128 exploratory queries, parsed and
-   auto-tagged. These carry no hand-verified facts, so they are only
-   meaningfully scored with --judge.
+3. SALVAGED: the old `app/agent/eval/test_cases.py` suite, recovered from
+   its bytecode in M5. Static string checks only; kept as a legacy subset.
 
-Subsets (see SUBSETS): smoke15, corrections, no-data, charts, salvaged,
-queries, all.
+4. eval_queries.txt (repo root): 128 exploratory queries, auto-tagged, no
+   ground truth (only meaningful with --judge).
+
+Subsets (see build_subsets): smoke, full, dev, heldout, adversarial, plus
+per-family subsets (e.g. fin, lad, chart) and the legacy smoke15,
+corrections, no-data, charts, salvaged, queries, all.
 """
 import re
 from pathlib import Path
 from typing import Dict, List
 
-from app.agent.eval.models import EvalCase
+from app.agent.eval.case_bank import BANK, T, TR
+from app.agent.eval.models import ChartExpect, EvalCase, Fact, PairCheck
+from app.agent.eval.sqlkit import CUR, grand_final, leaders, per_season_wins, player_total, record
 
 # Repo root: backend/app/agent/eval/cases.py -> up 4 levels.
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -42,112 +39,102 @@ EVAL_QUERIES_PATH = REPO_ROOT / "eval_queries.txt"
 
 
 # ---------------------------------------------------------------------------
-# 1. SMOKE15 — the gate set (12 M0-benchmark mirrors + 3 salvaged-derived).
+# 1. GATE: the M5 smoke15 cases with live ground truth.
 # ---------------------------------------------------------------------------
-SMOKE15: List[EvalCase] = [
+GATE: List[EvalCase] = [
     EvalCase(
         id="single_01",
         queries=["How many games has Collingwood won this season?"],
-        tags=["smoke", "single", "current_season"],
+        tags=["smoke", "smoke15", "single", "current_season"],
         source="m0_benchmark",
-        description="Current-season team wins; 'this season' resolves via the dynamic season ceiling (M1).",
+        description="Current-season team wins; 'this season' = max season in the DB.",
         expected_facts=["collingwood"],
-        # 9 = Collingwood wins in season 2026 (both completed-to-date and
-        # full-season counts agree); 17 = the 2025 answer accepted at baseline.
-        expected_any=["9", "17"],
-        verification_sql=(
-            "select count(*) filter (where (home_team_id=14 and home_score>away_score) "
-            "or (away_team_id=14 and away_score>home_score)) from matches "
-            "where (home_team_id=14 or away_team_id=14) and season=2026 and home_score is not null"
-        ),
+        verification_sql=record(14, CUR),
+        truth=[T("wins", alts=["wins_ha"])],
     ),
     EvalCase(
         id="single_02",
         queries=["Who won the Brownlow Medal in 2023?"],
-        tags=["smoke", "single", "award"],
+        tags=["smoke", "smoke15", "single", "award"],
         source="m0_benchmark",
         description="Historical award fact.",
-        # Real-world winner is Bontempelli (29 votes); the DB's brownlow_votes
-        # column aggregates to Neale 31 for 2023 (known data-quality quirk
-        # flagged at baseline) — accept either name.
-        expected_any=["bontempelli", "neale"],
-        verification_sql=(
-            "select p.name, sum(ps.brownlow_votes) v from player_stats ps "
-            "join players p on p.id=ps.player_id join matches m on m.id=ps.match_id "
-            "where m.season=2023 group by p.name order by v desc limit 3"
-        ),
+        # Lachie Neale won the 2023 Brownlow with 31 votes; Marcus Bontempelli
+        # was runner-up on 29. The DB's brownlow_votes agree. (The M5 comment
+        # here had it backwards and accepted either name: a false pass.)
+        verification_sql=leaders("sum(coalesce(ps.brownlow_votes,0))", "2023", 1, alias="votes"),
+        truth=[T("name", all_rows=True), T("votes")],
+        notes="Neale 31 won; Bontempelli 29 was second. Naming Bontempelli as winner is wrong.",
     ),
     EvalCase(
         id="single_03",
         queries=["Show me a chart of Melbourne's wins per season since 2018"],
-        tags=["smoke", "single", "chart", "trend"],
+        tags=["smoke15", "single", "chart", "trend"],
         source="m0_benchmark",
-        description="Wins-per-season trend; should emit a valid ChartSpecV1 (line).",
+        description="Wins-per-season trend; one line, one point per season, values = DB.",
         expected_facts=["melbourne"],
-        expected_any=["2018"],
-        expects_chart=True,
-        verification_sql=(
-            "select season, count(*) filter (where (home_team_id=21 and home_score>away_score) "
-            "or (away_team_id=21 and away_score>home_score)) from matches "
-            "where (home_team_id=21 or away_team_id=21) and season>=2018 group by season"
+        verification_sql=per_season_wins({21: "Melbourne"}, 2018),
+        chart=ChartExpect(
+            types=["line", "bar", "area"],
+            series=1,
+            pairs=[PairCheck(key="season", value="value", min_frac=0.9)],
         ),
-        notes="DB wins by season: 2018:16 2019:5 2020:9 2021:20 2022:16 2023:16 2024:11 2025:7 2026:10",
     ),
     EvalCase(
         id="single_04",
         queries=["What's Dustin Martin's career goals tally?"],
-        tags=["smoke", "single", "career_total"],
+        tags=["smoke15", "single", "career_total"],
         source="m0_benchmark",
         description="Career aggregate for a retired player.",
-        expected_facts=["338"],
-        verification_sql=(
-            "select sum(goals) from player_stats ps join players p on p.id=ps.player_id "
-            "where p.name ilike '%dustin martin%'"
-        ),
+        verification_sql=player_total("Dustin Martin", {"goals": "sum(coalesce(ps.goals,0))"}),
+        truth=[T("goals")],
     ),
     EvalCase(
         id="single_05",
         queries=["What was the score in the 2024 grand final?"],
-        tags=["smoke", "single", "match_result"],
+        tags=["smoke", "smoke15", "single", "match_result"],
         source="m0_benchmark",
         description="Exact score lookup.",
-        expected_facts=["brisbane", "120", "60"],
-        verification_sql=(
-            "select home_team_id, away_team_id, home_score, away_score from matches "
-            "where season=2024 and round='Grand Final'  -- Sydney 60, Brisbane Lions 120"
-        ),
+        verification_sql=grand_final("2024"),
+        truth=[T("winner"), T("loser"), T("winner_score"), T("loser_score")],
     ),
     EvalCase(
         id="single_06",
         queries=["Show me a pie chart of scoring sources - goals vs behinds for Sydney in 2024"],
-        tags=["smoke", "single", "chart", "pie"],
+        tags=["smoke15", "single", "chart", "pie"],
         source="m0_benchmark",
-        description="Pie chart with two DB-verifiable slices (baseline's worst failure: fabricated numbers).",
+        description="Pie with two DB-verifiable slices. Team behinds include rushed behinds "
+        "(match level); player_stats behinds do not. Either total is accepted.",
         expected_facts=["sydney"],
-        expected_any=["366", "239"],
-        expects_chart=True,
         verification_sql=(
-            "select sum(ps.goals), sum(ps.behinds) from player_stats ps "
-            "join matches m on m.id=ps.match_id where ps.team_id=26 and m.season=2024"
-            "  -- goals=366, behinds=239"
+            "select (select sum(case when home_team_id=26 then home_q4_goals else away_q4_goals end) from matches "
+            "where season=2024 and 26 in (home_team_id, away_team_id)) goals, "
+            "(select sum(case when home_team_id=26 then home_q4_behinds else away_q4_behinds end) from matches "
+            "where season=2024 and 26 in (home_team_id, away_team_id)) behinds, "
+            "(select sum(coalesce(ps.goals,0)) from player_stats ps join matches m on m.id=ps.match_id "
+            "where m.season=2024 and ps.team_id=26) ps_goals, "
+            "(select sum(coalesce(ps.behinds,0)) from player_stats ps join matches m on m.id=ps.match_id "
+            "where m.season=2024 and ps.team_id=26) ps_behinds"
         ),
+        chart=ChartExpect(types=["pie", "bar"]),
+        truth=[
+            Fact(col="goals", alts=["ps_goals"], where=["chart", "text"]),
+            Fact(col="behinds", alts=["ps_behinds"], where=["chart", "text"]),
+        ],
     ),
     EvalCase(
         id="single_07",
         queries=["What's Carlton's win-loss record against Essendon since 1990?"],
-        tags=["smoke", "single", "head_to_head"],
+        tags=["smoke", "smoke15", "single", "head_to_head"],
         source="m0_benchmark",
-        description="Head-to-head record with a since-year filter (baseline answered the wrong question).",
-        expected_facts=["31", "34"],
-        expected_any=["69"],
+        description="Head-to-head record with a since-year filter.",
         verification_sql=(
-            "select count(*), count(*) filter (where (home_team_id=13 and home_score>away_score) "
-            "or (away_team_id=13 and away_score>home_score)), count(*) filter (where "
-            "(home_team_id=15 and home_score>away_score) or (away_team_id=15 and "
-            "away_score>home_score)) from matches where season>=1990 and "
+            "select count(*) games, count(*) filter (where (home_team_id=13 and home_score>away_score) "
+            "or (away_team_id=13 and away_score>home_score)) carlton_wins, count(*) filter (where "
+            "(home_team_id=15 and home_score>away_score) or (away_team_id=15 and away_score>home_score)) essendon_wins "
+            "from matches where season>=1990 and home_score is not null and "
             "((home_team_id=13 and away_team_id=15) or (home_team_id=15 and away_team_id=13))"
-            "  -- 69 games, Carlton 31, Essendon 34"
         ),
+        truth=[T("carlton_wins"), T("essendon_wins")],
     ),
     EvalCase(
         id="pair_01",
@@ -155,18 +142,12 @@ SMOKE15: List[EvalCase] = [
             "Who kicked the most goals last round?",
             "No, I meant round 10 of the 2024 season, not last round.",
         ],
-        tags=["smoke", "pair", "correction"],
+        tags=["smoke15", "pair", "correction"],
         source="m0_benchmark",
         description="Relative-time query then an explicit correction pinning round+season.",
         is_correction=True,
-        expected_facts=["5"],
-        expected_any=["cameron", "lohmann", "waterman", "hardwick"],
-        verification_sql=(
-            "select p.name, ps.goals from player_stats ps join players p on p.id=ps.player_id "
-            "join matches m on m.id=ps.match_id where m.season=2024 and m.round='10' "
-            "order by ps.goals desc nulls last limit 4"
-            "  -- Lohmann/Cameron/Waterman/Hardwick all 5"
-        ),
+        verification_sql=leaders("sum(coalesce(ps.goals,0))", "2024", 1, "m.round = '10'"),
+        truth=[T("value", alts=["value_ha"]), T("name", all_rows=True)],
     ),
     EvalCase(
         id="pair_02",
@@ -174,17 +155,18 @@ SMOKE15: List[EvalCase] = [
             "Show me Patrick Cripps's stats for 2023",
             "Sorry, I meant Marcus Bontempelli, not Cripps.",
         ],
-        tags=["smoke", "pair", "correction"],
+        tags=["smoke15", "pair", "correction"],
         source="m0_benchmark",
         description="Player-swap correction; final answer must be Bontempelli's 2023 numbers.",
         is_correction=True,
         expected_facts=["bontempelli"],
-        expected_any=["636", "27.7", "27.65"],  # total disposals or per-game average
-        verification_sql=(
-            "select count(*), sum(disposals) from player_stats ps join players p on "
-            "p.id=ps.player_id join matches m on m.id=ps.match_id where p.name ilike "
-            "'%bontempelli%' and m.season=2023  -- 23 games, 636 disposals"
+        verification_sql=player_total(
+            "Marcus Bontempelli",
+            {"disposals": "sum(ps.disposals)", "avg_disposals": "round(avg(ps.disposals), 2)"},
+            "2023",
+            where="coalesce(ps.disposals, 0) > 0",
         ),
+        truth=[TR("disposals", alts=["avg_disposals"])],
     ),
     EvalCase(
         id="pair_03",
@@ -192,79 +174,78 @@ SMOKE15: List[EvalCase] = [
             "What was the score in the 2023 grand final?",
             "Actually I meant the 2022 grand final, not 2023.",
         ],
-        tags=["smoke", "pair", "correction"],
+        tags=["smoke", "smoke15", "pair", "correction"],
         source="m0_benchmark",
         description="Year-swap correction on an exact score lookup.",
         is_correction=True,
-        expected_facts=["geelong", "133", "52"],
-        verification_sql=(
-            "select home_team_id, away_team_id, home_score, away_score from matches "
-            "where season=2022 and round='Grand Final'  -- Geelong 133, Sydney 52"
-        ),
+        verification_sql=grand_final("2022"),
+        truth=[T("winner"), T("winner_score"), T("loser_score")],
     ),
     EvalCase(
         id="nodata_01",
         queries=["What were Nick Daicos's stats in 2015?"],
-        tags=["smoke", "nodata"],
+        tags=["smoke15", "nodata"],
         source="m0_benchmark",
-        description="Player existed but has no rows before 2022; response must explain why.",
+        description="Player has no rows before his debut; response must explain why.",
         expects_no_data=True,
         expected_facts=["daicos"],
-        expected_any=["2022", "covers", "debut"],
+        expected_any=["covers", "debut", "first season", "didn't play", "did not play"],
         verification_sql=(
-            "select min(m.season) from matches m join player_stats ps on ps.match_id=m.id "
-            "join players p on p.id=ps.player_id where p.name='Nick Daicos'  -- 2022"
+            "select min(m.season) first_season from matches m join player_stats ps on ps.match_id=m.id "
+            "join players p on p.id=ps.player_id where p.name='Nick Daicos'"
         ),
     ),
     EvalCase(
         id="nodata_02",
         queries=["What was the score in the 2030 AFL grand final?"],
-        tags=["smoke", "nodata"],
+        tags=["smoke", "smoke15", "nodata"],
         source="m0_benchmark",
-        description="Season out of range (data covers 1990-2026); response must say so.",
+        description="Season out of range; response must name the covered range.",
         expects_no_data=True,
-        expected_any=["2026", "1990"],
-        verification_sql="select max(season) from matches  -- 2026",
+        verification_sql="select min(season) lo, max(season) hi from matches",
+        truth=[T("hi", alts=["lo"])],
     ),
-    # ── Salvaged-derived additions (old eval suite, DB-verified 2026-07-08) ──
     EvalCase(
         id="salv_player_goals",
         queries=["How many goals did Charlie Curnow kick in 2024?"],
-        tags=["smoke", "single", "salvaged"],
+        tags=["smoke15", "single", "salvaged"],
         source="salvaged",
         description="Salvaged 'player_goals_season' case: player+season stat join.",
-        expected_facts=["curnow", "57"],
-        verification_sql=(
-            "select sum(ps.goals) from player_stats ps join players p on p.id=ps.player_id "
-            "join matches m on m.id=ps.match_id where p.name ilike '%charlie curnow%' "
-            "and m.season=2024  -- 57"
-        ),
+        expected_facts=["curnow"],
+        verification_sql=player_total("Charlie Curnow", {"goals": "sum(coalesce(ps.goals,0))"}, "2024"),
+        truth=[T("goals")],
     ),
     EvalCase(
         id="salv_top_disposals",
         queries=["Top 5 disposal getters in 2024"],
-        tags=["smoke", "single", "top_n", "salvaged"],
+        tags=["smoke15", "single", "top_n", "salvaged"],
         source="salvaged",
-        description="Salvaged 'top_disposals' case: top-N ranking.",
-        expected_facts=["green"],
-        expected_any=["770", "neale", "whitfield"],
-        verification_sql=(
-            "select p.name, sum(ps.disposals) d from player_stats ps join players p on "
-            "p.id=ps.player_id join matches m on m.id=ps.match_id where m.season=2024 "
-            "group by p.name order by d desc limit 5"
-            "  -- Tom Green 770, Neale 762, Whitfield 754, Treloar 725, Zorko 711"
-        ),
+        description="Top-N ranking; names AND totals must match (Tom Green's 770 is split by team-swapped rows).",
+        verification_sql=leaders("sum(ps.disposals)", "2024", 5),
+        truth=[T("name", all_rows=True)],
+        pairs=[PairCheck(key="name", value="value", alts=["value_ha"], min_frac=0.8)],
     ),
     EvalCase(
         id="salv_chart_trend",
         queries=["Show Carlton's average score per season from 2015 to 2024"],
-        tags=["smoke", "chart", "trend", "salvaged"],
+        tags=["smoke15", "chart", "trend", "salvaged"],
         source="salvaged",
-        description="Salvaged 'chart_trend_line' case: season trend should chart.",
+        description="Season trend chart with DB-equal values.",
         expected_facts=["carlton"],
-        expects_chart=True,
+        verification_sql=(
+            "select m.season, round(avg(case when m.home_team_id=13 then m.home_score else m.away_score end), 2) value "
+            "from matches m where 13 in (m.home_team_id, m.away_team_id) and m.season between 2015 and 2024 "
+            "group by m.season order by 1"
+        ),
+        chart=ChartExpect(
+            types=["line", "bar", "area"],
+            series=1,
+            pairs=[PairCheck(key="season", value="value", tol=0.6, min_frac=0.9)],
+        ),
     ),
 ]
+# Back-compat alias for older imports.
+SMOKE15 = GATE
 
 
 # ---------------------------------------------------------------------------
@@ -499,23 +480,44 @@ def parse_eval_queries(path: Path = EVAL_QUERIES_PATH) -> List[EvalCase]:
 # ---------------------------------------------------------------------------
 # Subsets
 # ---------------------------------------------------------------------------
+# Families = id prefix of BANK cases (fin, lad, nick, ...).
+def _family(case: EvalCase) -> str:
+    return case.id.split("_")[0]
+
+
+def truth_cases() -> List[EvalCase]:
+    """Every case with ground truth or asserted behaviour (gate + bank)."""
+    return [*GATE, *BANK]
+
+
 def build_subsets() -> Dict[str, List[EvalCase]]:
     """Build the named subset -> cases mapping (parses eval_queries.txt lazily)."""
+    full = truth_cases()
     parsed = parse_eval_queries()
     subsets: Dict[str, List[EvalCase]] = {
-        "smoke15": list(SMOKE15),
-        "corrections": [c for c in SMOKE15 if c.is_correction],
-        "no-data": [c for c in SMOKE15 if c.expects_no_data]
-        + [c for c in SALVAGED if c.expects_no_data],
-        "charts": [c for c in SMOKE15 if c.expects_chart]
-        + [c for c in SALVAGED if c.expects_chart or c.expects_no_chart],
+        # Fast gate: representative, one or two per family.
+        "smoke": [c for c in full if "smoke" in c.tags],
+        # The 1E gate: every ground-truth case, held-out included.
+        "full": full,
+        # For iterating on prompts/tools: never tune against held-out cases.
+        "dev": [c for c in full if "heldout" not in c.tags],
+        "heldout": [c for c in full if "heldout" in c.tags],
+        "adversarial": [c for c in full if "adversarial" in c.tags],
+        "charts": [c for c in full if c.expects_chart or c.chart is not None],
+        "current-season": [c for c in full if "current_season" in c.tags],
+        # Legacy subsets (M5 names).
+        "smoke15": list(GATE),
+        "corrections": [c for c in full if c.is_correction],
+        "no-data": [c for c in full if c.expects_no_data or c.on_empty_truth == "expect_no_data"],
         "salvaged": list(SALVAGED),
         "queries": parsed,
     }
+    for case in BANK:
+        subsets.setdefault(f"fam:{_family(case)}", []).append(case)
     # "all": everything, without duplicate ids.
     seen = set()
     everything: List[EvalCase] = []
-    for case in [*SMOKE15, *SALVAGED, *parsed]:
+    for case in [*full, *SALVAGED, *parsed]:
         if case.id not in seen:
             seen.add(case.id)
             everything.append(case)
@@ -527,9 +529,7 @@ def get_subset(name: str) -> List[EvalCase]:
     """Return the cases for a named subset; raises ValueError on unknown name."""
     subsets = build_subsets()
     if name not in subsets:
-        raise ValueError(
-            f"Unknown subset '{name}'. Available: {', '.join(sorted(subsets))}"
-        )
+        raise ValueError(f"Unknown subset '{name}'. Available: {', '.join(sorted(subsets))}")
     return subsets[name]
 
 

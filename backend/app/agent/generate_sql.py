@@ -23,13 +23,11 @@ self-correction retry loop can key off it.
 """
 import json
 import logging
-import os
 import re
 from typing import Any, Dict, List, Optional
 
-import httpx
 from dotenv import load_dotenv
-from openai import OpenAI
+from app.agent.v3.llm import complete as llm_complete
 
 from app.agent.prompts.generate_sql import (
     GENERATE_SQL_PROMPT,
@@ -44,11 +42,6 @@ from app.agent.state import QueryIntent
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    timeout=httpx.Timeout(60.0, connect=10.0),
-)
 
 # Intents that are answered by dedicated tools in execute_node, never by SQL.
 NO_SQL_INTENTS = {"afl_news", "injury_news", "tipping_advice"}
@@ -69,7 +62,7 @@ _AGGREGATE_FUNCS = ("SUM(", "COUNT(", "AVG(", "MAX(", "MIN(")
 
 
 def _accumulate_usage(state: Dict[str, Any], usage: Any, model: Optional[str] = None) -> None:
-    """Merge real OpenAI token usage (per model) into the per-request state accumulator."""
+    """Merge real LLM token usage (llm.Usage, per model) into the per-request state accumulator."""
     from app.middleware.usage_tracker import record_llm_usage
     record_llm_usage(state, usage, model)
 
@@ -226,18 +219,13 @@ def generate_sql(
         )
 
         logger.info(
-            f"GENERATE_SQL: Calling OpenAI (turn_type={turn_type}, "
+            f"GENERATE_SQL: Calling LLM (turn_type={turn_type}, "
             f"reasoning_effort={reasoning_effort})..."
         )
-        response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            reasoning_effort=reasoning_effort,
-        )
+        response = llm_complete(prompt, json_mode=True, effort=reasoning_effort)
         _accumulate_usage(state, response.usage, getattr(response, "model", None))
 
-        raw = (response.choices[0].message.content or "").strip()
+        raw = (response.text or "").strip()
         data = json.loads(raw)
 
         intent = data.get("intent", "unknown")

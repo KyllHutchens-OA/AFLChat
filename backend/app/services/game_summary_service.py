@@ -1,23 +1,17 @@
 """
 Game Summary Service - Generates AI summaries for completed AFL games.
-Uses OpenAI to create casual, engaging match summaries with team nicknames.
+Uses the LLM (SUMMARY_MODEL via app.agent.v3.llm) to create casual, engaging match summaries with team nicknames.
 """
 import logging
-import os
 from typing import Dict, Any, List, Optional
 
-from openai import OpenAI
-import httpx
 from dotenv import load_dotenv
+
+from app.agent.v3.llm import complete as llm_complete
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    timeout=httpx.Timeout(30.0, connect=10.0)
-)
 
 # Team nicknames for casual summaries
 TEAM_NICKNAMES = {
@@ -240,17 +234,13 @@ Game Flow: {momentum}
 
 Write a casual, engaging 2-3 sentence summary. Don't just list stats - tell the story of the game through the players who shaped it."""
 
-            response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
-                messages=[
-                    {"role": "system", "content": "You are an AFL commentator who writes brief, casual match summaries."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=1,
-                max_completion_tokens=4096,
+            response = llm_complete(
+                prompt, system="You are an AFL commentator who writes brief, casual match summaries.",
+                role="SUMMARY_MODEL", effort="low", max_output_tokens=4096, timeout=30.0,
+                track_endpoint="game_summary",
             )
 
-            summary = response.choices[0].message.content.strip()
+            summary = (response.text or "").strip()
             logger.info(f"Generated summary for game {game.id}: {summary[:50]}...")
             return summary
 
@@ -316,17 +306,13 @@ Top performers so far: {performers if performers else "Data not available"}
 Example: "The Pies took control in Q2 with Daicos racking up 12 disposals. De Goey kicked two goals to blow the margin out to 25 points."
 Keep it brief and engaging."""
 
-            response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
-                messages=[
-                    {"role": "system", "content": "You are an AFL commentator writing brief quarter summaries."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=1,
-                max_completion_tokens=2000,
+            response = llm_complete(
+                prompt, system="You are an AFL commentator writing brief quarter summaries.",
+                role="SUMMARY_MODEL", effort="low", max_output_tokens=2000, timeout=30.0,
+                track_endpoint="quarter_summary",
             )
 
-            summary = response.choices[0].message.content.strip()
+            summary = (response.text or "").strip()
             logger.info(f"Generated Q{quarter} summary: {summary[:60]}...")
             return summary
 
@@ -385,17 +371,13 @@ Keep it brief and engaging."""
                 f"Do NOT include headings or labels. Two plain paragraphs only."
             )
 
-            response = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-mini"),
-                messages=[
-                    {"role": "system", "content": "You are an AFL commentator writing brief post-game analysis."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.8,
-                max_completion_tokens=400,
+            response = llm_complete(
+                prompt, system="You are an AFL commentator writing brief post-game analysis.",
+                role="SUMMARY_MODEL", effort="low", max_output_tokens=1000, timeout=30.0,
+                track_endpoint="post_game_analysis",
             )
 
-            analysis = response.choices[0].message.content.strip()
+            analysis = (response.text or "").strip()
             if analysis:
                 logger.info(f"Generated post-game analysis for {home_nick} vs {away_nick}: {analysis[:60]}...")
                 return analysis

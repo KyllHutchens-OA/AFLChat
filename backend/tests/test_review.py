@@ -43,10 +43,9 @@ def _run(coro):
 
 
 def _fake_response(payload: dict, prompt_tokens: int = 50, completion_tokens: int = 10):
-    message = SimpleNamespace(content=json.dumps(payload))
-    choice = SimpleNamespace(message=message)
-    usage = SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
-    return SimpleNamespace(choices=[choice], usage=usage)
+    """Fake llm.LLMResult (text + usage)."""
+    usage = SimpleNamespace(input_tokens=prompt_tokens, output_tokens=completion_tokens)
+    return SimpleNamespace(text=json.dumps(payload), usage=usage)
 
 
 class TestShouldSkipReview:
@@ -102,7 +101,7 @@ class TestReviewResultsVerdictParsing:
     def test_yes_verdict_parsed(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}}
         payload = {"verdict": "YES", "reason": "Matches the question."}
-        with patch("app.agent.review.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.review.llm_complete", return_value=_fake_response(payload)):
             result = review_results(
                 user_query="How many goals did Hawkins kick in 2024?",
                 sql_query="SELECT SUM(goals) FROM player_stats",
@@ -116,7 +115,7 @@ class TestReviewResultsVerdictParsing:
     def test_no_verdict_parsed(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}}
         payload = {"verdict": "NO", "reason": "Grouped by team instead of player."}
-        with patch("app.agent.review.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.review.llm_complete", return_value=_fake_response(payload)):
             result = review_results(
                 user_query="Who is the best defender this season?",
                 sql_query="SELECT team, COUNT(*) FROM player_stats GROUP BY team",
@@ -129,7 +128,7 @@ class TestReviewResultsVerdictParsing:
     def test_verdict_is_case_insensitive(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}}
         payload = {"verdict": "no", "reason": "wrong shape"}
-        with patch("app.agent.review.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.review.llm_complete", return_value=_fake_response(payload)):
             result = review_results(
                 user_query="x", sql_query="SELECT 1", query_results=pd.DataFrame({"a": [1]}), state=state,
             )
@@ -138,7 +137,7 @@ class TestReviewResultsVerdictParsing:
     def test_malformed_verdict_defaults_to_yes_passthrough(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}}
         payload = {"verdict": "MAYBE", "reason": "unclear"}
-        with patch("app.agent.review.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.review.llm_complete", return_value=_fake_response(payload)):
             result = review_results(
                 user_query="x", sql_query="SELECT 1", query_results=pd.DataFrame({"a": [1]}), state=state,
             )
@@ -147,7 +146,7 @@ class TestReviewResultsVerdictParsing:
     def test_missing_verdict_key_defaults_to_yes_passthrough(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}}
         payload = {"reason": "no verdict field at all"}
-        with patch("app.agent.review.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.review.llm_complete", return_value=_fake_response(payload)):
             result = review_results(
                 user_query="x", sql_query="SELECT 1", query_results=pd.DataFrame({"a": [1]}), state=state,
             )
@@ -156,10 +155,10 @@ class TestReviewResultsVerdictParsing:
     def test_malformed_json_defaults_to_yes_passthrough(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}}
         bad_response = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
+            text="not json",
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
         )
-        with patch("app.agent.review.client.chat.completions.create", return_value=bad_response):
+        with patch("app.agent.review.llm_complete", return_value=bad_response):
             result = review_results(
                 user_query="x", sql_query="SELECT 1", query_results=pd.DataFrame({"a": [1]}), state=state,
             )
@@ -167,7 +166,7 @@ class TestReviewResultsVerdictParsing:
 
     def test_llm_exception_defaults_to_yes_passthrough(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}}
-        with patch("app.agent.review.client.chat.completions.create", side_effect=RuntimeError("API down")):
+        with patch("app.agent.review.llm_complete", side_effect=RuntimeError("API down")):
             result = review_results(
                 user_query="x", sql_query="SELECT 1", query_results=pd.DataFrame({"a": [1]}), state=state,
             )
@@ -178,19 +177,19 @@ class TestReviewResultsVerdictParsing:
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}}
         payload = {"verdict": "YES", "reason": "ok"}
         with patch(
-            "app.agent.review.client.chat.completions.create", return_value=_fake_response(payload)
+            "app.agent.review.llm_complete", return_value=_fake_response(payload)
         ) as mock_create:
             review_results(
                 user_query="x", sql_query="SELECT 1", query_results=pd.DataFrame({"a": [1]}), state=state,
             )
-        _, call_kwargs = mock_create.call_args
-        assert call_kwargs["reasoning_effort"] == "low"
+        call_args, call_kwargs = mock_create.call_args
+        assert call_kwargs["effort"] == "low"
 
     def test_prompt_includes_question_sql_and_row_count(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}}
         payload = {"verdict": "YES", "reason": "ok"}
         with patch(
-            "app.agent.review.client.chat.completions.create", return_value=_fake_response(payload)
+            "app.agent.review.llm_complete", return_value=_fake_response(payload)
         ) as mock_create:
             review_results(
                 user_query="Who scored the most goals?",
@@ -198,8 +197,8 @@ class TestReviewResultsVerdictParsing:
                 query_results=pd.DataFrame({"name": ["Hawkins"], "sum": [50]}),
                 state=state,
             )
-        _, call_kwargs = mock_create.call_args
-        sent_prompt = call_kwargs["messages"][0]["content"]
+        call_args, call_kwargs = mock_create.call_args
+        sent_prompt = call_args[0]
         assert "Who scored the most goals?" in sent_prompt
         assert "SELECT name, SUM(goals) FROM player_stats GROUP BY name" in sent_prompt
         assert "1 row(s)" in sent_prompt
@@ -300,7 +299,7 @@ class TestGenerateSqlReviewCritiqueIntegration:
         payload = {"intent": "team_analysis", "sql": "SELECT name, tackles FROM player_stats", "requires_visualization": False}
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}, "sql_attempts": 1}
         with patch(
-            "app.agent.generate_sql.client.chat.completions.create",
+            "app.agent.generate_sql.llm_complete",
             return_value=_fake_response(payload),
         ) as mock_create:
             updates = generate_sql(
@@ -310,9 +309,9 @@ class TestGenerateSqlReviewCritiqueIntegration:
                 conversation_history=[], state=state,
                 review_critique="Grouped by team instead of a per-player defensive metric.",
             )
-        _, call_kwargs = mock_create.call_args
-        assert call_kwargs["reasoning_effort"] == "medium"
-        sent_prompt = call_kwargs["messages"][0]["content"]
+        call_args, call_kwargs = mock_create.call_args
+        assert call_kwargs["effort"] == "medium"
+        sent_prompt = call_args[0]
         assert "Grouped by team instead of a per-player defensive metric." in sent_prompt
         assert "did NOT answer the question" in sent_prompt
         # Consumed — cleared so a later retry this turn doesn't resend a stale critique.
@@ -322,7 +321,7 @@ class TestGenerateSqlReviewCritiqueIntegration:
         payload = {"intent": "simple_stat", "sql": "SELECT 1", "requires_visualization": False}
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}, "sql_attempts": 0}
         with patch(
-            "app.agent.generate_sql.client.chat.completions.create",
+            "app.agent.generate_sql.llm_complete",
             return_value=_fake_response(payload),
         ):
             updates = generate_sql(

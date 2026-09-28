@@ -119,6 +119,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
                   text={message.text}
                   visualization={message.visualization}
                   isError={message.isError}
+                  dataAsOf={message.isStreaming ? undefined : message.dataAsOf}
                 />
               )}
             </div>

@@ -16,23 +16,10 @@ from app.data.database import Session
 
 logger = logging.getLogger(__name__)
 
-# USD per 1K tokens (OpenAI list prices). Unknown models raise: add them here
-# before configuring them anywhere.
-PRICING = {
-    "gpt-5": {"input": 0.00125, "cached_input": 0.000125, "output": 0.01},
-    "gpt-5-mini": {"input": 0.00025, "cached_input": 0.000025, "output": 0.002},
-    "gpt-5-nano": {"input": 0.00005, "cached_input": 0.000005, "output": 0.0004},
-    "gpt-4o": {"input": 0.0025, "cached_input": 0.00125, "output": 0.01},
-    "gpt-4o-mini": {"input": 0.00015, "cached_input": 0.000075, "output": 0.0006},
-}
-
-# Env vars that select a model somewhere in the app, with their code defaults
-MODEL_ENV_VARS = {
-    "OPENAI_MODEL": "gpt-5-mini",
-    "OPENAI_MODEL_FAST": "gpt-5-mini",
-    "OPENAI_MODEL_RESPONSE": "gpt-5-mini",
-    "NEWS_ENRICHMENT_MODEL": "gpt-5-nano",
-}
+# Prices and model env vars live in ONE place: app/agent/v3/llm.py (PRICES,
+# MODEL_ENV_DEFAULTS). Unknown models raise: add them there before configuring them.
+# Removed model env vars (1E): warn if still set so stale Railway config is noticed.
+REMOVED_MODEL_ENV_VARS = ("OPENAI_MODEL", "OPENAI_MODEL_FAST", "OPENAI_MODEL_RESPONSE")
 
 # Daily limits from environment (with sensible defaults)
 DAILY_LIMIT_PER_VISITOR = int(os.getenv("DAILY_LIMIT_PER_VISITOR", "50"))
@@ -48,36 +35,45 @@ def normalize_model(model: str) -> str:
 
 
 def get_pricing(model: str) -> Dict[str, float]:
-    """Pricing for a model; raises ValueError for unknown models (no silent fallback)."""
-    pricing = PRICING.get(normalize_model(model))
-    if pricing is None:
-        raise ValueError(f"No PRICING entry for model {model!r}; add it to usage_tracker.PRICING")
-    return pricing
+    """USD per 1M tokens for a model; raises ValueError for unknown models (no silent fallback)."""
+    from app.agent.v3.llm import PRICES
+    prices = PRICES.get(normalize_model(model))
+    if prices is None:
+        raise ValueError(f"No price for model {model!r}; add it to app/agent/v3/llm.py PRICES")
+    p_in, p_cached, p_write, p_out = prices
+    return {"input": p_in, "cached_input": p_cached, "cache_write": p_write, "output": p_out}
 
 
 def estimate_cost(model: str, input_tokens: int, output_tokens: int, cached_input_tokens: int = 0) -> float:
-    """USD cost; cached input tokens are a subset of input_tokens billed at the cached rate."""
-    pricing = get_pricing(model)
-    cached = min(cached_input_tokens or 0, input_tokens or 0)
-    return (
-        ((input_tokens or 0) - cached) / 1000 * pricing["input"]
-        + cached / 1000 * pricing["cached_input"]
-        + (output_tokens or 0) / 1000 * pricing["output"]
-    )
+    """USD cost via llm.cost_usd; cached input tokens are a subset of input_tokens."""
+    from app.agent.v3.llm import Usage, cost_usd
+    get_pricing(model)  # ValueError for unknown models
+    inp = input_tokens or 0
+    return cost_usd(normalize_model(model), Usage(
+        input_tokens=inp,
+        cached_input_tokens=min(cached_input_tokens or 0, inp),
+        output_tokens=output_tokens or 0,
+    ))
 
 
 def validate_configured_models() -> None:
     """Raise at startup if any configured model has no price."""
-    for env_var, default in MODEL_ENV_VARS.items():
-        get_pricing(os.getenv(env_var, default))
+    from app.agent.v3.llm import MODEL_ENV_DEFAULTS, model_for
+    for role in MODEL_ENV_DEFAULTS:
+        get_pricing(model_for(role))
+    if os.getenv("EVAL_JUDGE_MODEL"):
+        get_pricing(os.environ["EVAL_JUDGE_MODEL"])
+    stale = [v for v in REMOVED_MODEL_ENV_VARS if os.getenv(v)]
+    if stale:
+        logger.warning(f"Ignoring removed model env vars {stale}; use AGENT_MODEL / SUMMARY_MODEL")
 
 
 def record_llm_usage(state: Dict[str, Any], usage: Any, model: Optional[str] = None) -> None:
     """
     Accumulate one LLM call into state["token_usage"]:
     {"input_tokens", "output_tokens", "cached_input_tokens", "by_model": {model: {...same keys}}}.
-    `usage` is an OpenAI CompletionUsage object or a dict with input_tokens/output_tokens
-    (optionally cached_input_tokens and model).
+    `usage` is an llm.Usage, an OpenAI CompletionUsage object, or a dict with
+    input_tokens/output_tokens (optionally cached_input_tokens and model).
     """
     if not usage:
         return
@@ -89,11 +85,15 @@ def record_llm_usage(state: Dict[str, Any], usage: Any, model: Optional[str] = N
         out = _n(usage.get("output_tokens"))
         cached = _n(usage.get("cached_input_tokens"))
         model = model or usage.get("model")
-    else:
+    elif hasattr(usage, "prompt_tokens"):
         inp = _n(getattr(usage, "prompt_tokens", 0))
         out = _n(getattr(usage, "completion_tokens", 0))
         details = getattr(usage, "prompt_tokens_details", None)
         cached = _n(getattr(details, "cached_tokens", 0)) if details else 0
+    else:  # llm.Usage
+        inp = _n(getattr(usage, "input_tokens", 0))
+        out = _n(getattr(usage, "output_tokens", 0))
+        cached = _n(getattr(usage, "cached_input_tokens", 0))
 
     totals = state.setdefault("token_usage", {"input_tokens": 0, "output_tokens": 0})
     totals["input_tokens"] = totals.get("input_tokens", 0) + inp
@@ -175,12 +175,13 @@ class UsageTracker:
         Record one request's usage: one APIUsage row per model actually called, sharing a request_id.
         Raises ValueError for unpriced models.
         """
+        from app.agent.v3.llm import model_for
         by_model = (token_usage or {}).get("by_model") or {}
         if not by_model and (token_usage or {}).get("input_tokens"):
-            by_model = {os.getenv("OPENAI_MODEL", MODEL_ENV_VARS["OPENAI_MODEL"]): token_usage}
+            by_model = {model_for("AGENT_MODEL"): token_usage}
         if not by_model:
             # No LLM call (e.g. cached answer) still counts toward request quotas
-            by_model = {os.getenv("OPENAI_MODEL", MODEL_ENV_VARS["OPENAI_MODEL"]): {}}
+            by_model = {model_for("AGENT_MODEL"): {}}
 
         request_id = str(uuid.uuid4())
         for model, counts in by_model.items():
@@ -205,15 +206,22 @@ class UsageTracker:
         endpoint: str = "chat",
         cached_input_tokens: int = 0,
         request_id: Optional[str] = None,
+        cost_usd: Optional[float] = None,
     ) -> None:
         """
         Record API usage for one model. Raises ValueError for unpriced models;
         DB write errors are logged, not raised.
+
+        input_tokens include cached ones; output_tokens include reasoning.
+        cost_usd: real cost from llm.cost_usd (cache and service-tier aware);
+        computed from llm.PRICES when omitted.
         """
         # Import here to avoid circular imports
         from app.data.models import APIUsage
 
-        cost = estimate_cost(model, input_tokens, output_tokens, cached_input_tokens)
+        cost = cost_usd
+        if cost is None:
+            cost = estimate_cost(model, input_tokens, output_tokens, cached_input_tokens)
 
         session = Session()
         try:

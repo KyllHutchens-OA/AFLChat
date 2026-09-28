@@ -26,10 +26,9 @@ from app.agent.state import QueryIntent
 
 
 def _fake_response(payload: dict, prompt_tokens: int = 100, completion_tokens: int = 20):
-    message = SimpleNamespace(content=json.dumps(payload))
-    choice = SimpleNamespace(message=message)
-    usage = SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
-    return SimpleNamespace(choices=[choice], usage=usage)
+    """Fake llm.LLMResult (text + usage)."""
+    usage = SimpleNamespace(input_tokens=prompt_tokens, output_tokens=completion_tokens)
+    return SimpleNamespace(text=json.dumps(payload), usage=usage)
 
 
 def _call_generate_sql(payload, **overrides):
@@ -45,7 +44,7 @@ def _call_generate_sql(payload, **overrides):
         state=state,
     )
     kwargs.update(overrides)
-    with patch("app.agent.generate_sql.client.chat.completions.create", return_value=_fake_response(payload)):
+    with patch("app.agent.generate_sql.llm_complete", return_value=_fake_response(payload)):
         updates = generate_sql(**kwargs)
     return updates, state
 
@@ -128,7 +127,7 @@ class TestGenerateSqlHappyPath:
     def test_sql_attempts_increments_from_existing_value(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}, "sql_attempts": 2}
         payload = {"intent": "simple_stat", "sql": "SELECT 1", "requires_visualization": False}
-        with patch("app.agent.generate_sql.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.generate_sql.llm_complete", return_value=_fake_response(payload)):
             updates = generate_sql(
                 user_query="x", entities={}, turn_type="new_question",
                 retrieved_schema_docs="", retrieved_examples=[], conversation_snippet="",
@@ -203,7 +202,7 @@ class TestCorrectionTurns:
         payload = {"intent": "simple_stat", "sql": "SELECT 1", "requires_visualization": False}
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}, "sql_attempts": 0}
         with patch(
-            "app.agent.generate_sql.client.chat.completions.create",
+            "app.agent.generate_sql.llm_complete",
             return_value=_fake_response(payload),
         ) as mock_create:
             generate_sql(
@@ -219,10 +218,10 @@ class TestCorrectionTurns:
                 prior_answer="Collingwood had 15 wins in 2024.",
                 complaint_summary="User wanted 2023, not 2024.",
             )
-        _, call_kwargs = mock_create.call_args
-        assert call_kwargs["reasoning_effort"] == "medium"
+        call_args, call_kwargs = mock_create.call_args
+        assert call_kwargs["effort"] == "medium"
         # Correction-specific content must appear in the prompt sent to the LLM.
-        sent_prompt = call_kwargs["messages"][0]["content"]
+        sent_prompt = call_args[0]
         assert "SELECT COUNT(*) FROM matches WHERE season = 2024" in sent_prompt
         assert "User wanted 2023, not 2024." in sent_prompt
         assert "produce different SQL" in sent_prompt or "DIFFERENT SQL" in sent_prompt
@@ -231,7 +230,7 @@ class TestCorrectionTurns:
         payload = {"intent": "simple_stat", "sql": "SELECT 1", "requires_visualization": False}
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}, "sql_attempts": 0}
         with patch(
-            "app.agent.generate_sql.client.chat.completions.create",
+            "app.agent.generate_sql.llm_complete",
             return_value=_fake_response(payload),
         ) as mock_create:
             generate_sql(
@@ -240,15 +239,15 @@ class TestCorrectionTurns:
                 retrieved_schema_docs="", retrieved_examples=[], conversation_snippet="",
                 conversation_history=[], state=state,
             )
-        _, call_kwargs = mock_create.call_args
-        assert call_kwargs["reasoning_effort"] == "low"
+        call_args, call_kwargs = mock_create.call_args
+        assert call_kwargs["effort"] == "low"
 
 
 class TestErrorFallback:
     def test_llm_exception_falls_back_gracefully(self):
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}, "sql_attempts": 0}
         with patch(
-            "app.agent.generate_sql.client.chat.completions.create",
+            "app.agent.generate_sql.llm_complete",
             side_effect=RuntimeError("API down"),
         ):
             updates = generate_sql(
@@ -275,7 +274,7 @@ class TestSelfCorrectRetryTurns:
         payload = {"intent": "simple_stat", "sql": "SELECT 2", "requires_visualization": False}
         state = {"token_usage": {"input_tokens": 0, "output_tokens": 0}, "sql_attempts": 1}
         with patch(
-            "app.agent.generate_sql.client.chat.completions.create",
+            "app.agent.generate_sql.llm_complete",
             return_value=_fake_response(payload),
         ) as mock_create:
             updates = generate_sql(
@@ -286,9 +285,9 @@ class TestSelfCorrectRetryTurns:
                 failed_sql="SELECT * FROM bad_table",
                 sql_error='relation "bad_table" does not exist',
             )
-        _, call_kwargs = mock_create.call_args
-        assert call_kwargs["reasoning_effort"] == "medium"
-        sent_prompt = call_kwargs["messages"][0]["content"]
+        call_args, call_kwargs = mock_create.call_args
+        assert call_kwargs["effort"] == "medium"
+        sent_prompt = call_args[0]
         assert "SELECT * FROM bad_table" in sent_prompt
         assert 'relation "bad_table" does not exist' in sent_prompt
         assert updates["sql_attempts"] == 2
@@ -303,7 +302,7 @@ class TestSelfCorrectRetryTurns:
             "suggestion": "Re-run without pinning the season.",
         }
         with patch(
-            "app.agent.generate_sql.client.chat.completions.create",
+            "app.agent.generate_sql.llm_complete",
             return_value=_fake_response(payload),
         ) as mock_create:
             updates = generate_sql(
@@ -313,9 +312,9 @@ class TestSelfCorrectRetryTurns:
                 conversation_history=[], state=state,
                 diagnosis=diagnosis,
             )
-        _, call_kwargs = mock_create.call_args
-        assert call_kwargs["reasoning_effort"] == "medium"
-        sent_prompt = call_kwargs["messages"][0]["content"]
+        call_args, call_kwargs = mock_create.call_args
+        assert call_kwargs["effort"] == "medium"
+        sent_prompt = call_args[0]
         assert "Nick Daicos has no 2015 stats." in sent_prompt
         assert "Re-run without pinning the season." in sent_prompt
         # Consumed — cleared so a later retry this turn doesn't resend stale facts.

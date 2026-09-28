@@ -126,6 +126,7 @@ class ConversationService:
                     "confidence": msg.get("confidence"),
                     "sources": msg.get("sources") or [],
                     "visualization": msg.get("visualization"),
+                    "data_as_of": msg.get("data_as_of"),
                 },
             })
         return public

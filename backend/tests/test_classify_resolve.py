@@ -23,11 +23,9 @@ from app.agent.classify_resolve import classify_and_resolve
 
 
 def _fake_response(payload: dict, prompt_tokens: int = 100, completion_tokens: int = 20):
-    """Build a fake OpenAI ChatCompletion response object."""
-    message = SimpleNamespace(content=json.dumps(payload))
-    choice = SimpleNamespace(message=message)
-    usage = SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
-    return SimpleNamespace(choices=[choice], usage=usage)
+    """Fake llm.LLMResult (text + usage)."""
+    usage = SimpleNamespace(input_tokens=prompt_tokens, output_tokens=completion_tokens)
+    return SimpleNamespace(text=json.dumps(payload), usage=usage)
 
 
 class TestClassifyAndResolveHappyPath:
@@ -41,7 +39,7 @@ class TestClassifyAndResolveHappyPath:
             "chitchat_reply": None,
         }
         state = {}
-        with patch("app.agent.classify_resolve.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.classify_resolve.llm_complete", return_value=_fake_response(payload)):
             updates = classify_and_resolve(
                 user_query="How many goals did Geelong kick in 2024?",
                 conversation_history=[],
@@ -59,7 +57,7 @@ class TestClassifyAndResolveHappyPath:
         payload = {"turn_type": "new_question", "entities": {}, "complaint_summary": None, "chitchat_reply": None}
         state = {"token_usage": {"input_tokens": 5, "output_tokens": 1}}
         with patch(
-            "app.agent.classify_resolve.client.chat.completions.create",
+            "app.agent.classify_resolve.llm_complete",
             return_value=_fake_response(payload, prompt_tokens=42, completion_tokens=8),
         ):
             classify_and_resolve(user_query="hi", conversation_history=[], state=state)
@@ -70,7 +68,7 @@ class TestClassifyAndResolveHappyPath:
     def test_unknown_turn_type_defaults_to_new_question(self):
         payload = {"turn_type": "something_bogus", "entities": {}, "complaint_summary": None, "chitchat_reply": None}
         state = {}
-        with patch("app.agent.classify_resolve.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.classify_resolve.llm_complete", return_value=_fake_response(payload)):
             updates = classify_and_resolve(user_query="???", conversation_history=[], state=state)
 
         assert updates["turn_type"] == "new_question"
@@ -78,7 +76,7 @@ class TestClassifyAndResolveHappyPath:
     def test_llm_exception_falls_back_gracefully(self):
         state = {}
         with patch(
-            "app.agent.classify_resolve.client.chat.completions.create",
+            "app.agent.classify_resolve.llm_complete",
             side_effect=RuntimeError("API down"),
         ):
             updates = classify_and_resolve(user_query="anything", conversation_history=[], state=state)
@@ -96,7 +94,7 @@ class TestChitchat:
             "chitchat_reply": "Hey! Ask me anything about AFL stats.",
         }
         state = {}
-        with patch("app.agent.classify_resolve.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.classify_resolve.llm_complete", return_value=_fake_response(payload)):
             updates = classify_and_resolve(user_query="hey there", conversation_history=[], state=state)
 
         assert updates["turn_type"] == "chitchat"
@@ -124,7 +122,7 @@ class TestCorrectionPlumbing:
             },
         ]
         state = {}
-        with patch("app.agent.classify_resolve.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.classify_resolve.llm_complete", return_value=_fake_response(payload)):
             updates = classify_and_resolve(
                 user_query="No, I meant 2023",
                 conversation_history=conversation_history,
@@ -147,7 +145,7 @@ class TestCorrectionPlumbing:
             "chitchat_reply": None,
         }
         state = {}
-        with patch("app.agent.classify_resolve.client.chat.completions.create", return_value=_fake_response(payload)):
+        with patch("app.agent.classify_resolve.llm_complete", return_value=_fake_response(payload)):
             updates = classify_and_resolve(user_query="that's wrong", conversation_history=[], state=state)
 
         assert updates["turn_type"] == "correction"

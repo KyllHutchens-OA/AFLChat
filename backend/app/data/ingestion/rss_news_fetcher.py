@@ -11,7 +11,8 @@ import json
 import os
 import logging
 from datetime import datetime
-from openai import OpenAI
+
+from app.agent.v3.llm import complete as llm_complete, parse_json
 
 from app.data.database import Session
 from app.data.models import NewsArticle
@@ -166,7 +167,8 @@ class RSSNewsFetcher:
     @classmethod
     def _call_enrichment_llm(cls, batch: list) -> list:
         """
-        Call GPT-5-nano to classify a batch of articles.
+        Classify a batch of articles with NEWS_ENRICHMENT_MODEL (reasoning off,
+        flex tier: half price, latency does not matter for a background job).
 
         Args:
             batch: List of article dicts
@@ -178,8 +180,6 @@ class RSSNewsFetcher:
         if not api_key:
             logger.warning("OPENAI_API_KEY not set, using fallback enrichment")
             return [cls._fallback_enrichment(e) for e in batch]
-
-        model = os.getenv("NEWS_ENRICHMENT_MODEL", "gpt-5-nano")
 
         # Build the prompt with all articles in the batch
         articles_text = ""
@@ -196,26 +196,19 @@ class RSSNewsFetcher:
 - "summary": one concise sentence summarising the article for an AFL fan
 - "injury_details": if category is "injury", a list of objects with "player", "type", "severity" (e.g. "minor", "moderate", "major", "season-ending"). null otherwise.
 
-Return a JSON array with one object per article, in the same order. Only valid JSON, no markdown.
+Return a JSON object {{"articles": [...]}} with one object per article, in the same order.
 {articles_text}"""
 
+        raw = ""
         try:
-            client = OpenAI(api_key=api_key)
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                reasoning_effort="low",
+            response = llm_complete(
+                prompt, role="NEWS_ENRICHMENT_MODEL", json_mode=True, effort="none",
+                service_tier=os.getenv("NEWS_SERVICE_TIER", "flex"), timeout=120.0,
+                track_endpoint="news_enrichment",
             )
-
-            raw = response.choices[0].message.content.strip()
-            # Strip markdown code fences if present
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-                if raw.endswith("```"):
-                    raw = raw[:-3]
-                raw = raw.strip()
-
-            results = json.loads(raw)
+            raw = response.text
+            parsed = parse_json(raw)
+            results = parsed.get("articles") if isinstance(parsed, dict) else parsed
 
             # Validate we got the right number of results
             if not isinstance(results, list) or len(results) != len(batch):

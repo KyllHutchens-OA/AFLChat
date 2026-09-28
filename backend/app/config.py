@@ -27,10 +27,11 @@ class Config:
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # OpenAI
+    # LLM providers. Model names (AGENT_MODEL, SUMMARY_MODEL,
+    # NEWS_ENRICHMENT_MODEL) and their defaults live in app/agent/v3/llm.py.
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
-    NEWS_ENRICHMENT_MODEL = os.getenv("NEWS_ENRICHMENT_MODEL", "gpt-5-nano")
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
     # Data Sources
     AFL_TABLES_BASE_URL = os.getenv(
