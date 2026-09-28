@@ -33,6 +33,17 @@
     scroll-behavior: smooth;
   }
 
+  /* Global focus-visible ring. Nav links, chips, cards and guernseys had no
+     custom focus style before this and fell back to the browser default,
+     invisible on several coloured backgrounds. Component-level
+     focus-visible: utilities (nav, club picker) override this where a
+     tighter ring reads better, but this is the floor everywhere else. */
+  :focus-visible {
+    outline: 2px solid #C8102E; /* sherrin */
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     html {
       scroll-behavior: auto;
@@ -102,36 +113,14 @@
     background-position: 0 0, 1.5px 1.5px;
   }
 
-  /* --- Legacy design system (kept for LiveGames/**, unowned in this pass) --- */
+  /* Glassmorphism surface, used by LiveGames cards over the live/ticker
+     background. Same token family as the rest of the design system. */
   .glass {
-    @apply bg-white/80 backdrop-blur-apple border border-afl-warm-200/50;
+    @apply bg-white/80 backdrop-blur-brand border border-warm-200/50;
   }
 
   .glass-dark {
-    @apply bg-apple-gray-900/80 backdrop-blur-apple border border-white/10;
-  }
-
-  .btn-apple-primary {
-    @apply px-6 py-2.5 bg-afl-accent text-white rounded-apple font-medium
-           shadow-apple hover:bg-afl-accent-600 active:scale-95
-           transition-all duration-200 ease-apple;
-  }
-
-  .btn-apple-secondary {
-    @apply px-6 py-2.5 bg-apple-gray-100 text-apple-gray-900 rounded-apple font-medium
-           shadow-apple-sm hover:bg-apple-gray-200 active:scale-95
-           transition-all duration-200 ease-apple;
-  }
-
-  .input-apple {
-    @apply px-4 py-2.5 bg-white border border-apple-gray-300 rounded-apple
-           focus:outline-none focus:ring-2 focus:ring-afl-accent focus:border-transparent
-           transition-all duration-200 ease-apple placeholder:text-apple-gray-500;
-  }
-
-  .card-apple {
-    @apply bg-white rounded-apple-lg shadow-apple border border-afl-warm-200/50
-           transition-all duration-300 ease-apple hover:shadow-apple-md;
+    @apply bg-ink/80 backdrop-blur-brand border border-white/10;
   }
 }
 

@@ -69,8 +69,8 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
   }
 
   return (
-    <div className="card-apple p-6">
-      <h3 className="text-lg font-semibold text-afl-warm-900 mb-4">
+    <div className="card p-6">
+      <h3 className="text-lg font-semibold text-warm-900 mb-4">
         Top Performers
       </h3>
 
@@ -78,7 +78,7 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
         {/* Top Goal Kickers */}
         {stats.top_goal_kickers?.length > 0 && (
           <div>
-            <h4 className="text-sm font-medium text-afl-warm-500 mb-2">
+            <h4 className="text-sm font-medium text-warm-600 mb-2">
               Goals
             </h4>
             <div className="space-y-1.5">
@@ -88,12 +88,12 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
                   className="flex items-center justify-between text-sm"
                 >
                   <div className="truncate flex-1 mr-2">
-                    <span className="text-afl-warm-700">{player.name}</span>
+                    <span className="text-warm-700">{player.name}</span>
                     {player.team && (
-                      <span className="text-afl-warm-400 text-xs ml-1">{shortenTeam(player.team)}</span>
+                      <span className="text-warm-600 text-xs ml-1">{shortenTeam(player.team)}</span>
                     )}
                   </div>
-                  <span className="font-semibold text-afl-warm-900 tabular-nums">
+                  <span className="font-semibold text-warm-900 tabular-nums">
                     {player.goals}
                   </span>
                 </div>
@@ -105,7 +105,7 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
         {/* Top Disposals */}
         {stats.top_disposals?.length > 0 && (
           <div>
-            <h4 className="text-sm font-medium text-afl-warm-500 mb-2">
+            <h4 className="text-sm font-medium text-warm-600 mb-2">
               Disposals
             </h4>
             <div className="space-y-1.5">
@@ -115,12 +115,12 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
                   className="flex items-center justify-between text-sm"
                 >
                   <div className="truncate flex-1 mr-2">
-                    <span className="text-afl-warm-700">{player.name}</span>
+                    <span className="text-warm-700">{player.name}</span>
                     {player.team && (
-                      <span className="text-afl-warm-400 text-xs ml-1">{shortenTeam(player.team)}</span>
+                      <span className="text-warm-600 text-xs ml-1">{shortenTeam(player.team)}</span>
                     )}
                   </div>
-                  <span className="font-semibold text-afl-warm-900 tabular-nums">
+                  <span className="font-semibold text-warm-900 tabular-nums">
                     {player.disposals}
                   </span>
                 </div>
@@ -132,7 +132,7 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
         {/* Top Fantasy */}
         {stats.top_fantasy?.length > 0 && (
           <div>
-            <h4 className="text-sm font-medium text-afl-warm-500 mb-2">
+            <h4 className="text-sm font-medium text-warm-600 mb-2">
               Fantasy
             </h4>
             <div className="space-y-1.5">
@@ -142,12 +142,12 @@ const GameStats: React.FC<GameStatsProps> = ({ gameId, gameStatus }) => {
                   className="flex items-center justify-between text-sm"
                 >
                   <div className="truncate flex-1 mr-2">
-                    <span className="text-afl-warm-700">{player.name}</span>
+                    <span className="text-warm-700">{player.name}</span>
                     {player.team && (
-                      <span className="text-afl-warm-400 text-xs ml-1">{shortenTeam(player.team)}</span>
+                      <span className="text-warm-600 text-xs ml-1">{shortenTeam(player.team)}</span>
                     )}
                   </div>
-                  <span className="font-semibold text-afl-warm-900 tabular-nums">
+                  <span className="font-semibold text-warm-900 tabular-nums">
                     {player.points}
                   </span>
                 </div>

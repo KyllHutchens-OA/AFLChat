@@ -12,8 +12,15 @@ const ClubPicker = () => {
     const onClick = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
     document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   return (
@@ -22,7 +29,8 @@ const ClubPicker = () => {
         onClick={() => setOpen((o) => !o)}
         aria-label={club ? `Your club: ${club.name}. Change club.` : 'Pick your club'}
         aria-expanded={open}
-        className="w-6 h-6 rounded-full border-2 border-warm-300 hover:border-warm-400 transition-colors"
+        className="w-6 h-6 rounded-full border-2 border-warm-300 hover:border-warm-400 transition-colors
+                   focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sherrin"
         style={{ backgroundColor: club ? club.primaryColor : '#F6F1E7' }}
       />
       {open && (
@@ -38,7 +46,8 @@ const ClubPicker = () => {
                 onClick={() => { setClub(c.abbreviation); setOpen(false); }}
                 title={c.name}
                 aria-label={c.name}
-                className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 ${
+                className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110
+                  focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sherrin ${
                   club?.abbreviation === c.abbreviation ? 'border-ink' : 'border-transparent'
                 }`}
                 style={{ backgroundColor: c.primaryColor }}

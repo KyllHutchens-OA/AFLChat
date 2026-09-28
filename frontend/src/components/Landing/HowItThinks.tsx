@@ -22,6 +22,7 @@ const STATS = [
   { value: '299,975', label: 'player-game rows' },
   { value: '118 / 121', label: 'ground-truth eval cases' },
   { value: '~2.6s', label: 'median answer time' },
+  { value: '~$0.0002', label: 'cost per answer' },
 ];
 
 const HowItThinks = () => {
@@ -65,7 +66,7 @@ const HowItThinks = () => {
           {activeStep.detail}
         </pre>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6">
           {STATS.map((s) => (
             <div key={s.label}>
               <div className="font-display text-3xl sm:text-4xl text-nightgame tabular-nums">{s.value}</div>

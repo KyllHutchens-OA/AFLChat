@@ -13,7 +13,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({ icon, headline, subtext, action
     <div className="card p-8 text-center">
       {icon && <div className="text-5xl mb-4">{icon}</div>}
       <h2 className="text-2xl font-semibold text-warm-900 mb-2">{headline}</h2>
-      {subtext && <p className="text-warm-500 mb-4">{subtext}</p>}
+      {subtext && <p className="text-warm-600 mb-4">{subtext}</p>}
       {action && (
         <button
           onClick={action.onClick}
