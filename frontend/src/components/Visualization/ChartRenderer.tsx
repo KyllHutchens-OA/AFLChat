@@ -71,7 +71,7 @@ function hasNegativeValues(spec: ChartSpec): boolean {
 
 // ── Responsive height: shorter on phones so a two-bar chart isn't a tall sliver ──
 
-function useChartHeight(): number {
+function useIsNarrowViewport(): boolean {
   const [narrow, setNarrow] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < 640,
   );
@@ -82,7 +82,18 @@ function useChartHeight(): number {
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
-  return narrow ? 260 : 400;
+  return narrow;
+}
+
+// Horizontal bars need one row of height per category, or Recharts starts
+// dropping category labels on a short mobile chart with many rows (e.g. a
+// top-10 with 11 rows because of ties at the cutoff).
+function chartHeight(narrow: boolean, s: ChartSpec): number {
+  const base = narrow ? 260 : 400;
+  if (s.chartType === 'bar' && s.orientation === 'horizontal') {
+    return Math.max(base, s.data.length * (narrow ? 30 : 36) + 60);
+  }
+  return base;
 }
 
 // ── A short text summary for screen readers (charts have no text alternative
@@ -98,7 +109,7 @@ function chartSummary(s: ChartSpec): string {
 // ── Main Component ──────────────────────────────────────────────
 
 const ChartRenderer: React.FC<ChartRendererProps> = ({ spec, bare = true }) => {
-  const height = useChartHeight();
+  const narrow = useIsNarrowViewport();
   if (!spec) return null;
 
   const result = chartSpecSchema.safeParse(spec);
@@ -128,6 +139,7 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec, bare = true }) => {
   }
 
   const colors = resolveSeriesColors(s.series, s.colors && s.colors.length ? s.colors : DEFAULT_COLORS);
+  const height = chartHeight(narrow, s);
 
   return (
     <div className={bare ? 'w-full tabular-nums' : 'w-full card p-6 my-4 tabular-nums'}>
