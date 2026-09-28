@@ -4,7 +4,7 @@ interface ThinkingCardProps {
 
 const STEPS = [
   { keys: ['understand', 'received', 'question', 'complexity', 'analyz', 'plan'], label: 'Understanding' },
-  { keys: ['sql', 'query', 'generat', 'building', 'execut', 'fetch', 'database', 'search', 'found', 'result', 'statistic', 'enrich', 'odds', 'news', 'predict', 'tipping'], label: 'Crunching the numbers' },
+  { keys: ['sql', 'query', 'generat', 'building', 'execut', 'fetch', 'database', 'search', 'found', 'result', 'statistic', 'enrich', 'news', 'predict', 'tipping'], label: 'Crunching the numbers' },
   { keys: ['visuali', 'chart', 'creat', 'respond', 'writ', 'response', 'complete'], label: 'Putting it together' },
 ];
 

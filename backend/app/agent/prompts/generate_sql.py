@@ -33,7 +33,6 @@ position, bye rounds, venue splits).
 "year by year", "historical", "evolution".
 - "afl_news": latest AFL news/articles. Set sql to "".
 - "injury_news": injury reports/availability. Set sql to "".
-- "betting_odds": betting odds/lines. Set sql to "".
 - "tipping_advice": tipping/predictions. Set sql to "".
 - "off_topic": genuinely non-AFL question (weather, recipes, other sports) — but a \
 follow-up about an AFL topic already in the conversation is NEVER off_topic.
@@ -71,16 +70,16 @@ in the examples above — never assume the team is always home or always away.
 
 ## Output (JSON only, no markdown)
 {{
-  "intent": "simple_stat"|"player_comparison"|"team_analysis"|"trend_analysis"|"afl_news"|"injury_news"|"betting_odds"|"tipping_advice"|"off_topic",
+  "intent": "simple_stat"|"player_comparison"|"team_analysis"|"trend_analysis"|"afl_news"|"injury_news"|"tipping_advice"|"off_topic",
   "requires_visualization": true|false,
   "data_shape_hint": "temporal_trend"|"top_n_ranking"|"comparison"|"single_value"|"distribution"|null,
   "chart_config": {{"x_col_hint": "column name for x-axis, or null", "y_col_hint": "column name for y-axis, or null"}},
-  "sql": "SELECT ... (or empty string for afl_news/injury_news/betting_odds/tipping_advice/off_topic)"
+  "sql": "SELECT ... (or empty string for afl_news/injury_news/tipping_advice/off_topic)"
 }}
 
 requires_visualization: true for trends over time, comparisons of 3+ entities, top-N \
 rankings (N>=3), round-by-round data. false for single facts, yes/no answers, match \
-results, 1-2 row results, news/odds/tips.
+results, 1-2 row results, news/tips.
 """
 
 

@@ -71,24 +71,6 @@ class LiveGameScheduler:
             replace_existing=True,
         )
 
-        # Job 5a: Update betting odds (morning at 9 AM AEST)
-        self.scheduler.add_job(
-            func=self._update_betting_odds,
-            trigger=CronTrigger(hour=9, minute=0, timezone='Australia/Melbourne'),
-            id="update_betting_odds_morning",
-            name="Update betting odds (morning)",
-            replace_existing=True,
-        )
-
-        # Job 5b: Update betting odds (evening at 5 PM AEST)
-        self.scheduler.add_job(
-            func=self._update_betting_odds,
-            trigger=CronTrigger(hour=17, minute=0, timezone='Australia/Melbourne'),
-            id="update_betting_odds_evening",
-            name="Update betting odds (evening)",
-            replace_existing=True,
-        )
-
         # Job 6: Update Squiggle predictions (daily at 8 AM AEST)
         self.scheduler.add_job(
             func=self._update_squiggle_predictions,
@@ -250,16 +232,6 @@ class LiveGameScheduler:
             logger.info(f"RSS job complete: {articles_added} new articles")
         except Exception as e:
             logger.error(f"RSS job failed: {e}")
-
-    def _update_betting_odds(self):
-        """Update odds with single efficient API call."""
-        try:
-            from app.data.ingestion.odds_fetcher import OddsFetcher
-
-            requests_made = OddsFetcher.update_upcoming_matches(days_ahead=7)
-            logger.info(f"Odds job complete: {requests_made} API request(s)")
-        except Exception as e:
-            logger.error(f"Odds job failed: {e}")
 
     def _update_squiggle_predictions(self):
         """Daily: Update predictions."""

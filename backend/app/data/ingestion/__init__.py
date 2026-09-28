@@ -1,3 +1,3 @@
 """
-AFL data ingestion modules for news, odds, and predictions.
+AFL data ingestion modules for news and predictions.
 """

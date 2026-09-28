@@ -32,7 +32,6 @@ class SQLValidator:
         "players",
         "player_stats",
         "team_stats",
-        "betting_odds",  # Betting odds from The Odds API
         "squiggle_predictions",  # Match predictions from Squiggle
         "news_articles",  # AFL news from RSS feeds
     }

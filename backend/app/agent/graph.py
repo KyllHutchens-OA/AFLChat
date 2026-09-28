@@ -80,7 +80,7 @@ class AFLAnalyticsAgent:
     3. GENERATE_SQL - One focused LLM call: final intent + SQL (with retry loops feeding back here)
     4. ANALYZE_DEPTH - Determine summary vs in-depth analysis mode
     5. PLAN - Determine analysis steps required
-    6. EXECUTE - Run SQL queries (or news/odds/tips tools) and compute statistics
+    6. EXECUTE - Run SQL queries (or news/tips tools) and compute statistics
     7. DIAGNOSE_EMPTY / REVIEW - Explain 0-row results / sanity-check non-empty results
     8. VISUALIZE - Generate chart specifications (if needed)
     9. RESPOND - Format natural language response
@@ -132,11 +132,11 @@ class AFLAnalyticsAgent:
         - `sql_error` set (by execute_node, only when under SQL_ATTEMPT_CAP) →
           self-correct: loop back to generate_sql with the exact failed SQL +
           DB error baked into the retry prompt.
-        - 0 rows, no error, and a DB-backed intent (not a news/odds/tips tool
+        - 0 rows, no error, and a DB-backed intent (not a news/tips tool
           call) → diagnose_empty (deterministic, no LLM) figures out why.
         - Non-empty rows from a SQL-backed intent → review (Milestone 3d): a
           cheap LLM sanity-check that the rows actually answer the question.
-          Tool intents (news/odds/tips) have no SQL to review, so they skip
+          Tool intents (news/tips) have no SQL to review, so they skip
           straight through to the base visualize/respond decision.
         - Otherwise (tool intents, or anything else) falls through to the
           base visualize/respond decision (_route_after_execute).
@@ -148,7 +148,6 @@ class AFLAnalyticsAgent:
         no_sql_intents = {
             QueryIntent.AFL_NEWS,
             QueryIntent.INJURY_NEWS,
-            QueryIntent.BETTING_ODDS,
             QueryIntent.TIPPING_ADVICE,
         }
         no_error = not state.get("execution_error")
@@ -838,25 +837,6 @@ class AFLAnalyticsAgent:
             self._emit_progress(state, "execute", state["thinking_message"])
             return state
 
-        # BETTING ODDS
-        elif intent == QueryIntent.BETTING_ODDS:
-            from app.agent.tools import BettingTool
-
-            state["thinking_message"] = "💰 Fetching betting odds..."
-            self._emit_progress(state, "execute", "💰 Fetching betting odds...")
-
-            entities = state.get("entities", {})
-            result = BettingTool.get_odds(
-                team_name=entities.get("teams", [None])[0] if entities.get("teams") else None,
-                round_num=entities.get("rounds", [None])[0] if entities.get("rounds") else None,
-                season=entities.get("seasons", [None])[0] if entities.get("seasons") else None
-            )
-            state["query_results"] = result.get("matches", [])
-            state["requires_visualization"] = False
-            state["thinking_message"] = f"Found odds for {len(state['query_results'])} matches"
-            self._emit_progress(state, "execute", state["thinking_message"])
-            return state
-
         # TIPPING ADVICE
         elif intent == QueryIntent.TIPPING_ADVICE:
             from app.agent.tools import TippingTool
@@ -1413,7 +1393,7 @@ Detected context:
 {context_str}
 
 Our database covers: {earliest} to Round {hist_round} of {hist_season} (match results, player stats, team stats).
-We also have: upcoming fixtures, betting odds, Squiggle tipping predictions, and AFL news.
+We also have: upcoming fixtures, Squiggle tipping predictions, and AFL news.
 
 {'The query failed to execute — likely a spelling issue, wrong season, or the data doesnt exist.' if error_type == 'execution_error' else 'The query ran but returned zero rows — the data may not exist for this specific filter.'}
 
@@ -1658,8 +1638,6 @@ Rules:
                         return f"I don't have any recent injury news for {team_str}. No major injuries reported in my current news feed."
                     return f"I don't have any recent news about {team_str} in my current feed."
                 return "I couldn't find any recent news matching your query."
-            if intent == QueryIntent.BETTING_ODDS:
-                return "I couldn't find betting odds for those matches. Odds may not be available yet."
             if intent == QueryIntent.TIPPING_ADVICE:
                 return "I don't have predictions available for those matches yet."
             # Check if user asked about remaining/upcoming games
@@ -1701,34 +1679,6 @@ Rules:
                 summary = a.get('summary') or a.get('title', '')
                 lines.append(f"- {summary}")
             return "Latest AFL news:\n" + "\n".join(lines)
-
-        # --- BETTING ODDS RESPONSE ---
-        if intent == QueryIntent.BETTING_ODDS:
-            if not data:
-                return "I couldn't find betting odds for the specified matches."
-
-            lines = []
-            for match in data[:7]:
-                home_odds = match.get('home_odds')
-                away_odds = match.get('away_odds')
-
-                lines.append(f"\n**{match['home_team']} vs {match['away_team']}**")
-                lines.append(f"📅 {match['match_date'][:10]} • Round {match['round']} • {match['venue']}")
-
-                if home_odds and away_odds:
-                    # Determine favourite
-                    if home_odds < away_odds:
-                        fav = match['home_team']
-                        fav_odds = home_odds
-                    else:
-                        fav = match['away_team']
-                        fav_odds = away_odds
-                    lines.append(f"  💰 {match['home_team']} ${home_odds:.2f} | {match['away_team']} ${away_odds:.2f}")
-                    lines.append(f"  ⭐ Favourite: {fav}")
-                else:
-                    lines.append("  Odds not yet available")
-
-            return "Current betting odds:\n" + "\n".join(lines)
 
         # --- TIPPING ADVICE RESPONSE ---
         if intent == QueryIntent.TIPPING_ADVICE:
@@ -2147,7 +2097,7 @@ Rules:
             # Check if results are all NULL (query succeeded but no data for that filter)
             data = state["query_results"]
 
-            # Handle list results from tools (BettingTool, NewsTool, TippingTool)
+            # Handle list results from tools (NewsTool, TippingTool)
             # vs DataFrame results from database queries
             if isinstance(data, list):
                 all_null = len(data) == 0
@@ -2273,7 +2223,7 @@ SYSTEM CAPABILITIES:
 ✓ CAN DO: Query AFL statistics ({_earliest}-{_hist_season}), match results, player stats, team performance
 ✓ CAN DO: Generate visualizations and charts
 ✓ CAN DO: Compare players, teams, and seasons
-✓ CAN DO: Provide betting odds and tipping predictions
+✓ CAN DO: Provide tipping predictions
 ✓ CAN DO: Show live/recent game scores and results
 
 ✗ CANNOT DO: Export data to CSV, Excel, or files

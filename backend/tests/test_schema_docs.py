@@ -74,17 +74,12 @@ class TestPruningLiveGames:
 
 
 class TestPruningToolIntents:
-    def test_betting_odds_intent_pulls_in_betting_odds_table(self):
-        docs = get_schema_docs("betting_odds", {})
-        assert "### betting_odds" in docs
-
     def test_tipping_advice_intent_pulls_in_squiggle_predictions(self):
         docs = get_schema_docs("tipping_advice", {})
         assert "### squiggle_predictions" in docs
 
-    def test_simple_stat_intent_excludes_betting_and_tipping_tables(self):
+    def test_simple_stat_intent_excludes_tipping_table(self):
         docs = get_schema_docs("simple_stat", {"teams": ["Carlton"], "seasons": ["2019"]})
-        assert "### betting_odds" not in docs
         assert "### squiggle_predictions" not in docs
 
 

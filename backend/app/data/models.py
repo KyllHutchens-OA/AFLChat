@@ -589,33 +589,6 @@ class NewsArticle(Base):
         return f"<NewsArticle {self.source}: {self.title[:50]}>"
 
 
-class BettingOdds(Base):
-    """Betting odds from The Odds API."""
-
-    __tablename__ = "betting_odds"
-
-    id = Column(Integer, primary_key=True)
-    match_id = Column(Integer, ForeignKey("matches.id", ondelete="CASCADE"), nullable=False)
-    bookmaker = Column(String(100), nullable=False)
-
-    # Head-to-head odds (decimal format)
-    home_odds = Column(Numeric(6, 2))
-    away_odds = Column(Numeric(6, 2))
-
-    odds_fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-
-    __table_args__ = (
-        UniqueConstraint('match_id', 'bookmaker', 'odds_fetched_at'),
-        Index('idx_odds_match_fetched', 'match_id', 'odds_fetched_at'),
-    )
-
-    # Relationships
-    match = relationship("Match", backref="betting_odds")
-
-    def __repr__(self):
-        return f"<BettingOdds Match:{self.match_id} {self.bookmaker}>"
-
-
 class SquigglePrediction(Base):
     """Match predictions from Squiggle API."""
 
@@ -698,7 +671,7 @@ class APIRequestLog(Base):
     __tablename__ = "api_request_logs"
 
     id = Column(Integer, primary_key=True)
-    api_name = Column(String(50), nullable=False, index=True)  # 'theoddsapi', 'tavily'
+    api_name = Column(String(50), nullable=False, index=True)  # e.g. 'tavily'
     endpoint = Column(String(200))
     request_timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
