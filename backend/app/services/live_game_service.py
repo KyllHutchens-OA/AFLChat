@@ -15,6 +15,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.data.database import get_session
 from app.data.models import LiveGame, LiveGameEvent, Team, Match, QuarterSnapshot
 from app.analytics.entity_resolver import VenueResolver
+from app.services.round_naming import resolve_round_display, fallback_round_name
 
 logger = logging.getLogger(__name__)
 
@@ -452,6 +453,11 @@ class LiveGameService:
     def _migrate_to_match(session: Session, live_game: LiveGame):
         """Migrate completed live game to Match table."""
         try:
+            # Best-effort round name/number for this season/round (the 1C data
+            # pipeline backfills the authoritative names later; this just means
+            # a freshly-completed final never sits at "Round 29" until then)
+            round_name, is_final, round_number = fallback_round_name(live_game.season, live_game.round)
+
             # Check if match already exists
             existing_match = session.query(Match).filter_by(
                 season=live_game.season,
@@ -465,6 +471,10 @@ class LiveGameService:
                 existing_match.home_score = live_game.home_score
                 existing_match.away_score = live_game.away_score
                 existing_match.match_status = "completed"
+                if not existing_match.round_name:
+                    existing_match.round_name = round_name
+                    existing_match.is_final = is_final
+                    existing_match.round_number = round_number
                 live_game.match_id = existing_match.id
                 logger.info(f"Updated existing match {existing_match.id}")
             else:
@@ -479,6 +489,9 @@ class LiveGameService:
                     home_score=live_game.home_score,
                     away_score=live_game.away_score,
                     match_status="completed",
+                    round_name=round_name,
+                    is_final=is_final,
+                    round_number=round_number,
                 )
                 session.add(match)
                 session.flush()
@@ -524,6 +537,7 @@ class LiveGameService:
                 session.query(LiveGame)
                 .options(joinedload(LiveGame.home_team))
                 .options(joinedload(LiveGame.away_team))
+                .options(joinedload(LiveGame.match))
                 .filter(
                     LiveGame.status == "live",
                     LiveGame.season == current_season,
@@ -538,6 +552,7 @@ class LiveGameService:
                 session.query(LiveGame)
                 .options(joinedload(LiveGame.home_team))
                 .options(joinedload(LiveGame.away_team))
+                .options(joinedload(LiveGame.match))
                 .filter(
                     LiveGame.status == "scheduled",
                     LiveGame.season == current_season,
@@ -554,6 +569,7 @@ class LiveGameService:
                     session.query(LiveGame)
                     .options(joinedload(LiveGame.home_team))
                     .options(joinedload(LiveGame.away_team))
+                    .options(joinedload(LiveGame.match))
                     .filter(
                         LiveGame.status == "completed",
                         LiveGame.season == current_season,
@@ -571,6 +587,7 @@ class LiveGameService:
                     session.query(LiveGame)
                     .options(joinedload(LiveGame.home_team))
                     .options(joinedload(LiveGame.away_team))
+                    .options(joinedload(LiveGame.match))
                     .filter(
                         LiveGame.status == "completed",
                         LiveGame.season == current_season,
@@ -585,11 +602,17 @@ class LiveGameService:
             # Serialize within session to avoid lazy loading after session closes
             result = []
             for game in games:
+                round_name, is_final, round_number = resolve_round_display(
+                    game.season, game.round, game.match
+                )
                 result.append({
                     'id': game.id,
                     'squiggle_game_id': game.squiggle_game_id,
                     'season': game.season,
                     'round': game.round,
+                    'round_name': round_name,
+                    'is_final': is_final,
+                    'round_number': round_number,
                     'home_team': {
                         'id': game.home_team.id,
                         'name': game.home_team.name,
@@ -616,3 +639,43 @@ class LiveGameService:
                 })
 
             return result
+
+    @staticmethod
+    def get_latest_premiers() -> Optional[dict]:
+        """Latest completed Grand Final, for the off-season premiers banner
+        and 'Relive the Grand Final' card. Reads `matches` directly (not
+        `live_games`) so it works regardless of live event-log coverage."""
+        from sqlalchemy.orm import joinedload
+
+        with get_session() as session:
+            match = (
+                session.query(Match)
+                .options(joinedload(Match.home_team))
+                .options(joinedload(Match.away_team))
+                .filter(Match.round_name == "Grand Final")
+                .order_by(Match.season.desc(), Match.match_date.desc())
+                .first()
+            )
+            if not match or match.home_score is None or match.away_score is None:
+                return None
+
+            live_game = session.query(LiveGame).filter_by(match_id=match.id).first()
+            home_won = match.home_score > match.away_score
+            winner = match.home_team if home_won else match.away_team
+
+            return {
+                'match_id': match.id,
+                'live_game_id': live_game.id if live_game else None,
+                'season': match.season,
+                'home_team': {'name': match.home_team.name, 'abbreviation': match.home_team.abbreviation},
+                'away_team': {'name': match.away_team.name, 'abbreviation': match.away_team.abbreviation},
+                'home_score': match.home_score,
+                'away_score': match.away_score,
+                'home_goals': match.home_q4_goals,
+                'home_behinds': match.home_q4_behinds,
+                'away_goals': match.away_q4_goals,
+                'away_behinds': match.away_q4_behinds,
+                'winner': {'name': winner.name, 'abbreviation': winner.abbreviation},
+                'venue': match.venue,
+                'match_date': match.match_date,
+            }

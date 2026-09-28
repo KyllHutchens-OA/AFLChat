@@ -14,6 +14,9 @@ interface LiveGame {
   squiggle_id: number;
   season: number;
   round: string;
+  round_name?: string;
+  is_final?: boolean;
+  round_number?: number | null;
   home_team: { id: number; name: string; abbreviation: string };
   away_team: { id: number; name: string; abbreviation: string };
   home_score: number;
@@ -33,7 +36,9 @@ interface LiveGame {
 
 interface UpcomingMatch {
   id: number;
+  season?: number;
   round: string | number;
+  round_name?: string;
   home_team: string;
   away_team: string;
   venue: string;
@@ -47,6 +52,23 @@ interface UpcomingMatch {
     home_prob: number | null;
     away_prob: number | null;
   } | null;
+}
+
+interface Premiers {
+  match_id: number;
+  live_game_id: number | null;
+  season: number;
+  home_team: { name: string; abbreviation: string };
+  away_team: { name: string; abbreviation: string };
+  home_score: number;
+  away_score: number;
+  home_goals: number | null;
+  home_behinds: number | null;
+  away_goals: number | null;
+  away_behinds: number | null;
+  winner: { name: string; abbreviation: string };
+  venue: string | null;
+  match_date: string | null;
 }
 
 interface GameEvent {
@@ -70,11 +92,24 @@ interface QuarterScores {
   away: (number | null)[];
 }
 
+interface QuarterBreakdownEntry {
+  quarter: number;
+  home_goals: number;
+  home_behinds: number;
+  home_total: number;
+  away_goals: number;
+  away_behinds: number;
+  away_total: number;
+}
+
 interface LiveGameDetail {
   id: number;
   squiggle_id: number;
   season: number;
   round: string;
+  round_name?: string;
+  is_final?: boolean;
+  round_number?: number | null;
   home_team: {
     id: number; name: string; abbreviation: string;
     primary_color: string; secondary_color: string;
@@ -101,6 +136,7 @@ interface LiveGameDetail {
   post_game_analysis?: string | null;
   quarter_scores?: QuarterScores;
   quarter_summaries?: Record<string, string>;
+  quarter_breakdown?: QuarterBreakdownEntry[] | null;
 }
 
 interface PlayerStat {
@@ -127,6 +163,10 @@ interface LiveDataContextType {
   upcomingMatches: UpcomingMatch[];
   upcomingLoading: boolean;
   nextMatch: UpcomingMatch | null;
+
+  // Premiers (latest Grand Final) — for the off-season banner
+  premiers: Premiers | null;
+  premiersLoading: boolean;
 
   // Game detail cache
   getGameDetail: (gameId: number) => LiveGameDetail | null;
@@ -160,6 +200,10 @@ export const LiveDataProvider = ({ children }: { children: ReactNode }) => {
   // ── Upcoming matches ──
   const [upcomingMatches, setUpcomingMatches] = useState<UpcomingMatch[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
+
+  // ── Premiers (latest Grand Final, for the off-season banner) ──
+  const [premiers, setPremiers] = useState<Premiers | null>(null);
+  const [premiersLoading, setPremiersLoading] = useState(true);
 
   // ── Game detail cache (keyed by gameId) ──
   const [detailCache, setDetailCache] = useState<Record<number, LiveGameDetail>>({});
@@ -237,6 +281,15 @@ export const LiveDataProvider = ({ children }: { children: ReactNode }) => {
     fetchUpcoming();
     const interval = setInterval(fetchUpcoming, UPCOMING_POLL_INTERVAL);
     return () => clearInterval(interval);
+  }, []);
+
+  // ── Fetch premiers (latest Grand Final; rarely changes, fetch once) ──
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/api/live-games/premiers`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setPremiers(data?.premiers || null))
+      .catch(() => {})
+      .finally(() => setPremiersLoading(false));
   }, []);
 
   // ── Eagerly prefetch detail + stats for all games once list loads ──
@@ -345,6 +398,7 @@ export const LiveDataProvider = ({ children }: { children: ReactNode }) => {
     <LiveDataContext.Provider value={{
       games, gamesLoading, gamesError,
       upcomingMatches, upcomingLoading, nextMatch,
+      premiers, premiersLoading,
       getGameDetail, setGameDetail, gameDetailLoading, fetchGameDetail,
       getGameStats, gameStatsLoading, fetchGameStats,
     }}>
@@ -364,4 +418,4 @@ export const useLiveData = () => {
 };
 
 // Re-export types for consumers
-export type { LiveGame, UpcomingMatch, LiveGameDetail, GameEvent, QuarterScores, GameStats, PlayerStat };
+export type { LiveGame, UpcomingMatch, LiveGameDetail, GameEvent, QuarterScores, GameStats, PlayerStat, Premiers, QuarterBreakdownEntry };

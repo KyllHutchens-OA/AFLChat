@@ -5,13 +5,17 @@ import GameSidebar from '../components/LiveGames/GameSidebar';
 import LiveDashboard from '../components/LiveGames/LiveDashboard';
 import ScoringPopup from '../components/LiveGames/ScoringPopup';
 import Countdown from '../components/LiveGames/Countdown';
+import OffSeason from '../components/LiveGames/OffSeason';
+
+// How far out an upcoming match still counts as "this week", not off-season
+const OFF_SEASON_HORIZON_MS = 14 * 24 * 60 * 60 * 1000;
 
 const LiveGames = () => {
-  const { games, gamesLoading, gamesError, upcomingMatches, nextMatch } = useLiveData();
-  // Subscribe to spoiler mode to ensure re-renders when it changes
-  useSpoilerMode();
+  const { games, gamesLoading, gamesError, upcomingMatches, nextMatch, premiers, premiersLoading } = useLiveData();
+  const { hideScores } = useSpoilerMode();
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
   const [selectedUpcomingId, setSelectedUpcomingId] = useState<number | null>(null);
+  const [relivingGF, setRelivingGF] = useState(false);
 
   // When selecting an upcoming match, deselect live/completed and vice versa
   const handleSelectGame = (gameId: number) => {
@@ -118,6 +122,44 @@ const LiveGames = () => {
   const hasLiveGames = games.some(g => g.status === 'live');
   const hasCompletedGames = games.some(g => g.status === 'completed');
 
+  // Off-season: no games at all, and nothing on the horizon for ~2 weeks
+  const isOffSeason = games.length === 0 && (
+    !nextMatch || (new Date(nextMatch.date).getTime() - Date.now()) > OFF_SEASON_HORIZON_MS
+  );
+
+  if (isOffSeason) {
+    if (relivingGF && premiers?.live_game_id != null) {
+      return (
+        <div>
+          <PageHeader />
+          <div className="max-w-4xl mx-auto px-6 sm:px-8 lg:px-10 pb-8">
+            <button
+              onClick={() => setRelivingGF(false)}
+              className="text-sm font-medium text-afl-accent mb-4 hover:underline"
+            >
+              &larr; Back
+            </button>
+            <LiveDashboard gameId={premiers.live_game_id} />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div>
+        <PageHeader />
+        <div className="max-w-4xl mx-auto px-6 sm:px-8 lg:px-10 pb-8">
+          <OffSeason
+            premiers={premiers}
+            premiersLoading={premiersLoading}
+            nextSeasonMatch={nextMatch}
+            hideScores={hideScores}
+            onRelive={() => setRelivingGF(true)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // Show upcoming schedule only when there are no games at all
   // When there are completed games, show them (even without live games)
   if (games.length === 0 || (!hasLiveGames && !hasCompletedGames)) {
@@ -145,7 +187,7 @@ const LiveGames = () => {
                   Next Game
                 </h3>
                 <p className="text-afl-warm-500">
-                  Round {nextMatch.round} • {nextMatch.venue}
+                  {nextMatch.round_name || `Round ${nextMatch.round}`} • {nextMatch.venue}
                 </p>
                 <p className="text-2xl font-semibold text-afl-warm-900 mt-3">
                   {nextMatch.home_team} vs {nextMatch.away_team}
@@ -220,7 +262,7 @@ const LiveGames = () => {
                           {match.home_team} vs {match.away_team}
                         </div>
                         <div className="text-sm text-afl-warm-500 mt-1">
-                          Round {match.round} • {match.venue}
+                          {match.round_name || `Round ${match.round}`} • {match.venue}
                         </div>
                       </div>
                       <div className="text-right ml-4">
@@ -283,7 +325,7 @@ const LiveGames = () => {
                 <div className="glass rounded-apple-xl p-8 shadow-apple-lg">
                   <div className="text-center mb-6">
                     <p className="text-sm font-medium text-afl-warm-500 uppercase tracking-wide">
-                      Round {selectedUpcoming.round} • {selectedUpcoming.venue}
+                      {selectedUpcoming.round_name || `Round ${selectedUpcoming.round}`} • {selectedUpcoming.venue}
                     </p>
                   </div>
                   <div className="text-center mb-6">
