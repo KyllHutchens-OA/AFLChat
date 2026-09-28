@@ -4,7 +4,7 @@ AFL Analytics Agent - Recharts Chart Builder
 Generates library-agnostic chart specifications rendered by Recharts on the frontend.
 Output format: {chartType, title, data, series, xAxis, yAxis, annotations, legend, colors}
 """
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 import math
 import logging
@@ -193,6 +193,17 @@ class RechartsBuilder:
         validation (logged loudly either way — callers must treat `None` as
         "do not emit a chart").
         """
+        spec, _ = RechartsBuilder.build_with_errors(data, chart_type, params)
+        return spec
+
+    @staticmethod
+    def build_with_errors(
+        data: pd.DataFrame,
+        chart_type: str,
+        params: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Like generate_chart, but returns (spec, error) so a caller (the v3
+        make_chart tool) can hand the validation error back to the model."""
         if params is None:
             params = {}
 
@@ -218,7 +229,7 @@ class RechartsBuilder:
             raw = builder(data, params)
         except Exception as e:
             logger.error(f"Error generating chart (chart_type={chart_type}): {e}")
-            return None
+            return None, f"chart builder error: {type(e).__name__}: {e}"
 
         raw.setdefault("version", "1")
 
@@ -228,9 +239,9 @@ class RechartsBuilder:
             logger.error(
                 f"Chart spec failed ChartSpecV1 validation (chart_type={chart_type}): {e}"
             )
-            return None
+            return None, f"ChartSpecV1 validation failed: {e}"
 
-        return spec.model_dump(exclude_none=True)
+        return spec.model_dump(exclude_none=True), None
 
     # ── Line Chart ──────────────────────────────────────────────
 

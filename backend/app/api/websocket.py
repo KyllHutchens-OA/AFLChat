@@ -5,6 +5,7 @@ from app import socketio
 from app.services.conversation_service import ConversationService
 from app.utils.json_serialization import make_json_serializable
 from app.middleware.usage_tracker import UsageTracker
+from app.agent.v3.llm import model_for
 from collections import defaultdict
 from datetime import datetime, timedelta
 import logging
@@ -16,6 +17,12 @@ logger = logging.getLogger(__name__)
 # In-memory WebSocket rate limiter (10 messages/minute per IP)
 _ws_rate_limit: dict = defaultdict(list)
 WS_RATE_LIMIT = 10  # messages per minute
+
+# v2 (LangGraph pipeline) is the default; v3 is the tool-calling loop in app/agent/v3.
+AGENT_ENGINE = os.getenv("AGENT_ENGINE", "v2").lower()
+if AGENT_ENGINE == "v3":
+    from app.agent.v3.tools.entities import warm_async
+    warm_async()
 
 
 def _check_ws_rate_limit(ip: str) -> bool:
@@ -73,6 +80,12 @@ def handle_chat_message(data):
         def session_emit(event, data):
             """Emit to the requesting client only"""
             socketio.emit(event, data, room=session_id)
+
+        if AGENT_ENGINE == "v3":
+            from app.agent.v3.ws_stream import handle_chat_message_v3
+            handle_chat_message_v3(data, emit=session_emit, session_id=session_id,
+                                   ip_address=ip_address or '', rate_limit_ok=_check_ws_rate_limit)
+            return
 
         if not user_query:
             session_emit('error', {'message': 'No message provided'})
@@ -137,7 +150,7 @@ def handle_chat_message(data):
         UsageTracker.track_usage(
             visitor_id=visitor_id,
             ip_address=ip_address or '',
-            model=os.getenv("OPENAI_MODEL_FAST", "gpt-5-mini"),
+            model=model_for("AGENT_MODEL"),
             input_tokens=token_usage.get("input_tokens", 0),
             output_tokens=token_usage.get("output_tokens", 0),
             endpoint="afl_chat"

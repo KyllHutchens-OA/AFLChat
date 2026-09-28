@@ -1,0 +1,78 @@
+"""
+WebSocket chat handler for AGENT_ENGINE=v3 (called from api/websocket.py).
+
+Event order: received (before any DB work) -> thinking* (one per real tool
+call) -> response_delta* (streamed answer) -> visualization? -> response
+(full text, v2-compatible) -> complete. `response` and `complete` carry
+`data_as_of` (latest match with player stats). Persistence, usage tracking
+and the trace row happen after `complete`.
+"""
+import logging
+import re
+from typing import Any, Callable, Dict, Optional
+
+from app.agent.v3 import llm
+from app.agent.v3.loop import AgentLoop
+from app.services.conversation_service import ConversationService
+from app.utils.json_serialization import make_json_serializable
+
+logger = logging.getLogger(__name__)
+
+_CONTROL = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
+GENERIC_ERROR = "Something went wrong processing your request. Please try again, or rephrase your question."
+
+
+def handle_chat_message_v3(data: Dict[str, Any], *, emit: Callable[[str, Dict[str, Any]], None],
+                           session_id: str, ip_address: str,
+                           rate_limit_ok: Callable[[str], bool]) -> None:
+    from app.middleware.usage_tracker import UsageTracker
+
+    user_query = (data.get("message") or "").strip()
+    if not user_query:
+        emit("error", {"message": "No message provided"})
+        return
+    emit("received", {"step": "Received your question...", "current_step": "received"})
+
+    if not rate_limit_ok(ip_address or session_id):
+        emit("error", {"message": "Rate limit exceeded. Please wait a moment before sending another message."})
+        return
+    visitor_id = data.get("visitor_id") or session_id
+    allowed, error_msg = UsageTracker.check_limits(visitor_id, ip_address or "")
+    if not allowed:
+        emit("error", {"message": error_msg})
+        return
+
+    conversation_id: Optional[str] = data.get("conversation_id")
+    history = []
+    if conversation_id:
+        conv = ConversationService.get_conversation(conversation_id)
+        history = (conv or {}).get("messages") or []
+        if not conv:
+            conversation_id = None
+    if not conversation_id:
+        source = data.get("source")
+        conversation_id = ConversationService.create_conversation(
+            chat_type=source if source in ("afl", "aflagent") else "afl")
+        emit("conversation_started", {"conversation_id": conversation_id})
+    ConversationService.add_message(conversation_id=conversation_id, role="user", content=user_query)
+
+    out = AgentLoop().run(user_query, history, spoiler_mode=bool(data.get("spoiler_mode")), emit=emit)
+
+    chart = None
+    if out.chart_spec:
+        chart = make_json_serializable(out.chart_spec)
+        emit("visualization", {"spec": chart})
+    text = _CONTROL.sub("", out.answer) if not out.error else (out.answer or GENERIC_ERROR)
+    emit("response", {"text": text, "confidence": 0.0 if out.error else 1.0, "sources": [],
+                      "data_as_of": out.data_as_of})
+    emit("complete", {"conversation_id": conversation_id, "data_as_of": out.data_as_of})
+
+    metadata = {"engine": "v3", "model": out.model, "tool_calls": make_json_serializable(out.memory),
+                "data_as_of": out.data_as_of}
+    if chart:
+        metadata["visualization"] = chart
+    ConversationService.add_message(conversation_id=conversation_id, role="assistant", content=text, metadata=metadata)
+    llm.record_usage(out.model, llm.Usage(**out.usage), out.cost_usd, endpoint="afl_chat_v3",
+                     visitor_id=visitor_id, ip_address=ip_address or "")
+    from app.agent.v3.trace import write_trace
+    write_trace(out, question=user_query, conversation_id=conversation_id, visitor_id=visitor_id)

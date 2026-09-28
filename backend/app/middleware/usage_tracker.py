@@ -4,7 +4,7 @@ Tracks token usage and enforces per-visitor and global daily limits.
 """
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Tuple
+from typing import Optional, Tuple
 import os
 import logging
 
@@ -12,19 +12,6 @@ from sqlalchemy import func
 from app.data.database import Session
 
 logger = logging.getLogger(__name__)
-
-# Pricing per 1K tokens (adjust based on actual OpenAI pricing)
-# These are approximate costs - update as needed
-PRICING = {
-    "gpt-4-turbo-preview": {"input": 0.01, "output": 0.03},
-    "gpt-4": {"input": 0.03, "output": 0.06},
-    "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
-    "gpt-4o": {"input": 0.005, "output": 0.015},
-    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
-    "gpt-5-nano": {"input": 0.0001, "output": 0.0004},
-    # Default fallback pricing
-    "default": {"input": 0.01, "output": 0.03},
-}
 
 # Daily limits from environment (with sensible defaults)
 DAILY_LIMIT_PER_VISITOR = int(os.getenv("DAILY_LIMIT_PER_VISITOR", "50"))
@@ -87,30 +74,35 @@ class UsageTracker:
         model: str,
         input_tokens: int,
         output_tokens: int,
-        endpoint: str = "chat"
+        endpoint: str = "chat",
+        cost_usd: Optional[float] = None,
     ) -> None:
         """
         Record API usage for cost tracking.
 
         Args:
-            visitor_id: Unique visitor identifier
+            visitor_id: Unique visitor identifier ("system" for background jobs)
             ip_address: Client IP address
-            model: OpenAI model name used
-            input_tokens: Number of input tokens
-            output_tokens: Number of output tokens
+            model: model name used
+            input_tokens: Number of input tokens (cached included)
+            output_tokens: Number of output tokens (reasoning included)
             endpoint: API endpoint name
+            cost_usd: real cost from llm.cost_usd (cache-aware); computed
+                from uncached list prices when omitted
         """
         # Import here to avoid circular imports
         from app.data.models import APIUsage
+        from app.agent.v3.llm import LLMError, Usage, cost_usd as price
 
         session = Session()
         try:
-            # Calculate estimated cost
-            pricing = PRICING.get(model, PRICING["default"])
-            cost = (
-                (input_tokens / 1000 * pricing["input"]) +
-                (output_tokens / 1000 * pricing["output"])
-            )
+            cost = cost_usd
+            if cost is None:
+                try:
+                    cost = price(model, Usage(input_tokens=input_tokens, output_tokens=output_tokens))
+                except LLMError as e:
+                    logger.error(f"Usage cost unknown: {e}")
+                    cost = 0.0
 
             usage = APIUsage(
                 visitor_id=visitor_id,
