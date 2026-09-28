@@ -47,11 +47,12 @@ def fetch_aflt(rel_url: str, refresh: bool = False) -> str:
     path = _cache_path("aflt", rel_url.strip("/").replace("/", "__"))
     if os.path.exists(path) and not refresh:
         return open(path, encoding="utf-8").read()
+    # one request at a time, request starts at least AFLT_DELAY apart
     wait = AFLT_DELAY - (time.time() - _last_aflt_fetch)
     if wait > 0:
         time.sleep(wait)
-    resp = requests.get(f"{AFLT_BASE}/{rel_url.lstrip('/')}", headers=AFLT_UA, timeout=(10, 45))
     _last_aflt_fetch = time.time()
+    resp = requests.get(f"{AFLT_BASE}/{rel_url.lstrip('/')}", headers=AFLT_UA, timeout=(10, 45))
     resp.raise_for_status()
     text = resp.content.decode("latin-1") if "charset" not in resp.headers.get("content-type", "") else resp.text
     with open(path, "w", encoding="utf-8") as f:
