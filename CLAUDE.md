@@ -167,7 +167,7 @@ User Query
    Template (simple) or LLM (complex) → natural language
 ```
 
-**v3 engine (`AGENT_ENGINE=v3`, `app/agent/v3/`)** — one tool-calling loop that replaces the pipeline above once the 1E gate passes:
+**v3 engine (`AGENT_ENGINE=v3`, `app/agent/v3/`)**: one tool-calling loop that replaces the pipeline above once the 1E gate passes:
 - `loop.py` `AgentLoop`: system prompt (`prompt.py`, cache-stable) + typed tools (`tools/`: resolve_entities, player_stats, leaderboard, team_results, head_to_head, match_lookup, ladder, news, run_sql, make_chart), max 6 tool calls, parallel tool calls, streamed answer
 - every tool returns `{rows, row_count, result_id, columns, why_empty, notes}`; `make_chart` builds a validated ChartSpecV1 and returns errors to the model
 - `ws_stream.py`: WS events `received` -> `thinking` (per tool call) -> `response_delta` -> `visualization` -> `response` -> `complete` (with `data_as_of`)
@@ -297,7 +297,7 @@ Wire-format chart types (`ChartSpecV1.chartType`, camelCase): `line`, `bar`, `gr
 
 - `conversation_service.py` — JSONB chat history CRUD
 - `live_game_service.py` — Squiggle SSE polling, scoring events, WebSocket broadcast
-- `game_summary_service.py` — SUMMARY_MODEL narrative summaries per quarter
+- `game_summary_service.py`: SUMMARY_MODEL narrative summaries per quarter
 - `api_sports_service.py` — live player stats with caching
 - `scheduler.py` — background jobs (odds refresh, news fetch, live game polling, stats ingestion)
 
@@ -377,7 +377,7 @@ Chat pipeline restructure (Milestones 0–5, complete):
 3. **React StrictMode** — socket hook uses singleton pattern to prevent double-connect
 4. **The Odds API quota** — only 16 req/day; fetcher guards against overcalling
 5. **Round field is a string** — rounds can be "1"–"24", "Opening Round", "Qualifying Final", etc. (V3 migration)
-6. **LLM calls** — go through `app/agent/v3/llm.py` (`chat` / `complete`); model names come only from `AGENT_MODEL` / `SUMMARY_MODEL` / `NEWS_ENRICHMENT_MODEL` (defaults in `llm.MODEL_ENV_DEFAULTS`), prices from `llm.PRICES` (an unknown model raises). Pass `track_endpoint` for background calls so api_usage records real model and cost
+6. **LLM calls**: go through `app/agent/v3/llm.py` (`chat` / `complete`); model names come only from `AGENT_MODEL` / `SUMMARY_MODEL` / `NEWS_ENRICHMENT_MODEL` (defaults in `llm.MODEL_ENV_DEFAULTS`), prices from `llm.PRICES` (an unknown model raises). Pass `track_endpoint` for background calls so api_usage records real model and cost
 7. **Single gunicorn worker** — WebSocket state is in-process; scaling to multiple workers requires Redis adapter
 8. **AFL Tables round numbering** — AFL Tables and Squiggle may number rounds differently (Opening Round offset). The stats ingester matches by team IDs + date, not round number
 9. **AFL Tables update delay** — player stats appear on afltables.com 1–3 days after a round completes. The 6 AM daily job will pick them up automatically once available
