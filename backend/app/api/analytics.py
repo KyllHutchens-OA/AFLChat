@@ -1,6 +1,6 @@
 """
 Analytics Dashboard - API endpoints for traffic, API usage, and conversation logs.
-No authentication - accessible at /api/analytics routes.
+Every route requires the admin bearer token (see admin_auth.py).
 """
 from flask import Blueprint, request, jsonify, Response
 from datetime import datetime, timedelta, timezone
@@ -9,6 +9,7 @@ from markupsafe import escape
 import json
 import logging
 
+from app.api.admin_auth import check_admin_token
 from app.data.database import Session
 from app.data.models import PageView, Conversation, APIUsage, UserReport
 from sqlalchemy import func, text
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 bp = Blueprint('analytics_dashboard', __name__, url_prefix='/api/analytics')
 
 AEDT = ZoneInfo('Australia/Sydney')
+
+
+@bp.before_request
+def _require_admin():
+    return check_admin_token()
 
 
 @bp.route('/traffic')

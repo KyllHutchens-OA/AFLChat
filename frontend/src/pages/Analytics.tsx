@@ -152,10 +152,11 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
   );
 }
 
-const ANALYTICS_PASSWORD = 'NotAnotherCommentator!';
+// Admin bearer token (server checks it); kept only for this browser session.
+const TOKEN_KEY = 'analytics_token';
 
 const Analytics = () => {
-  const [authed, setAuthed] = useState(() => sessionStorage.getItem('analytics_authed') === '1');
+  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem(TOKEN_KEY));
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [hours, setHours] = useState<TimeRange>(24);
@@ -169,18 +170,56 @@ const Analytics = () => {
   const [reports, setReports] = useState<ReportData[]>([]);
   const [expandedReport, setExpandedReport] = useState<number | null>(null);
 
+  const logout = useCallback(() => {
+    sessionStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setPasswordError(true);
+  }, []);
+
+  const fetchData = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    const headers = { Authorization: `Bearer ${token}` };
+    try {
+      const [trafficRes, usageRes, convosRes, reportsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/analytics/traffic?hours=${hours}`, { headers }),
+        fetch(`${API_BASE}/api/analytics/api-usage?hours=${hours}`, { headers }),
+        fetch(`${API_BASE}/api/analytics/conversations?hours=${hours}`, { headers }),
+        fetch(`${API_BASE}/api/analytics/reports`, { headers }),
+      ]);
+
+      if ([trafficRes, usageRes, convosRes, reportsRes].some((r) => r.status === 401)) {
+        logout();
+        return;
+      }
+      if (trafficRes.ok) setTraffic(await trafficRes.json());
+      if (usageRes.ok) setUsage(await usageRes.json());
+      if (convosRes.ok) setConvos(await convosRes.json());
+      if (reportsRes.ok) {
+        const data = await reportsRes.json();
+        setReports(data.reports || []);
+      }
+    } catch (e) {
+      console.error('Failed to fetch analytics:', e);
+    }
+    setLoading(false);
+  }, [hours, token, logout]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (passwordInput === ANALYTICS_PASSWORD) {
-      sessionStorage.setItem('analytics_authed', '1');
-      setAuthed(true);
-      setPasswordError(false);
-    } else {
-      setPasswordError(true);
-    }
+    const value = passwordInput.trim();
+    if (!value) return;
+    sessionStorage.setItem(TOKEN_KEY, value);
+    setToken(value);
+    setPasswordInput('');
+    setPasswordError(false);
   };
 
-  if (!authed) {
+  if (!token) {
     return (
       <div className="max-w-sm mx-auto px-4 py-32">
         <form onSubmit={handleLogin} className="bg-white/60 backdrop-blur rounded-xl p-6 border border-apple-gray-200/50">
@@ -189,14 +228,14 @@ const Analytics = () => {
             type="password"
             value={passwordInput}
             onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(false); }}
-            placeholder="Password"
+            placeholder="Admin token"
             autoFocus
             className={`w-full px-3 py-2 rounded-lg border text-sm bg-white
               ${passwordError ? 'border-red-400' : 'border-apple-gray-200'}
               focus:outline-none focus:ring-2 focus:ring-apple-blue-500/30 focus:border-apple-blue-500`}
           />
           {passwordError && (
-            <p className="text-xs text-red-500 mt-1.5">Incorrect password</p>
+            <p className="text-xs text-red-500 mt-1.5">Invalid token</p>
           )}
           <button
             type="submit"
@@ -210,39 +249,26 @@ const Analytics = () => {
     );
   }
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [trafficRes, usageRes, convosRes, reportsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/analytics/traffic?hours=${hours}`),
-        fetch(`${API_BASE}/api/analytics/api-usage?hours=${hours}`),
-        fetch(`${API_BASE}/api/analytics/conversations?hours=${hours}`),
-        fetch(`${API_BASE}/api/analytics/reports`),
-      ]);
-
-      if (trafficRes.ok) setTraffic(await trafficRes.json());
-      if (usageRes.ok) setUsage(await usageRes.json());
-      if (convosRes.ok) setConvos(await convosRes.json());
-      if (reportsRes.ok) {
-        const data = await reportsRes.json();
-        setReports(data.reports || []);
-      }
-    } catch (e) {
-      console.error('Failed to fetch analytics:', e);
-    }
-    setLoading(false);
-  }, [hours]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
   const filteredConvos = convos?.conversations.filter(
     (c) => chatFilter === 'all' || c.chat_type === chatFilter
   );
 
-  const handleDownload = () => {
-    window.open(`${API_BASE}/api/analytics/conversations/download?hours=${hours}`, '_blank');
+  // fetch + blob so the bearer header is sent (window.open cannot set headers)
+  const handleDownload = async () => {
+    const res = await fetch(`${API_BASE}/api/analytics/conversations/download?hours=${hours}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      logout();
+      return;
+    }
+    if (!res.ok) return;
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `conversations_${hours}h.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (

@@ -7,6 +7,7 @@ from app.data.database import Session
 from app.data.models import Match, Team, PageView
 from app.utils.validators import PageViewRequest, ChatMessageRequest
 from app.middleware.rate_limiter import limiter
+from app.api.admin_auth import require_admin_token
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import os
@@ -156,6 +157,7 @@ def track_page_view():
 
 
 @bp.route('/analytics/summary', methods=['GET'])
+@require_admin_token
 def get_analytics_summary():
     """Get analytics summary."""
     try:
