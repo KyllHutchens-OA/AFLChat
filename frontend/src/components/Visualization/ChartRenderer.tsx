@@ -71,7 +71,7 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({ spec }) => {
   const colors = s.colors && s.colors.length ? s.colors : DEFAULT_COLORS;
 
   return (
-    <div className="w-full card-apple p-6 my-4">
+    <div className="w-full card p-6 my-4">
       {s.title && (
         <h3 className="text-base font-semibold text-[#3D2E1F] mb-4 text-center">
           {s.title}

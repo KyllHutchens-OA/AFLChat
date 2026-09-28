@@ -37,14 +37,14 @@ const DataTable: React.FC<DataTableProps> = ({ data, title }) => {
   if (columns.length === 0) return null;
 
   return (
-    <div className="w-full card-apple p-6 my-4">
+    <div className="w-full card p-6 my-4">
       {title && (
         <h3 className="text-base font-semibold text-[#3D2E1F] mb-4 text-center">{title}</h3>
       )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
           <thead>
-            <tr className="border-b border-afl-warm-100">
+            <tr className="border-b border-warm-100">
               {columns.map((col) => (
                 <th key={col} className="px-3 py-2 font-semibold text-[#6B5B4E] whitespace-nowrap">
                   {humanizeKey(col)}
@@ -54,7 +54,7 @@ const DataTable: React.FC<DataTableProps> = ({ data, title }) => {
           </thead>
           <tbody>
             {data.map((row, i) => (
-              <tr key={i} className="border-b border-afl-warm-100/60 last:border-0">
+              <tr key={i} className="border-b border-warm-100/60 last:border-0">
                 {columns.map((col) => (
                   <td key={col} className="px-3 py-2 text-[#3D2E1F] whitespace-nowrap">
                     {formatCell(row?.[col])}
