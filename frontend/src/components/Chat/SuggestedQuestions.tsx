@@ -1,28 +1,59 @@
+import { useEffect, useState } from 'react';
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+
 interface SuggestedQuestionsProps {
-  teamName?: string | null;
   onSelect: (question: string) => void;
 }
 
-const GENERIC_QUESTIONS = [
-  "Who won the 2025 grand final?",
-  "Top goal kickers of all time",
-  "Show me the closest games this season",
-  "Which team has the longest winning streak?",
-];
+interface SeasonMeta {
+  current_season: number;
+  latest_completed_season: number;
+  in_season: boolean;
+}
 
-const TEAM_QUESTIONS: Record<string, string[]> = {
-  default: [
-    "How did {team} go last season?",
-    "Who is {team}'s all-time leading goal kicker?",
-    "{team}'s biggest win ever",
-    "Show me {team}'s win/loss record by season",
-  ],
+// Client-side guess until /api/meta/season answers: AFL runs roughly Mar-Sep.
+const fallbackSeasonMeta = (now: Date = new Date()): SeasonMeta => {
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0 = Jan
+  if (month >= 2 && month <= 8) {
+    return { current_season: year, latest_completed_season: year - 1, in_season: true };
+  }
+  const completed = month < 2 ? year - 1 : year;
+  return { current_season: completed, latest_completed_season: completed, in_season: false };
 };
 
-const SuggestedQuestions: React.FC<SuggestedQuestionsProps> = ({ teamName, onSelect }) => {
-  const questions = teamName
-    ? (TEAM_QUESTIONS.default).map(q => q.replace('{team}', teamName))
-    : GENERIC_QUESTIONS;
+// Stats/records only: no "who won" chips, so they never spoil a result.
+const buildStarterQuestions = (meta: SeasonMeta): string[] => {
+  const season = meta.in_season ? meta.current_season : meta.latest_completed_season;
+  const soFar = meta.in_season ? ' so far' : '';
+  return [
+    `Top 10 goal kickers in ${season}${soFar}`,
+    `Most disposals in a single game in ${season}`,
+    `Average tackles per game by team in ${season}`,
+    'Top goal kickers of all time',
+  ];
+};
+
+const SuggestedQuestions: React.FC<SuggestedQuestionsProps> = ({ onSelect }) => {
+  const [meta, setMeta] = useState<SeasonMeta>(() => fallbackSeasonMeta());
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BACKEND_URL}/api/meta/season`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: SeasonMeta | null) => {
+        if (!cancelled && data && typeof data.current_season === 'number') setMeta(data);
+      })
+      .catch(() => {
+        // Keep the client-side fallback
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const questions = buildStarterQuestions(meta);
 
   return (
     <div className="flex flex-wrap gap-2 justify-center">
