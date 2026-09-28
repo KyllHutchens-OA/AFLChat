@@ -99,6 +99,10 @@ def create_app(config=None):
     from app.api import teams_api
     app.register_blueprint(teams_api.bp)
 
+    # Register meta API (season status for starter chips)
+    from app.api import meta_api
+    app.register_blueprint(meta_api.bp)
+
     # Register WebSocket handlers
     from app.api import websocket
 

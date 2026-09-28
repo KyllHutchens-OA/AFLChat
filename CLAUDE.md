@@ -202,6 +202,7 @@ Migrations are in `database/migrations/` (V1–V6) and `backend/app/data/migrati
 - `GET /api/health` — health check (DB + OpenAI)
 - `POST /api/chat/message` — non-streaming chat
 - `GET /api/conversations/<id>` — load history
+- `GET /api/meta/season` — current / latest completed season + `in_season` (drives chat starter chips; `api/meta_api.py`)
 - `GET /api/admin/analytics/*` — admin dashboard
 
 **WebSocket** (`/socket.io` via `api/websocket.py`):
