@@ -5,6 +5,7 @@ Generates library-agnostic chart specifications rendered by Recharts on the fron
 Output format: {chartType, title, data, series, xAxis, yAxis, annotations, legend, colors}
 """
 from typing import Dict, Any, List, Optional, Tuple
+from decimal import Decimal
 import pandas as pd
 import math
 import logging
@@ -17,6 +18,31 @@ logger = logging.getLogger(__name__)
 
 # AFL warm color palette
 AFL_COLORS = ["#C2581C", "#2D7A6F", "#D4794D", "#246359", "#8C7B6B", "#A30046", "#D4001A", "#002B5C"]
+
+
+def nice_number(value: float, round_up: bool) -> float:
+    """Round `value` to a "nice" 1/2/2.5/5 x 10^n step (classic axis-tick
+    algorithm), instead of an arbitrary padded max like 103 or 777 (B11)."""
+    if value == 0:
+        return 0.0
+    exp = math.floor(math.log10(abs(value)))
+    frac = abs(value) / (10 ** exp)
+    if round_up:
+        nice_frac = 1 if frac <= 1 else 2 if frac <= 2 else 2.5 if frac <= 2.5 else 5 if frac <= 5 else 10
+    else:
+        nice_frac = 1 if frac < 1.5 else 2 if frac < 3 else 5 if frac < 7 else 10
+    return math.copysign(nice_frac * 10 ** exp, value)
+
+
+def nice_domain(min_v: float, max_v: float, start_at_zero: bool = True) -> List[float]:
+    """A [lo, hi] y-axis domain rounded to nice tick values."""
+    if max_v <= min_v:
+        max_v = min_v + 1
+    lo = 0.0 if start_at_zero else nice_number(min_v, round_up=False)
+    hi = nice_number(max_v, round_up=True)
+    if hi <= lo:
+        hi = lo + 1
+    return [lo, hi]
 
 
 class ChartHelper:
@@ -51,6 +77,18 @@ class ChartHelper:
             return special_cases[col_name.lower()]
 
         return col_name.replace("_", " ").title()
+
+    # Columns whose values already read as labels directly on the chart (a
+    # player/team name printed under each bar) — an axis title like "Player
+    # Name" next to them is pure redundancy (review 1.6, B11).
+    _REDUNDANT_AXIS_COLS = {"name", "player", "player_name", "team", "team_name"}
+
+    @staticmethod
+    def axis_label(col_name: str) -> str:
+        """Axis label for a column; blank for name-like columns (see above)."""
+        if col_name.lower() in ChartHelper._REDUNDANT_AXIS_COLS:
+            return ""
+        return ChartHelper.humanize_column_name(col_name)
 
     @staticmethod
     def generate_chart_title(
@@ -147,11 +185,16 @@ class ChartHelper:
 
 
 def _clean_value(v):
-    """Convert a value to JSON-safe type."""
-    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-        return None
+    """Convert a value to a JSON-safe, chart-ready type: Decimal -> float,
+    NaN/inf -> None, floats rounded to 2dp (a raw 70.7727... on an axis or
+    tooltip reads as noise, and this mirrors the same rounding tools/base.py
+    already applies to rows before they reach here)."""
+    if isinstance(v, Decimal):
+        v = float(v)
+    if isinstance(v, float):
+        return None if (math.isnan(v) or math.isinf(v)) else round(v, 2)
     if hasattr(v, 'item'):  # numpy scalar
-        return v.item()
+        return _clean_value(v.item())
     return v
 
 
@@ -218,6 +261,7 @@ class RechartsBuilder:
             "grouped_bar": lambda d, p: RechartsBuilder._build_multi_bar_chart(d, p, stacked=False),
             "comparison": RechartsBuilder._build_comparison_chart,
             "trend": RechartsBuilder._build_line_chart,
+            "diverging_bar": RechartsBuilder._build_diverging_bar_chart,
         }
 
         builder = builders.get(chart_type)
@@ -264,6 +308,10 @@ class RechartsBuilder:
         chart_data = []
 
         if group_col and group_col in data.columns:
+            if data.duplicated(subset=[x_col, group_col]).any():
+                # e.g. two teams' scores by season landing in one un-pivoted line
+                # (B1's zig-zag bug) — refuse rather than silently overwrite points.
+                raise ValueError(f"duplicate ({x_col}, {group_col}) rows; each series needs unique x values")
             # Multiple lines — pivot to flat format
             groups = list(data[group_col].unique())
             # Build x values from all groups
@@ -301,18 +349,22 @@ class RechartsBuilder:
 
             # Add moving average series if available
             if recommendations.get("show_moving_avg") and "moving_avg_3" in data.columns:
+                # "3-Game Average" only makes sense per-match/round; per-season
+                # data has one point per season, so a rolling average of rows
+                # is a multi-season average, not "3 games" (B11).
+                avg_label = "3-Game Average" if x_col not in ("season", "year") else "Moving Average"
                 series.append({
                     "key": "moving_avg_3",
-                    "name": "3-Game Average",
+                    "name": avg_label,
                     "color": AFL_COLORS[1],
                     "dashed": True,
                 })
-                logger.info("Added 3-game moving average to line chart")
+                logger.info("Added moving average series to line chart")
 
         annotations = _convert_annotations(annotations_in)
 
         # Axis config
-        x_axis = {"label": ChartHelper.humanize_column_name(x_col)}
+        x_axis = {"label": ChartHelper.axis_label(x_col)}
         y_axis = {"label": ChartHelper.humanize_column_name(y_col)}
 
         _apply_layout_config(x_axis, y_axis, layout_config)
@@ -331,6 +383,9 @@ class RechartsBuilder:
             "annotations": annotations,
             "legend": len(series) > 1,
             "colors": AFL_COLORS,
+            # Discrete per-season/round buckets: no values exist between them,
+            # so a straight line reads better than a smoothed curve (B11/2A).
+            "curve": "linear" if x_col in ("season", "year") else None,
         }
 
     # ── Bar Chart ───────────────────────────────────────────────
@@ -356,7 +411,7 @@ class RechartsBuilder:
             "color": AFL_COLORS[0],
         }]
 
-        x_axis = {"label": ChartHelper.humanize_column_name(x_col)}
+        x_axis = {"label": ChartHelper.axis_label(x_col)}
         y_axis = {"label": ChartHelper.humanize_column_name(y_col)}
         _apply_layout_config(x_axis, y_axis, layout_config)
 
@@ -398,7 +453,7 @@ class RechartsBuilder:
         }]
 
         x_axis = {"label": ChartHelper.humanize_column_name(y_col)}
-        y_axis = {"label": ChartHelper.humanize_column_name(x_col)}
+        y_axis = {"label": ChartHelper.axis_label(x_col)}
         _apply_layout_config(x_axis, y_axis, layout_config)
 
         return {
@@ -595,7 +650,7 @@ class RechartsBuilder:
             "title": title,
             "data": chart_data,
             "series": series,
-            "xAxis": {"label": ChartHelper.humanize_column_name(group_col) if group_col else ""},
+            "xAxis": {"label": ChartHelper.axis_label(group_col) if group_col else ""},
             "yAxis": {"label": ChartHelper.humanize_column_name(y_col)},
             "annotations": [],
             "legend": True,
@@ -611,14 +666,20 @@ class RechartsBuilder:
         title = params.get("title", "Comparison")
         layout_config = params.get("layout_config", {})
 
-        numeric_cols = [c for c in data.select_dtypes(include=['number']).columns.tolist()
-                        if 'id' not in c.lower()]
+        # An explicit metric_cols (the columns the caller/model actually named)
+        # wins over auto-detecting every numeric column (B1: never silently
+        # widen to numeric_cols[0]/all-numeric when specific metrics were asked for).
+        numeric_cols = params.get("metric_cols") or [
+            c for c in data.select_dtypes(include=['number']).columns.tolist() if 'id' not in c.lower()
+        ]
 
         series = []
         chart_data = []
 
         if group_col and group_col in data.columns:
             y_col = params.get("y_col", numeric_cols[0] if numeric_cols else data.columns[-1])
+            if data.duplicated(subset=[x_col, group_col]).any():
+                raise ValueError(f"duplicate ({x_col}, {group_col}) rows; each series needs unique x values")
             groups = list(data[group_col].unique())
             x_values = data[x_col].unique().tolist()
 
@@ -656,7 +717,7 @@ class RechartsBuilder:
                     s["stackId"] = "a"
                 series.append(s)
 
-        x_axis = {"label": ChartHelper.humanize_column_name(x_col)}
+        x_axis = {"label": ChartHelper.axis_label(x_col)}
         y_axis = {"label": "Value"}
         _apply_layout_config(x_axis, y_axis, layout_config)
 
@@ -669,6 +730,45 @@ class RechartsBuilder:
             "series": series,
             "xAxis": x_axis,
             "yAxis": y_axis,
+            "annotations": [],
+            "legend": True,
+            "colors": AFL_COLORS,
+        }
+
+    # ── Diverging Bar (win/loss by season: wins positive, losses negative) ──
+
+    @staticmethod
+    def _build_diverging_bar_chart(data: pd.DataFrame, params: Dict) -> Dict:
+        """Two series straddling zero — e.g. wins above, losses below — instead
+        of a smoothed line implying values between discrete seasons (B11/2A)."""
+        x_col = params.get("x_col", data.columns[0])
+        pos_col, neg_col = params["pos_col"], params["neg_col"]
+        title = params.get("title", "Comparison")
+
+        chart_data = []
+        for _, r in data.iterrows():
+            neg = r[neg_col]
+            chart_data.append(_clean_row({
+                "x": str(r[x_col]),
+                pos_col: _clean_value(r[pos_col]),
+                neg_col: _clean_value(-neg) if pd.notna(neg) else None,
+            }))
+
+        series = [
+            {"key": pos_col, "name": ChartHelper.humanize_column_name(pos_col), "color": AFL_COLORS[1]},
+            {"key": neg_col, "name": ChartHelper.humanize_column_name(neg_col), "color": AFL_COLORS[5]},
+        ]
+        x_axis = {"label": ChartHelper.axis_label(x_col)}
+        if x_col in ("season", "year"):
+            x_axis["integerOnly"] = True
+
+        return {
+            "chartType": "groupedBar",
+            "title": title,
+            "data": chart_data,
+            "series": series,
+            "xAxis": x_axis,
+            "yAxis": {"label": "Games"},
             "annotations": [],
             "legend": True,
             "colors": AFL_COLORS,
@@ -702,7 +802,7 @@ class RechartsBuilder:
             "title": title,
             "data": chart_data,
             "series": series,
-            "xAxis": {"label": ChartHelper.humanize_column_name(group_col)},
+            "xAxis": {"label": ChartHelper.axis_label(group_col)},
             "yAxis": {"label": "Value"},
             "annotations": [],
             "legend": True,

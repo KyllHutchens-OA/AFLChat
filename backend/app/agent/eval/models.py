@@ -78,6 +78,9 @@ class PairCheck(BaseModel):
     top: Optional[int] = None  # only the first N truth rows
     min_frac: float = 1.0  # fraction of truth rows that must match
     tol: Optional[float] = None
+    # Compare |cell| against |truth value|: a diverging-bar chart plots one
+    # series negated (e.g. losses below zero), so the sign legitimately differs.
+    abs_value: bool = False
 
 
 class ChartExpect(BaseModel):
@@ -89,6 +92,7 @@ class ChartExpect(BaseModel):
     max_series: Optional[int] = None
     unique_x: bool = True  # each x appears once (not for pie/scatter)
     min_points: Optional[int] = None
+    max_points: Optional[int] = None  # categorical cap (2A): a bar/pie past ~25 x values is unreadable
     # Each label must appear among series keys/names or x values (e.g. every
     # requested metric of a multi-metric comparison).
     labels: List[str] = Field(default_factory=list)
@@ -96,6 +100,10 @@ class ChartExpect(BaseModel):
     # scatter: fraction of plotted (x, y) points that equal a truth (x_col, y_col) pair
     scatter_truth: Optional[Dict[str, str]] = None  # {"x": col, "y": col}
     scatter_min_frac: float = 0.8
+    # A missing chart is not a failure (e.g. the model may reasonably answer
+    # with a table instead once the categorical cap is hit) — only check the
+    # fields above when a chart IS emitted.
+    optional: bool = False
 
 
 class Budget(BaseModel):

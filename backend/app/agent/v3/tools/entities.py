@@ -159,6 +159,28 @@ def _describe(r: Dict[str, Any]) -> str:
     return f"{r['name']} (id {r['id']}, {clubs}, {r['first_season']}-{r['last_season']}, {r['games']} games)"
 
 
+def most_common_team(player_name: str, season_from: Optional[int] = None, season_to: Optional[int] = None) -> Optional[str]:
+    """A player's most-frequent club within a season range (career if none
+    given) — chart highlight metadata (2A #4), not a stats answer, so a
+    fuzzy/best-effort match is fine here."""
+    hits, _ = find_players(player_name, season_to or season_from)
+    if hits.empty:
+        return None
+    params: Dict[str, Any] = {"pid": int(hits.iloc[0]["id"]), "ids": list(AFL_TEAM_IDS)}
+    where = ""
+    if season_from:
+        where += " AND m.season >= :season_from"
+        params["season_from"] = season_from
+    if season_to:
+        where += " AND m.season <= :season_to"
+        params["season_to"] = season_to
+    df = query(
+        f"SELECT t.name FROM player_stats ps JOIN teams t ON t.id = ps.team_id "
+        f"JOIN matches m ON m.id = ps.match_id WHERE ps.player_id = :pid AND t.id = ANY(:ids){where} "
+        "GROUP BY t.name ORDER BY COUNT(*) DESC LIMIT 1", params)
+    return df["name"].iloc[0] if len(df) else None
+
+
 def resolve_team_id(text: str) -> Optional[tuple[int, str]]:
     name = EntityResolver.resolve_team(text or "")
     if not name:
