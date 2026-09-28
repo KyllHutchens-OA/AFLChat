@@ -1,8 +1,11 @@
 """
 Conversation Service - Manages conversation history for contextual queries.
 """
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
+import hashlib
+import hmac
+import secrets
 import uuid
 import logging
 
@@ -55,6 +58,77 @@ class ConversationService:
             raise
         finally:
             session.close()
+
+    @staticmethod
+    def _hash_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def create_owned_conversation(cls, chat_type: str = 'afl') -> Tuple[str, str]:
+        """
+        Create a conversation bound to a fresh owner token.
+        Returns (conversation_id, owner_token); only the sha256 of the token is stored,
+        so the token must be handed to the client now and is never retrievable again.
+        """
+        owner_token = secrets.token_urlsafe(32)
+        session = Session()
+        try:
+            conversation = Conversation(
+                chat_type=chat_type,
+                messages=[],
+                owner_token_hash=cls._hash_token(owner_token),
+            )
+            session.add(conversation)
+            session.commit()
+            conversation_id = str(conversation.id)
+            logger.info(f"Created new owned conversation: {conversation_id}")
+            return conversation_id, owner_token
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error creating conversation: {e}")
+            raise
+        finally:
+            session.close()
+
+    @classmethod
+    def verify_owner(cls, conversation_id: Optional[str], owner_token: Optional[str]) -> bool:
+        """True only if the conversation exists and owner_token matches its stored hash."""
+        if not isinstance(conversation_id, str) or not isinstance(owner_token, str) or not owner_token:
+            return False
+        try:
+            conv_uuid = uuid.UUID(conversation_id)
+        except ValueError:
+            return False
+        session = Session()
+        try:
+            stored = session.query(Conversation.owner_token_hash).filter(
+                Conversation.id == conv_uuid
+            ).scalar()
+            if not stored:
+                return False
+            return hmac.compare_digest(stored, cls._hash_token(owner_token))
+        except Exception as e:
+            logger.error(f"Error verifying conversation owner {conversation_id}: {e}")
+            return False
+        finally:
+            session.close()
+
+    @staticmethod
+    def public_messages(messages: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Client-safe view of stored messages: no SQL, entities, intent or other internals."""
+        public = []
+        for msg in messages or []:
+            public.append({
+                "role": msg.get("role"),
+                "content": msg.get("content"),
+                "timestamp": msg.get("timestamp"),
+                "metadata": {
+                    "confidence": msg.get("confidence"),
+                    "sources": msg.get("sources") or [],
+                    "visualization": msg.get("visualization"),
+                },
+            })
+        return public
 
     @classmethod
     def get_conversation(cls, conversation_id: str) -> Optional[Dict[str, Any]]:
@@ -113,7 +187,7 @@ class ConversationService:
         """
         session = Session()
         try:
-            logger.info(f"add_message: Looking up conversation {conversation_id}")
+            logger.debug(f"add_message: Looking up conversation {conversation_id}")
             conversation = session.query(Conversation).filter(
                 Conversation.id == uuid.UUID(conversation_id)
             ).first()
@@ -122,7 +196,7 @@ class ConversationService:
                 logger.error(f"Conversation not found: {conversation_id}")
                 return False
 
-            logger.info(f"add_message: Found conversation, current message count = {len(conversation.messages or [])}")
+            logger.debug(f"add_message: Found conversation, current message count = {len(conversation.messages or [])}")
 
             # Build message
             message = {
@@ -134,13 +208,13 @@ class ConversationService:
             # Add metadata if provided
             if metadata:
                 message.update(metadata)
-                logger.info(f"add_message: Added metadata keys: {list(metadata.keys())}")
+                logger.debug(f"add_message: Added metadata keys: {list(metadata.keys())}")
 
             # Append to messages (JSONB array)
             messages = conversation.messages or []
-            logger.info(f"add_message: Current messages array length: {len(messages)}")
+            logger.debug(f"add_message: Current messages array length: {len(messages)}")
             messages.append(message)
-            logger.info(f"add_message: After append, messages array length: {len(messages)}")
+            logger.debug(f"add_message: After append, messages array length: {len(messages)}")
 
             # CRITICAL: For JSONB columns, SQLAlchemy doesn't auto-detect mutations
             # We must explicitly flag the column as modified
@@ -149,15 +223,15 @@ class ConversationService:
             flag_modified(conversation, "messages")
             conversation.updated_at = datetime.utcnow()
 
-            logger.info(f"add_message: Flagged 'messages' as modified for SQLAlchemy")
+            logger.debug(f"add_message: Flagged 'messages' as modified for SQLAlchemy")
 
-            logger.info(f"add_message: About to commit. Setting conversation.messages to array with {len(messages)} messages")
+            logger.debug(f"add_message: About to commit. Setting conversation.messages to array with {len(messages)} messages")
             session.commit()
             logger.info(f"add_message: Commit successful. Added {role} message to conversation {conversation_id}")
 
             # Verify the save
             session.refresh(conversation)
-            logger.info(f"add_message: After refresh, message count = {len(conversation.messages or [])}")
+            logger.debug(f"add_message: After refresh, message count = {len(conversation.messages or [])}")
 
             return True
 
