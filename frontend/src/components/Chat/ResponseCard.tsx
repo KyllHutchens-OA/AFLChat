@@ -6,7 +6,7 @@ import DataTable from '../Visualization/DataTable';
 import ChartErrorBoundary from '../Common/ChartErrorBoundary';
 import FeedbackButton from './FeedbackButton';
 import SpoilerBlur from './SpoilerBlur';
-import WorkingDrawer, { type Trace } from './WorkingDrawer';
+import type { Trace } from './WorkingDrawer';
 import { looksLikeResult } from '../../utils/spoilerHeuristics';
 import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 
@@ -31,7 +31,7 @@ interface ResponseCardProps {
   visualization?: any;
   isError?: boolean;
   dataAsOf?: string;
-  trace?: Trace;
+  trace?: Trace; // kept for callers; the working drawer is hidden
   conversationId?: string | null;
 }
 
@@ -54,9 +54,8 @@ const formatDataAsOf = (iso: string): string | null => {
   return `${d} ${MONTHS[m - 1]} ${y}`;
 };
 
-const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isError, dataAsOf, trace, conversationId }) => {
+const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isError, dataAsOf, conversationId }) => {
   const [showNumbers, setShowNumbers] = useState(false);
-  const [showWorking, setShowWorking] = useState(false);
   const { hideScores } = useSpoilerMode();
   const asOf = dataAsOf ? formatDataAsOf(dataAsOf) : null;
   const tableData = Array.isArray(visualization?.data) ? visualization.data : null;
@@ -119,21 +118,9 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ text, visualization, isErro
       <div className="flex items-center justify-between mt-3">
         <div className="flex items-center gap-3">
           {asOf && <p className="text-xs text-warm-600">Data as of {asOf}</p>}
-          {trace && (
-            <button
-              onClick={() => setShowWorking(true)}
-              className="text-xs font-medium text-warm-500 hover:text-ink underline decoration-warm-300
-                         underline-offset-2 transition-colors focus-visible:ring-2 focus-visible:ring-sherrin/50
-                         focus-visible:outline-none rounded"
-            >
-              Show your working
-            </button>
-          )}
         </div>
         <FeedbackButton compact conversationId={conversationId ?? null} messageText={text} />
       </div>
-
-      {showWorking && trace && <WorkingDrawer trace={trace} onClose={() => setShowWorking(false)} />}
     </div>
   );
 };

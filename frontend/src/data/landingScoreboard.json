@@ -5,25 +5,163 @@
     "summary": "Brisbane Lions defeated Fremantle by 7 points to win the 2026 flag.",
     "season": 2026,
     "round": "Grand Final",
-    "home": { "abbr": "FRE", "score": "12.17 (89)", "total": 89, "quarters": [22, 43, 72, 89], "primary": "#2A0D45", "secondary": "#FFFFFF" },
-    "away": { "abbr": "BRI", "score": "14.12 (96)", "total": 96, "quarters": [23, 43, 62, 96], "primary": "#A30046", "secondary": "#0039A6" }
+    "home": {
+      "abbr": "FRE",
+      "score": "12.17 (89)",
+      "total": 89,
+      "quarters": [
+        22,
+        43,
+        72,
+        89
+      ],
+      "primary": "#2A0D45",
+      "secondary": "#FFFFFF"
+    },
+    "away": {
+      "abbr": "BRI",
+      "score": "14.12 (96)",
+      "total": 96,
+      "quarters": [
+        23,
+        43,
+        62,
+        96
+      ],
+      "primary": "#A30046",
+      "secondary": "#0039A6"
+    }
+  },
+  {
+    "id": "gf2025",
+    "question": "Who won the 2025 Grand Final?",
+    "summary": "Brisbane Lions beat Geelong by 47 points for back-to-back flags. Level at half time, the Lions kicked away in the second half.",
+    "season": 2025,
+    "round": "Grand Final",
+    "home": {
+      "abbr": "GEE",
+      "score": "11.9 (75)",
+      "total": 75,
+      "quarters": [
+        15,
+        36,
+        44,
+        75
+      ],
+      "primary": "#001F3D",
+      "secondary": "#FFFFFF"
+    },
+    "away": {
+      "abbr": "BRI",
+      "score": "18.14 (122)",
+      "total": 122,
+      "quarters": [
+        12,
+        36,
+        63,
+        122
+      ],
+      "primary": "#A30046",
+      "secondary": "#0039A6"
+    }
   },
   {
     "id": "blowout2011",
     "question": "What's the biggest score in a match since 1990?",
-    "summary": "Geelong put up 37.11 (233) against Melbourne in round 19, 2011 — the biggest team score of the AFL era.",
+    "summary": "Geelong put up 37.11 (233) against Melbourne in round 19, 2011. No team has scored more in the AFL era.",
     "season": 2011,
     "round": "Round 19",
-    "home": { "abbr": "GEE", "score": "37.11 (233)", "total": 233, "quarters": [51, 124, 176, 233], "primary": "#001F3D", "secondary": "#FFFFFF" },
-    "away": { "abbr": "MEL", "score": "7.5 (47)", "total": 47, "quarters": [3, 10, 34, 47], "primary": "#0F1131", "secondary": "#CC2031" }
+    "home": {
+      "abbr": "GEE",
+      "score": "37.11 (233)",
+      "total": 233,
+      "quarters": [
+        51,
+        124,
+        176,
+        233
+      ],
+      "primary": "#001F3D",
+      "secondary": "#FFFFFF"
+    },
+    "away": {
+      "abbr": "MEL",
+      "score": "7.5 (47)",
+      "total": 47,
+      "quarters": [
+        3,
+        10,
+        34,
+        47
+      ],
+      "primary": "#0F1131",
+      "secondary": "#CC2031"
+    }
   },
   {
     "id": "closest2025",
     "question": "What's the closest finals result since 1990?",
-    "summary": "Gold Coast stole the 2025 Elimination Final off Fremantle by a single point, 11.14 (80) to 12.7 (79) — their first ever final win.",
+    "summary": "Gold Coast beat Fremantle by a single point in the 2025 Elimination Final, 11.14 (80) to 12.7 (79). It was their first finals win.",
     "season": 2025,
     "round": "Elimination Final",
-    "home": { "abbr": "FRE", "score": "12.7 (79)", "total": 79, "quarters": [8, 32, 52, 79], "primary": "#2A0D45", "secondary": "#FFFFFF" },
-    "away": { "abbr": "GCS", "score": "11.14 (80)", "total": 80, "quarters": [12, 57, 67, 80], "primary": "#D4001A", "secondary": "#FFD200" }
+    "home": {
+      "abbr": "FRE",
+      "score": "12.7 (79)",
+      "total": 79,
+      "quarters": [
+        8,
+        32,
+        52,
+        79
+      ],
+      "primary": "#2A0D45",
+      "secondary": "#FFFFFF"
+    },
+    "away": {
+      "abbr": "GCS",
+      "score": "11.14 (80)",
+      "total": 80,
+      "quarters": [
+        12,
+        57,
+        67,
+        80
+      ],
+      "primary": "#D4001A",
+      "secondary": "#FFD200"
+    }
+  },
+  {
+    "id": "comeback2008",
+    "question": "What's the biggest half-time comeback since 1990?",
+    "summary": "Melbourne trailed Fremantle by 50 points at half time in round 7, 2008, then won by 6.",
+    "season": 2008,
+    "round": "Round 7",
+    "home": {
+      "abbr": "MEL",
+      "score": "17.17 (119)",
+      "total": 119,
+      "quarters": [
+        9,
+        26,
+        63,
+        119
+      ],
+      "primary": "#0F1131",
+      "secondary": "#CC2031"
+    },
+    "away": {
+      "abbr": "FRE",
+      "score": "15.23 (113)",
+      "total": 113,
+      "quarters": [
+        36,
+        76,
+        95,
+        113
+      ],
+      "primary": "#2A0D45",
+      "secondary": "#FFFFFF"
+    }
   }
 ]

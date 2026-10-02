@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import landingProof from '../../data/landingProof.json';
 import Sparkline from './Sparkline';
 import MiniQuarterChart from './MiniQuarterChart';
+import SeasonLines from './SeasonLines';
 
 const ProofCards = () => {
   const navigate = useNavigate();
@@ -13,8 +14,7 @@ const ProofCards = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-10">
         <h2 className="font-display text-3xl text-ink mb-2">What can it do?</h2>
         <p className="text-warm-600 mb-8 max-w-2xl">
-          Real outputs from the app, not mock-ups. Answered from 7,090 matches and 310,423 player-game
-          rows.
+          These answers come straight from the app, using 7,090 matches and 310,423 player-game rows.
         </p>
 
         <div className="grid md:grid-cols-3 gap-5">
@@ -40,16 +40,13 @@ const ProofCards = () => {
             <p className="text-ink font-medium mb-3">&ldquo;{headToHead.question}&rdquo;</p>
             <p className="text-sm text-warm-700 mb-4">{headToHead.answer}</p>
             <div className="mb-4">
-              <MiniQuarterChart
-                home={{ quarters: headToHead.daicos.values, primary: headToHead.daicos.primary }}
-                away={{ quarters: headToHead.bontempelli.values, primary: headToHead.bontempelli.primary }}
-              />
+              <SeasonLines seasons={headToHead.seasons} a={headToHead.a} b={headToHead.b} />
             </div>
             <div className="mt-auto flex items-center justify-between">
               <button onClick={() => ask(headToHead.askQuestion)} className="btn-secondary text-sm py-2 px-4">
                 Ask this
               </button>
-              <span className="text-xs text-warm-600">Here's the SQL, too</span>
+              <span className="text-xs text-warm-600">Brownlow votes, 2015 to 2020</span>
             </div>
           </div>
 
@@ -58,7 +55,7 @@ const ProofCards = () => {
             <span className="section-label mb-2">Live footy</span>
             <p className="text-ink font-medium mb-3">&ldquo;How did the Grand Final play out, quarter by quarter?&rdquo;</p>
             <p className="text-sm text-warm-700 mb-4">
-              Quarter-by-quarter scoring, an AI summary per quarter, and scoring pops as they happen.
+              Scores by quarter, a short summary after each quarter, and every goal as it happens.
             </p>
             <div className="mb-4">
               <MiniQuarterChart

@@ -12,7 +12,7 @@ const PLACEHOLDER_QUESTIONS = [
 ];
 
 const BASE_CHIPS = [
-  'Who kicked 1000 goals before Buddy?',
+  'Most disposals in a single game since 1990',
   "Show me Geelong's win/loss record since 2015",
   'Top 10 goal kickers in 2025',
 ];
@@ -59,11 +59,11 @@ const Hero = () => {
             </span>
           </div>
 
-          <h1 className="font-display text-6xl sm:text-7xl leading-[0.95] text-ink mb-4">
-            ASK THE<br />FOOTY.
+          <h1 className="font-display text-5xl sm:text-6xl leading-[0.95] text-ink mb-4">
+            NEED TO SETTLE<br />A DEBATE?
           </h1>
           <p className="text-lg text-warm-700 mb-8 max-w-md">
-            36 years of AFL stats. Plain English. Charts in seconds.
+            Ask about any AFL match or player since 1990 and get the answer with a chart.
           </p>
 
           <form onSubmit={handleSubmit} className="mb-4">
@@ -72,7 +72,7 @@ const Hero = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={PLACEHOLDER_QUESTIONS[placeholderIndex]}
-                aria-label="Ask the footy a question"
+                aria-label="Ask a footy question"
                 className="input-field flex-1 text-base py-3.5"
               />
               <button

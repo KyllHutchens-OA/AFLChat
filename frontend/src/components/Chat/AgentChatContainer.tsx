@@ -91,7 +91,7 @@ const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
       >
         {/* Present for screen readers/SEO even though the empty-state heading
             below (h2) is the only one usually visible. */}
-        <h1 className="sr-only">Ask the footy</h1>
+        <h1 className="sr-only">Ask a footy question</h1>
 
         {/* Disconnected warning */}
         {!isConnected && (

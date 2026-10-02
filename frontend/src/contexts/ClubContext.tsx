@@ -10,7 +10,11 @@ const ClubContext = createContext<ClubContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'footy-nac-club';
 
-// Sherrin red / ink — the app's default accent when no club is chosen.
+// Club picker is hidden for now. While false, a stored club is ignored and the
+// default accent applies everywhere.
+export const CLUB_PICKER_ENABLED = false;
+
+// Sherrin red / ink: the app's default accent when no club is chosen.
 const DEFAULT_PRIMARY = '#C8102E';
 const DEFAULT_SECONDARY = '#16130F';
 
@@ -22,6 +26,7 @@ function applyClubVars(club: Club | null) {
 
 export const ClubProvider = ({ children }: { children: ReactNode }) => {
   const [club, setClubState] = useState<Club | null>(() => {
+    if (!CLUB_PICKER_ENABLED) return null;
     const stored = localStorage.getItem(STORAGE_KEY);
     return CLUBS.find((c) => c.abbreviation === stored) ?? null;
   });

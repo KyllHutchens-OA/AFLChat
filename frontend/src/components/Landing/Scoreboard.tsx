@@ -73,7 +73,7 @@ const Scoreboard = () => {
     >
       <div className="flex items-center justify-between mb-3">
         <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-nightgame">
-          Verified answer &middot; {answer.season} {answer.round}
+          {answer.season} {answer.round}
         </span>
         <div className="flex gap-1">
           {ANSWERS.map((a, i) => (

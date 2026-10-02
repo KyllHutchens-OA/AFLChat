@@ -1,5 +1,5 @@
 import { CLUBS } from '../../constants/clubs';
-import { useClub } from '../../contexts/ClubContext';
+import { useClub, CLUB_PICKER_ENABLED } from '../../contexts/ClubContext';
 import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 import Dialog from '../Modal/Dialog';
 
@@ -7,8 +7,8 @@ interface MobileSettingsSheetProps {
   onClose: () => void;
 }
 
-// Mobile-only settings sheet: the club picker and spoiler toggle that live
-// inline in the desktop nav move here so the mobile top bar stays to just
+// Mobile-only settings sheet: the spoiler toggle (and club picker, when
+// enabled) from the desktop nav live here so the mobile top bar stays to just
 // the logo and this one button (nav links themselves move to MobileTabBar).
 const MobileSettingsSheet: React.FC<MobileSettingsSheetProps> = ({ onClose }) => {
   const { club, setClub } = useClub();
@@ -33,7 +33,7 @@ const MobileSettingsSheet: React.FC<MobileSettingsSheetProps> = ({ onClose }) =>
         </button>
       </div>
 
-      <section className="mb-6">
+      <section className={CLUB_PICKER_ENABLED ? 'mb-6' : ''}>
         <p className="section-label mb-2">Spoilers</p>
         <button
           onClick={toggleSpoilerMode}
@@ -45,6 +45,7 @@ const MobileSettingsSheet: React.FC<MobileSettingsSheetProps> = ({ onClose }) =>
         </button>
       </section>
 
+      {CLUB_PICKER_ENABLED && (
       <section>
         <p className="section-label mb-2">Pick your colours</p>
         <div className="grid grid-cols-6 gap-2.5">
@@ -70,6 +71,7 @@ const MobileSettingsSheet: React.FC<MobileSettingsSheetProps> = ({ onClose }) =>
           </button>
         )}
       </section>
+      )}
     </Dialog>
   );
 };

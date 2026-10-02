@@ -34,9 +34,9 @@ const HowItThinks = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-10">
         <h2 className="font-display text-3xl mb-2">How it thinks.</h2>
         <p className="text-white/60 mb-10 max-w-2xl">
-          Every answer is a passage of play: a question comes in, gets resolved, runs through a tool,
-          and the SQL and chart it produced are checked before anyone sees them. Hover a step for the
-          real artefact from a stored trace.
+          Each answer goes through the same steps. The question is matched to real teams and players,
+          a tool or SQL query gets the data, and the SQL and chart are checked before you see them.
+          Hover a step to see the real output from a stored answer.
         </p>
 
         <div className="flex flex-wrap gap-2 sm:gap-0 sm:flex items-stretch mb-6 border-b border-white/10 pb-6">

@@ -2,17 +2,65 @@
   "goalkicker": {
     "question": "Who's kicked the most goals in the AFL era?",
     "askQuestion": "Who has the most career goals since 1990?",
-    "answer": "Lance Franklin — 1,066 goals, more than anyone else since 1990.",
+    "answer": "Lance Franklin, with 1,066 goals. Nobody has kicked more since 1990.",
     "name": "Lance Franklin",
     "total": 1066,
-    "bySeason": [21, 31, 73, 113, 67, 64, 82, 69, 60, 79, 47, 81, 73, 57, 27, 51, 52, 19]
+    "bySeason": [
+      21,
+      31,
+      73,
+      113,
+      67,
+      64,
+      82,
+      69,
+      60,
+      79,
+      47,
+      81,
+      73,
+      57,
+      27,
+      51,
+      52,
+      19
+    ]
   },
   "headToHead": {
-    "question": "Daicos v Bontempelli, disposals by season",
-    "askQuestion": "Compare Nick Daicos and Marcus Bontempelli average disposals per season since 2021",
-    "answer": "Daicos has climbed past Bontempelli on the ball since 2023.",
-    "seasons": [2021, 2022, 2023, 2024, 2025, 2026],
-    "daicos": { "name": "Nick Daicos", "values": [18.9, 23.4, 27.8, 27.8, 28.4, 29.5], "primary": "#000000", "secondary": "#FFFFFF" },
-    "bontempelli": { "name": "Marcus Bontempelli", "values": [26.7, 23.5, 27.7, 25.8, 27.1, 27.9], "primary": "#014896", "secondary": "#CC2031" }
+    "question": "Dangerfield v Dustin Martin, Brownlow votes by season",
+    "askQuestion": "Compare Patrick Dangerfield and Dustin Martin Brownlow votes per season from 2015 to 2020",
+    "answer": "Dangerfield won the 2016 Brownlow with 35 votes. A year later Martin won it with 36, three clear of Dangerfield.",
+    "seasons": [
+      2015,
+      2016,
+      2017,
+      2018,
+      2019,
+      2020
+    ],
+    "a": {
+      "name": "Patrick Dangerfield",
+      "values": [
+        22,
+        35,
+        33,
+        17,
+        27,
+        15
+      ],
+      "color": "#1C5BA8"
+    },
+    "b": {
+      "name": "Dustin Martin",
+      "values": [
+        21,
+        25,
+        36,
+        19,
+        23,
+        15
+      ],
+      "color": "#16130F"
+    }
   }
 }

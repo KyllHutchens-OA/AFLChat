@@ -4,6 +4,7 @@ import { useSpoilerMode } from '../../hooks/useSpoilerMode';
 import LogoMark from './LogoMark';
 import ClubPicker from './ClubPicker';
 import MobileSettingsSheet from './MobileSettingsSheet';
+import { CLUB_PICKER_ENABLED } from '../../contexts/ClubContext';
 
 interface NavLink {
   path: string;
@@ -69,7 +70,7 @@ const NavBar = () => {
               </a>
             )}
 
-            <ClubPicker />
+            {CLUB_PICKER_ENABLED && <ClubPicker />}
 
             <button
               onClick={toggleSpoilerMode}
@@ -97,10 +98,10 @@ const NavBar = () => {
             </button>
           </div>
 
-          {/* Mobile: a single settings button opens the club + spoiler sheet */}
+          {/* Mobile: a single settings button opens the settings sheet */}
           <button
             onClick={() => setSettingsOpen(true)}
-            aria-label="Open settings: club colours and spoiler mode"
+            aria-label="Open settings"
             className="sm:hidden p-2 rounded-lg text-warm-600 hover:bg-warm-100 transition-colors
                        focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sherrin"
           >

@@ -14,7 +14,7 @@ const LandingFooter = () => {
             <span className="font-display text-sm tracking-wide text-white">FOOTY-NAC</span>
           </div>
           <p className="text-sm max-w-md">
-            Built by a data scientist who got sick of arguing at the pub without evidence.
+            Built by a data scientist who wanted real numbers behind footy debates.
           </p>
         </div>
 
@@ -22,7 +22,6 @@ const LandingFooter = () => {
           <Link to="/about" className="hover:text-white transition-colors">About</Link>
           <a href="https://github.com/KyllHutchens-OA/AFLChat" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
           <a href="https://instagram.com/footy.nac" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Instagram</a>
-          <a href="https://buymeacoffee.com/footy.nac" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Buy Me a Coffee</a>
         </div>
 
         <button
@@ -31,7 +30,7 @@ const LandingFooter = () => {
           title="Full time"
           className="text-xs text-white/40 hover:text-nightgame transition-colors"
         >
-          {sirenPlayed ? 'FT — thanks for reading' : 'Siren'}
+          {sirenPlayed ? 'FT. Thanks for reading.' : 'Siren'}
         </button>
       </div>
     </footer>
