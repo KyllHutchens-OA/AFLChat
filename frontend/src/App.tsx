@@ -14,6 +14,7 @@ const Landing = lazy(() => import('./pages/Landing'));
 const AFLAgent = lazy(() => import('./pages/AFLAgent'));
 const LiveGames = lazy(() => import('./pages/LiveGames'));
 const About = lazy(() => import('./pages/About'));
+const Demo = lazy(() => import('./pages/Demo'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 
 function AppRoutes() {
@@ -29,6 +30,7 @@ function AppRoutes() {
         {/* Spoiler preference is asked only on the first visit to /live */}
         <Route path="/live" element={<><SpoilerModal /><LiveGames /></>} />
         <Route path="/about" element={<About />} />
+        <Route path="/demo" element={<Demo />} />
         <Route path="/analytics" element={<Analytics />} />
         {/* Old induction URL; keep bookmarks working */}
         <Route path="/welcome" element={<Navigate to="/" replace />} />

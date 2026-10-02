@@ -98,6 +98,16 @@ const Hero = () => {
               </button>
             ))}
           </div>
+
+          <button
+            onClick={() => navigate('/demo')}
+            className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-warm-700 hover:text-ink transition-colors"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+            Watch the 20 second demo
+          </button>
         </div>
 
         <div className="flex justify-center lg:justify-end">

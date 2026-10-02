@@ -20,6 +20,7 @@ const LandingFooter = () => {
 
         <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-6">
           <Link to="/about" className="hover:text-white transition-colors">About</Link>
+          <Link to="/demo" className="hover:text-white transition-colors">Demo</Link>
           <a href="https://github.com/KyllHutchens-OA/AFLChat" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
           <a href="https://instagram.com/footy.nac" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Instagram</a>
         </div>

@@ -20,6 +20,7 @@ const NavBar = () => {
   const navLinks: NavLink[] = [
     { path: '/ask', label: 'Ask', aliases: ['/afl', '/aflagent'] },
     { path: '/live', label: 'Live' },
+    { path: '/demo', label: 'Demo' },
     { path: '/about', label: 'About' },
   ];
 
